@@ -129,10 +129,10 @@ relaunched. See
 full execution policy.
 
 `wait` prints NDJSON, one line per state change
-(`{"dispatch":"<id>","state":"running"|"needs_you","question"?:...,"at":"<ISO>"}`)
+(`{"dispatch":"<id>","state":"running"|"needs_you"|"waiting","question"?:...,"waitingOn"?:...,"waitingFor"?:...,"at":"<ISO>"}`)
 and a final line
 (`{"dispatch":"<id>","state":"done"|"failed"|"gone"|"timeout","final":true,"final_reply"?:...,"question"?:...,"error"?:...,"prs"?:[...]}`).
-`needs_you` is not final. It peeks with `POST /v1/dispatch/returns?peek=1`
+`needs_you` and `waiting` (parked on CI, background work or a queue) are not final. It peeks with `POST /v1/dispatch/returns?peek=1`
 so a conductor's returns stay unread, reads
 `POST /v1/dispatch/workers` for live state, and acknowledges only this dispatch
 with `POST /v1/dispatch/returns/ack { "dispatch": "<uuid>" }`. Exit codes: 0
@@ -232,18 +232,21 @@ transcript when there are none; see [Returns](conductor.md#returns).
 | State | Meaning |
 |-------|---------|
 | `done` | The worker finished its turn. `reply` holds its final reply from the Stop hook or the transcript, at most 4000 UTF-8 bytes (`truncated` when cut). `background` counts background tasks still running when it was counted done after waiting two hours for them (every task that finishes wakes the worker, so the wait only runs out when none has finished for two hours). `waited` is the most background tasks the worker waited on before it finished, when none is still running. |
-| `needs-you` | The worker finished by asking the owner something. `question` holds the question line, `reply` the whole reply. |
+| `needs-you` | The worker finished by asking the owner something, stopped mid-task, or left uncommitted files with no PR. `question` holds the question line or the reason, `reply` the whole reply. |
+| `waiting` | The worker's turn ended waiting on CI, background work or a queue, with nothing left running. `waitingOn` is `ci`, `background`, `queue` or `other`; `waitingFor` is the worker's sentence. Not an owner action: no owner inbox item, no "needs you" notice, and the pane stays open. |
 | `failed` | The harness ended the worker's turn on an error instead of a reply, such as Codex's usage limit, or the owner interrupted it in the worker's terminal. `error` holds the message. |
 | `blocked` | The worker waits on terminal input, such as a permission prompt. |
 | `gone` | The worker's pane closed or another conversation took it over. |
 
 Each row carries `id` (the dispatch ID), `computer`, `project`, `label`,
-`harness`, `state`, `at` and the worker's `target` for `hand_off`. A `done`,
-`needs-you` or `failed` row can carry `tasks`: every task the worker's session
-claimed or moved to Active (`project`, `stableId`, `title`, `section` and
-`resolution`: `done`, `queue`, `parked`, `open` or `missing`). A finished turn
-that leaves a task `open` returns `needs-you` with `question` naming its bids;
-see [Settling tasks](task-responsibility.md#settling-tasks). A worker
+`harness`, `state`, `phase` (`working`, `waiting`, `needs-owner` or `done`),
+`at` and the worker's `target` for `hand_off`. A `done`, `waiting`,
+`needs-you` or `failed` row can carry `tasks`: every task the worker's session claimed or
+moved to Active (`project`, `stableId`, `title`, `section` and `resolution`:
+`done`, `queue`, `parked`, `open` or `missing`). A finished turn that leaves a
+task `open` returns `needs-you` with `question` naming its bids, unless the
+worker is `waiting`; see [Settling tasks](task-responsibility.md#settling-tasks).
+A worker
 that takes more work after `done` and finishes again produces a new return.
 The dispatching Hook asks each enrolled computer about its open dispatches at
 most every 15 seconds, in one request per computer. Dispatches are followed

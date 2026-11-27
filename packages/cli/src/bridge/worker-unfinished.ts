@@ -52,7 +52,8 @@ function closingLines(reply: string): string[] {
 }
 
 const LIST_ITEM = /^(?:[-*+>]|\d+[.)])\s+/;
-const sentences = (line: string) => line.replace(LIST_ITEM, "").replace(/[*_`#]+/g, "").replace(/[\u2018\u2019]/g, "'").trim()
+// Emphasis and heading marks go; a mid-sentence "#940" is a PR number and stays.
+const sentences = (line: string) => line.replace(LIST_ITEM, "").replace(/^#+\s*/, "").replace(/[*_`]+/g, "").replace(/[\u2018\u2019]/g, "'").trim()
   .split(/(?<=[.!?\u2026])\s+/).map(sentence => sentence.trim()).filter(Boolean);
 
 function nextStep(sentence: string): boolean {
@@ -150,16 +151,39 @@ export async function sharedCheckout(directory: string, folders: readonly unknow
 /** A pull request the reply itself names: a GitHub PR link or "PR #12". */
 const PR_NAMED = /\/pull\/\d+|\bPR\s*#\d+/i;
 
-/** Why a turn that ended is not done: it announced a next step, or it left
- * uncommitted work with no PR reported or named in the reply (`unfinished`). `unchecked` when its
- * checkout could not be read: the turn may be done, but it is not safe to
- * close. Empty when it reads as done. */
+/** What a wait sentence waits on, as a return's one word. */
+export type WaitingOn = "ci" | "background" | "queue" | "other";
+/** CI and its runs, by the words a closing sentence names them with: a PR
+ * number, a check, a workflow, a build, a merge. Checked first. */
+const CI_WAIT = /\b(?:ci|checks?|pipelines?|workflows?|actions?|builds?|rc|runs?|jobs?|tests?|deploy\w*|merge[sd]?)\b|#\d+|\bpr\s*#?\d+/i;
+/** A shared resource the worker sits behind: a queue, a slot, a lock, a
+ * budget, or another agent's turn. */
+const QUEUE_WAIT = /\b(?:queued?|slots?|locks?|turns?|budgets?|(?:another|other)\s+(?:agents?|workers?|sessions?|leads?))\b/i;
+/** The worker's own background work: shells, processes, servers, downloads,
+ * installs, sub-agents. */
+const BACKGROUND_WAIT = /\b(?:background|tasks?|shells?|process(?:es)?|servers?|download\w*|install\w*|monitors?|monitoring|subagents?|agents?|workers?)\b/i;
+
+/** What a wait sentence waits on: "ci" first, then "queue", then
+ * "background", else "other". Whole words, case-insensitive. */
+export function waitingOn(sentence: string): WaitingOn {
+  if (CI_WAIT.test(sentence)) return "ci";
+  if (QUEUE_WAIT.test(sentence)) return "queue";
+  if (BACKGROUND_WAIT.test(sentence)) return "background";
+  return "other";
+}
+
+/** Why a turn that ended is not done: it announced a next step or left
+ * uncommitted work with no PR reported or named in the reply (`unfinished`),
+ * or it waits on work still to finish (`waiting`, the sentence
+ * `awaitedInReply` read). `unchecked` when its checkout could not be read:
+ * the turn may be done, but it is not safe to close. Empty when it reads
+ * as done. */
 export async function unfinishedTurn(input: { reply?: string; prs?: readonly unknown[]; directory?: string },
-  uncommitted?: (directory: string) => Promise<Uncommitted>): Promise<{ unfinished?: string; unchecked?: true }> {
+  uncommitted?: (directory: string) => Promise<Uncommitted>): Promise<{ unfinished?: string; waiting?: string; unchecked?: true }> {
   const step = announcedNextStep(input.reply);
   if (step) return { unfinished: `Stopped mid-task: ${step}` };
   const waiting = awaitedInReply(input.reply);
-  if (waiting) return { unfinished: `Stopped waiting: ${waiting}` };
+  if (waiting) return { waiting };
   if (input.prs?.length || PR_NAMED.test(input.reply ?? "") || !input.directory || !uncommitted) return {};
   const files = await uncommitted(input.directory).catch((): Uncommitted => UNKNOWN);
   if (files === UNKNOWN) return { unchecked: true };

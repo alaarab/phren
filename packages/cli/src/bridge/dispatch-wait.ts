@@ -155,11 +155,21 @@ export async function waitForDispatch(id: string, options: DispatchWaitOptions =
     // A needs-you return from before the worker was last seen working is historical.
     const needsYou = (state === "needs-you" || state === "blocked")
       && (lastWorkingAt === undefined || !Number.isFinite(returnedAt) || returnedAt >= lastWorkingAt);
+    // So is a waiting one: the worker took new work after it parked.
+    const waitingNow = state === "waiting"
+      && (lastWorkingAt === undefined || !Number.isFinite(returnedAt) || returnedAt >= lastWorkingAt);
     if (workerState === "working") {
       emit("running");
     } else if (workerState === "gone" || workerState === "closed") {
       final("gone");
       return 1;
+    } else if (waitingNow) {
+      // Parked on CI, background work or a queue is not finished: say what it
+      // waits on and keep following, as for needs-you, so `wait && merge`
+      // never treats a CI wait as done.
+      const waiting = object(returned);
+      emit("waiting", { ...(typeof waiting.waitingOn === "string" ? { waitingOn: waiting.waitingOn } : {}),
+        ...(typeof waiting.waitingFor === "string" && waiting.waitingFor ? { waitingFor: waiting.waitingFor } : {}) });
     } else if (needsYou) {
       const question = questionOf(returned);
       emit("needs_you", question ? { question } : {});

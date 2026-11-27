@@ -27,6 +27,9 @@ const prs = [{ url: "https://github.com/alaarab/phren/pull/999", repo: "alaarab/
 let root: string, pane: Json, panes: Json[], restore: () => void;
 const closePane = vi.fn();
 const event = (event: string) => noteTurn(target.server, target.pane, { event, terminal: String(pane.terminal_id), source: target.source, session: target.session, dispatch, reply: event === "Stop" ? "Checks passed" : undefined });
+// A lead's own turn events: no dispatch id, so close-self defers on its own.
+const leadEvent = (event: string, stop: { background?: number } = {}) => noteTurn(target.server, target.pane,
+  { event, terminal: String(pane.terminal_id), source: target.source, session: target.session, reply: event === "Stop" ? "Checks passed" : undefined, ...stop });
 const receipt = (): Receipt => ({ id: dispatch, computer: "Desk", project: "phren", harness: "claude", label: "checks", state: "accepted", target, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
 const save = (value: Receipt) => atomicInPrivateDir(path.join(root, "dispatches", `${value.id}.json`), value);
 beforeEach(async () => {
@@ -43,12 +46,18 @@ afterEach(async () => { vi.clearAllTimers(); vi.useRealTimers(); restore(); vi.u
 
 describe("an agent closing its own pane", () => {
   const origin = { server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane };
-  it("answers first, then closes only that pane", async () => {
+  it("answers first, then closes that pane only once its turn has ended", async () => {
+    vi.useFakeTimers();
     await rm(turnPath(target.server, target.pane));
+    await leadEvent("UserPromptSubmit"); pane.agent_status = "working";
     const result = await closeOwnPane({ origin }, 20);
-    expect(result).toMatchObject({ ok: true, closed: true, pending: false, pane: target.pane });
+    expect(result).toMatchObject({ ok: true, closed: false, pending: true, pane: target.pane });
     expect(closePane).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(closePane).toHaveBeenCalledWith(target.server, target.pane));
+    await vi.advanceTimersByTimeAsync(20); await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    await leadEvent("Stop"); pane.agent_status = "idle";
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(closePane).toHaveBeenCalledExactlyOnceWith(target.server, target.pane));
   });
   it("keeps the last turn alive until its done return reaches the conductor", async () => {
     vi.useFakeTimers();
@@ -107,6 +116,70 @@ describe("an agent closing its own pane", () => {
       await sleep(50);
       expect(closePane).not.toHaveBeenCalled();
     }
+  });
+  it("never closes a lead's pane over background work, and closes once it ends", async () => {
+    vi.useFakeTimers();
+    await rm(turnPath(target.server, target.pane));
+    await leadEvent("UserPromptSubmit"); pane.agent_status = "working";
+    await closeOwnPane({ origin }, 20);
+    await leadEvent("Stop", { background: 2 }); pane.agent_status = "idle";
+    await vi.advanceTimersByTimeAsync(20); await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    // The two tasks finished; this turn's later Stop reports none still running.
+    await leadEvent("Stop", { background: 0 });
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(closePane).toHaveBeenCalledExactlyOnceWith(target.server, target.pane));
+  });
+  it("cancels a lead's close when the pane takes new work", async () => {
+    vi.useFakeTimers();
+    await rm(turnPath(target.server, target.pane));
+    await leadEvent("UserPromptSubmit"); pane.agent_status = "working";
+    await closeOwnPane({ origin }, 20);
+    await leadEvent("Stop"); pane.agent_status = "idle";
+    await leadEvent("UserPromptSubmit"); pane.agent_status = "working";
+    vi.mocked(validateTarget).mockClear();
+    await vi.advanceTimersByTimeAsync(600_000); await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    // The close was cancelled, not kept waiting: exactly one recheck ran.
+    expect(validateTarget).toHaveBeenCalledTimes(1);
+  });
+  it("closes a pane with no turn record only once it reads idle on a recheck", async () => {
+    vi.useFakeTimers();
+    await rm(turnPath(target.server, target.pane));
+    pane.agent_status = "working";
+    expect(await closeOwnPane({ origin }, 20)).toMatchObject({ closed: false, pending: true, pane: target.pane });
+    await vi.advanceTimersByTimeAsync(20); await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    pane.agent_status = "idle";
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(closePane).toHaveBeenCalledExactlyOnceWith(target.server, target.pane));
+  });
+  it("retries every refused dispatched close until the worker reads clean", async () => {
+    vi.useFakeTimers();
+    const value = receipt(); await save(value);
+    await noteTurn(target.server, target.pane, { event: "Stop", terminal: String(pane.terminal_id), source: target.source,
+      session: target.session, dispatch, background: 2, reply: "Checks passed" });
+    pane.agent_status = "idle";
+    observe(value, (await workerStates({ targets: [{ ...target, dispatch }] })).workers[0], Date.now());
+    expect(value.returned).toMatchObject({ state: "done", background: 2 });
+    await save(value);
+    expect(await closeOwnPane({ origin }, 20)).toMatchObject({ closed: false, pending: true, dispatch });
+    await vi.advanceTimersByTimeAsync(20); await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    // The tasks finished; the same turn's later Stop reports none still running.
+    await noteTurn(target.server, target.pane, { event: "Stop", terminal: String(pane.terminal_id), source: target.source,
+      session: target.session, dispatch, background: 0, reply: "Checks passed" });
+    observe(value, (await workerStates({ targets: [{ ...target, dispatch }] })).workers[0], Date.now());
+    expect(value.returned).not.toHaveProperty("background");
+    await save(value);
+    // The worker stopped over uncommitted work: the close itself refuses.
+    pane.cwd = "/work/phren-wt";
+    vi.mocked(recentUncommitted).mockResolvedValue(3);
+    await vi.advanceTimersByTimeAsync(20); await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    vi.mocked(recentUncommitted).mockResolvedValue(0);
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(closePane).toHaveBeenCalledExactlyOnceWith(target.server, target.pane));
   });
   it("does nothing for a pane that is already gone and refuses a body naming anything else", async () => {
     panes = [];
@@ -255,6 +328,17 @@ describe("finished worker lifecycle", () => {
     expect(await stat(paths.cloneDir).catch(() => undefined)).toBeUndefined();
     expect(await stat(paths.gitConfigFile).catch(() => undefined)).toBeUndefined();
     expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
+  });
+  it("keeps a worker's pane open while its finished turn waits on CI", async () => {
+    const turn = (event: string, reply?: string) => noteTurn(target.server, target.pane,
+      { event, terminal: String(pane.terminal_id), source: target.source, session: target.session, dispatch, ...(reply ? { reply } : {}) });
+    await turn("UserPromptSubmit"); await turn("Stop", "PR #940 is up. Waiting on CI for #940.");
+    const seen = (await workerStates({ targets: [target] })).workers[0];
+    expect(seen).toMatchObject({ state: "done", completed: true, waiting: "Waiting on CI for #940." });
+    const value = receipt(); observe(value, seen, Date.now());
+    expect(value.returned).toMatchObject({ state: "waiting", waitingOn: "ci", waitingFor: "Waiting on CI for #940." });
+    expect(await closeFinishedWorker({ target, dispatch, turn: value.returned!.turn })).toEqual({ ok: true, closed: false });
+    expect(closePane).not.toHaveBeenCalled();
   });
   it("refuses to close a different completed turn", async () => {
     const wrong = createHash("sha256").update("wrong turn").digest("hex").slice(0, 16);

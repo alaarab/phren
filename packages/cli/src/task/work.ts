@@ -15,9 +15,13 @@ import { z } from "zod";
 
 export const FORGES = ["github", "gitlab", "gitboy"] as const;
 export type Forge = typeof FORGES[number];
-/** The worker's last known state, as its dispatch saw it. */
-export const WORK_WORKER_STATES = ["launching", "working", "uncertain", "needs-you", "blocked", "stalled", "done", "failed", "gone", "closed"] as const;
+/** The worker's last known state, as its dispatch saw it. `waiting` is parked
+ * on CI, background work or a queue: no one's attention needed. */
+export const WORK_WORKER_STATES = ["launching", "working", "waiting", "uncertain", "needs-you", "blocked", "stalled", "done", "failed", "gone", "closed"] as const;
 export type WorkWorkerState = typeof WORK_WORKER_STATES[number];
+/** The same words a waiting return's notice reads (dispatch-returns.ts
+ * `noticeLine`): CI, background work, the queue, work. */
+export const WORK_WAITED_ON = { ci: "CI", background: "background work", queue: "the queue", other: "work" } as const;
 
 const line = (max: number) => z.string().min(1).max(max).refine(value => !/[\x00-\x1f\x7f]/.test(value));
 const forgeRef = z.object({ forge: z.enum(FORGES), number: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
@@ -25,7 +29,8 @@ const forgeRef = z.object({ forge: z.enum(FORGES), number: z.number().int().posi
 export const taskWorkSchema = z.object({
   version: z.literal(1),
   worker: z.object({ dispatchId: z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/), computer: line(200), session: line(200).optional(),
-    label: line(200).optional(), harness: line(40).optional(), state: z.enum(WORK_WORKER_STATES), at: z.string().datetime() }).strict().optional(),
+    label: line(200).optional(), harness: line(40).optional(), state: z.enum(WORK_WORKER_STATES), at: z.string().datetime(),
+    waitingOn: z.enum(["ci", "background", "queue", "other"]).optional().describe("What a waiting worker waits on; the same word its return carries.") }).strict().optional(),
   branch: line(256).optional(),
   worktree: line(4096).optional(),
   pr: forgeRef.optional(),
@@ -130,7 +135,9 @@ export interface ForgeItem {
   mergedAt?: string;
   closedAt?: string;
 }
-/** The worker's state as a client groups it. */
+/** The worker's state as a client groups it. The state `waiting` (parked on
+ * CI, background work or a queue) is live: it needs no one's attention,
+ * unlike this "waiting" phase's needs-you, blocked and stalled. */
 export function workerPhase(state: WorkWorkerState): "live" | "waiting" | "done" {
   if (state === "needs-you" || state === "blocked" || state === "stalled") return "waiting";
   if (state === "done" || state === "failed" || state === "gone" || state === "closed") return "done";
@@ -174,7 +181,9 @@ export function workStatusLine(work: TaskWork | undefined, live: LiveWork): stri
     if (pr.mergeable === "blocked") return `${ref} · blocked`;
     return `${ref} · ${pr.checks === "passing" ? "checks passing" : "open"}${pr.mergeable === "clean" ? " · ready to merge" : ""}`;
   }
-  if (worker?.phase === "live") return `Worker ${worker.state === "launching" ? "starting" : "working"}${on}`;
+  if (worker?.phase === "live") return worker.state === "launching" ? `Worker starting${on}`
+    : worker.state === "waiting" ? `Worker waiting on ${WORK_WAITED_ON[work.worker?.waitingOn ?? "other"]}${on}`
+    : `Worker working${on}`;
   if (work.pr) return live.pr && "error" in live.pr ? `${ref} · state unknown` : ref;
   if (worker) return `Worker ${worker.state}${on}`;
   const issue = live.issue && "state" in live.issue ? live.issue : undefined;
