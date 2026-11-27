@@ -127,7 +127,7 @@ export async function runImportCommand(args: string[], ctx: CliContext): Promise
     throw new Error("Usage: phren import vault <dir> --project <name> [--dry-run] [--prune]");
   }
   const { resolveProject } = await import("./store-routing.js");
-  const { projectDir, store } = resolveProject(ctx.phrenPath(), values.project, ctx.profile());
+  const { projectDir, store } = resolveProject(ctx.phrenPath(), values.project, ctx.profile(), { subscribedOnly: true });
   const dryRun = values["dry-run"] ?? false;
   if (!dryRun && store.role === "readonly") throw new Error(`Store "${store.name}" is read-only.`);
   const { importVault } = await import("./import/vault.js");

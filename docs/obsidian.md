@@ -81,11 +81,11 @@ phren import vault ~/notes/MyVault --project demo --dry-run
 phren import vault ~/notes/MyVault --project demo
 ```
 
-Choose an existing project in the active profile. Use `store/project` if several stores share its name. Phren copies `.md` notes, including their YAML frontmatter, to `<project>/reference/obsidian/<vault-name>-<id>/`. It keeps the folder structure and adjusts names for portability, indexing, and collisions. The ID comes from the vault's resolved path. Moving the vault starts a separate import.
+Choose an existing project in the active profile or a subscribed project in an attached store. Use `store/project` if several stores share its name. Phren copies `.md` notes, including their YAML frontmatter, to `<project>/reference/obsidian/<vault-name>-<id>/`. It keeps the folder structure and adjusts names for portability, indexing, and collisions. The ID comes from the vault's resolved path. Moving the vault starts a separate import.
 
 Import assumes you control the vault and store on your computer and that no hostile process swaps their files or directories during the run.
 
-Imported notes are committed and synced with the store like other reference docs. `--dry-run` lists the notes that would be added and shows counts, including planned removals when used with `--prune`. A dry run leaves the notes and import inventory untouched.
+Imported notes are committed and synced with the store like other reference docs. Phren adds a `.gitattributes` rule under `reference/obsidian/` so Git preserves the original note bytes, including LF or CRLF line endings. `--dry-run` lists the notes that would be added and shows counts, including planned removals when used with `--prune`. A dry run leaves the import files untouched.
 
 Phren skips `.obsidian/`, `.trash/`, `.git/`, `attachments/`, symlinks, and files other than Markdown notes. It skips notes whose frontmatter has `phren: generated` or whose bytes match the note's SHA-256 digest in `files` or `pending` in `.phren-vault.json`. A stale digest leaves the personal note eligible for import. Notes over 1 MiB are skipped and listed in the report.
 

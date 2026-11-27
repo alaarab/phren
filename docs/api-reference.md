@@ -1448,7 +1448,7 @@ These internal names do not introduce additional user-facing concepts. The
 `canonical` document type and `search --type canonical` continue to mean
 `truths.md`. Keeping these identifiers avoids breaking existing tools and filters.
 
-Get docs linked to a named fragment.
+Get docs linked to a named fragment, with snippets from the indexed documents in their stores.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

@@ -10,6 +10,8 @@ const MAX_NOTE_BYTES = 1024 * 1024;
 const MAX_MANIFEST_BYTES = 8 * MAX_NOTE_BYTES;
 const EXPORT_MANIFEST = ".phren-vault.json";
 const IMPORT_MANIFEST = ".phren-import.json";
+const OBSIDIAN_REFERENCE = "reference/obsidian";
+const PRESERVE_NOTE_BYTES = "**/*.md -text";
 const IGNORED_DIRS = new Set([".obsidian", ".trash", ".git", "attachments"]);
 const INDEXED_DIR_ESCAPE = /^(?:notes|skills|node_modules|dist|build)$/i;
 const DEVICE_NAME = /^(?:con|prn|aux|nul|conin\$|conout\$|(?:com|lpt)[1-9¹²³]) *(?:\.|$)/i;
@@ -86,6 +88,16 @@ function readBounded(root: string, file: string, stat: fs.Stats, limit: number):
 function noteDigest(root: string, file: string, stat = statIfPresent(file)): string | undefined {
   const bytes = stat?.isFile() ? readBounded(root, file, stat, MAX_NOTE_BYTES) : undefined;
   return bytes && digest(bytes);
+}
+
+function preserveNoteBytesInGit(project: string): void {
+  const file = path.join(checkedPath(project, OBSIDIAN_REFERENCE), ".gitattributes");
+  const stat = statIfPresent(file);
+  const current = stat ? readBounded(project, file, stat, MAX_NOTE_BYTES) : Buffer.alloc(0);
+  if (!current) throw new Error(`Git attributes exceed 1 MiB: ${file}`);
+  if (current.toString("utf8").split(/\r?\n/).includes(PRESERVE_NOTE_BYTES)) return;
+  const separator = current.length && current.at(-1) !== 10 ? "\n" : "";
+  atomicWriteText(file, Buffer.concat([current, Buffer.from(`${separator}${PRESERVE_NOTE_BYTES}\n`)]));
 }
 
 function readManifest(root: string, file: string): unknown {
@@ -267,6 +279,7 @@ function importNotes(vault: string, project: string, prefix: string, options: { 
   for (const { source, copy } of writes) tracked.set(source, copy);
   for (const source of forget) tracked.delete(source);
   const completed = encode(tracked);
+  if (!options.dryRun && tracked.size) preserveNoteBytesInGit(project);
   if (!options.dryRun && (pending || forget.length || previous?.pending !== undefined)) {
     if (pending) atomicWriteText(manifestPath, pending);
     for (const { source, copy, expected } of writes) {
@@ -297,7 +310,7 @@ export function importVault(directory: string, projectDir: string, options: { dr
   if (!statIfPresent(projectDir)?.isDirectory()) throw new Error(`Expected a project directory at ${projectDir}`);
   const project = fs.realpathSync.native(projectDir);
   const name = `${portableName(path.basename(vault) || "vault")}-${digest(vault).slice(0, 12)}`;
-  const prefix = `reference/obsidian/${name}`;
+  const prefix = `${OBSIDIAN_REFERENCE}/${name}`;
   const root = checkedPath(project, prefix);
   if (contains(vault, root) || contains(root, vault)) throw new Error("Vault and import destination must be separate directories");
   const run = () => importNotes(vault, project, prefix, options);
