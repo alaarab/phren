@@ -3,13 +3,25 @@
 // taps, text and keys are posted with CGEvent. Built on demand by Phren Hook
 // with swiftc; see mac-windows.ts.
 // Exit codes: 2 usage, 3 Accessibility not granted, 5 no such window,
-// 6 focus could not be verified, 7 the Hook (our parent) went away.
+// 6 focus could not be verified, 7 the Hook (our parent) went away,
+// 8 the Hook cancelled the action.
 import ApplicationServices
 import Carbon.HIToolbox
 import Cocoa
 
 // A closed pipe from the Hook must not kill us mid-keystroke.
 _ = signal(SIGPIPE, SIG_IGN)
+// SIGTERM is the badge's Stop: set a flag, then finish any press in flight.
+_ = signal(SIGTERM, SIG_IGN)
+let cancelLock = NSLock()
+var cancelled = false
+let cancelSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: DispatchQueue(label: "wininput-signal"))
+cancelSource.setEventHandler {
+    cancelLock.lock()
+    cancelled = true
+    cancelLock.unlock()
+}
+cancelSource.resume()
 
 func fail(_ code: Int32, _ message: String) -> Never { FileHandle.standardError.write((message + "\n").data(using: .utf8)!); exit(code) }
 
@@ -144,15 +156,28 @@ func checkAlive() {
     if getppid() == 1 { fail(7, "orphaned") }
 }
 
+// A cancel is only honoured between event pairs, so a press always gets its
+// release; the Hook's bounded kill covers a helper that lingers.
+func isCancelled() -> Bool {
+    cancelLock.lock()
+    defer { cancelLock.unlock() }
+    return cancelled
+}
+func checkCancel() {
+    if isCancelled() { fail(8, "cancelled") }
+}
+
 // Text arrives as Unicode key events, packed by scalar into chunks of at most
 // 20 UTF-16 units so a surrogate pair is never split; a grapheme may span two
 // chunks. A newline is Return, as the phone sends for submit.
 func typeText(_ text: String) {
     checkAlive()
+    checkCancel()
     var chunk: [UniChar] = []
     func flush() {
         checkAlive()
         guard !chunk.isEmpty else { return }
+        checkCancel()
         ensureFocus()
         let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
         let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
@@ -165,6 +190,7 @@ func typeText(_ text: String) {
         if scalar.value == 10 {
             flush()
             checkAlive()
+            checkCancel()
             ensureFocus()
             post(CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Return), keyDown: true), pause: 0)
             post(CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Return), keyDown: false), pause: 8_000)
@@ -178,6 +204,7 @@ func typeText(_ text: String) {
 }
 
 func press(_ code: CGKeyCode, modifiers: [String]) {
+    checkCancel()
     ensureFocus()
     var flags: CGEventFlags = []
     if modifiers.contains("cmd") { flags.insert(.maskCommand) }
@@ -199,6 +226,7 @@ case "tap":
     let bounds = raised.bounds
     // The -1 keeps a tap at fraction 1.0 inside the frame.
     let point = CGPoint(x: bounds.minX + CGFloat(fx) * (bounds.width - 1), y: bounds.minY + CGFloat(fy) * (bounds.height - 1))
+    checkCancel()
     ensureFocus()
     post(CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left))
     // The element under the point must belong to this window, not an alert
