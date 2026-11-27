@@ -1,8 +1,9 @@
 import { createDecipheriv, generateKeyPairSync, randomBytes } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { approvalPushCapability, approvalPushPayload, ApprovalPushService, ownerInboxPushBody, ownerInboxPushPayload,
   RELAY_MAX_CIPHERTEXT, relayCiphertext, relaySignature, scheduleCollapseId, schedulePushPayload, sendThroughRelay, upsertPushDevice } from "./push.js";
 import { PushBindingStore } from "./agent-hooks.js";
@@ -239,19 +240,55 @@ describe("owner inbox push delivery", () => {
   const relay = (suffix: string) => ({ url: "https://push.example.com", relayId: "r".repeat(47) + suffix,
     secret: "s".repeat(43), key: randomBytes(32).toString("base64url") });
 
-  it("accepts the sixth kind while legacy registrations keep their five entries and default", async () => {
-    await bridgeHome();
+  it("persists Inbox opt-in while the previous Hook can still load every registration", async () => {
+    const root = await bridgeHome();
     const push = new ApprovalPushService();
     await push.start();
     const legacy = ["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed", "scheduleBlocked"];
     await push.register({ deviceID, hostID, token: "a".repeat(64), environment: "production", kinds: legacy });
-    await push.register({ deviceID: otherDeviceID, hostID, token: "b".repeat(64), environment: "production", kinds: [...legacy, "ownerInbox"] });
+    await push.register({ deviceID: otherDeviceID, hostID, relay: relay("b"), environment: "production", kinds: [...legacy, "ownerInbox"] });
     expect(upsertPushDevice([], { deviceID: approvalDeviceID, hostID, token: "c".repeat(64), environment: "production" })[0].kinds)
       .toEqual(["approval"]);
     await expect(push.register({ deviceID, hostID, token: "a".repeat(64), environment: "production",
       kinds: [...legacy, "ownerInbox", "approval"] })).rejects.toThrow();
     await expect(push.register({ deviceID, hostID, token: "a".repeat(64), environment: "production", kinds: ["nope"] }))
       .rejects.toThrow();
+
+    // Frozen rollback reader from origin/main. Zod strips unknown device fields.
+    const oldRelaySchema = z.object({
+      url: z.string().url().refine(value => /^https:\/\//.test(value) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(`${value}/`)),
+      relayId: z.string().regex(/^[A-Za-z0-9_-]{40,400}$/),
+      secret: z.string().regex(/^[A-Za-z0-9_-]{20,100}$/),
+      key: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+    });
+    const oldDeviceSchema = z.object({
+      deviceID: z.string().uuid(),
+      hostID: z.string().uuid(),
+      token: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+      relay: oldRelaySchema.optional(),
+      environment: z.enum(["development", "production"]),
+      kinds: z.array(z.enum(["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed", "scheduleBlocked"])).max(5).default(["approval"]),
+    }).refine(device => device.token !== undefined || device.relay !== undefined);
+    const file = path.join(root, "push-devices.json");
+    const oldRead = async () => z.array(oldDeviceSchema).max(16).parse(JSON.parse(await readFile(file, "utf8")));
+    const loaded = await oldRead();
+    expect(loaded.map(device => [device.deviceID, device.kinds])).toEqual([[deviceID, legacy], [otherDeviceID, legacy]]);
+
+    // The existing device-file loader requires POSIX permissions.
+    if (process.platform !== "win32") {
+      const restarted = new ApprovalPushService();
+      await restarted.start();
+      expect(restarted.ownerInboxPushDevices()).toEqual([otherDeviceID]);
+
+      await writeFile(file, JSON.stringify([loaded[0], { ...loaded[1], kinds: [...legacy, "ownerInbox"] }]));
+      const upgraded = new ApprovalPushService();
+      await upgraded.start();
+      expect(upgraded.ownerInboxPushDevices()).toEqual([otherDeviceID]);
+      expect(await oldRead()).toEqual(loaded);
+
+      await upgraded.register({ ...loaded[1], kinds: legacy });
+      expect(upgraded.ownerInboxPushDevices()).toEqual([]);
+    }
   });
 
   it("offers inbox alerts only to reachable phones that registered the kind", async () => {
