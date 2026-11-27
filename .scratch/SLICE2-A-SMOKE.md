@@ -38,6 +38,11 @@ Also check these cases on the granted Mac.
   clipping or content from overlapping windows.
 - Pause motion until idle, then move or scroll within the window. The first
   new frame after the idle gap should be sync even for a gap under two seconds.
+- Stop pulling, make one visible change, and wait for the window to go static.
+  The next ordinary PULL should deliver that final change, even if capture has
+  already reported idle. If a VT drop is observed while testing a static
+  window, expect tag 0 for the drop and one retry on the next ordinary PULL.
+  A successful retry must be sync.
 - Close the window mid-stream and expect exit 5. Revoke Screen Recording
   mid-stream and expect exit 3. An unavailable codec/profile should exit 6.
 - Replace the installed CLI's source-hash-built helper and check whether it

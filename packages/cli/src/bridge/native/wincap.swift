@@ -198,16 +198,24 @@ func appendBE64(_ data: inout Data, _ value: UInt64) {
 func monotonicMicros() -> UInt64 { DispatchTime.now().uptimeNanoseconds / 1000 }
 
 /// stdin owns cancellation. The lock covers only credit bookkeeping and
-/// nonblocking writes, so no capture, encoder or pipe wait can delay STOP.
+/// nonblocking I/O, so no capture, encoder or pipe wait can delay STOP.
 private final class StreamPipe: @unchecked Sendable {
     private let lock = NSLock()
     private var pullOutstanding = false
     private var outputConfigured = false // Only the state queue writes.
+    private var inputFlags: Int32?
+    private var inputLine: [UInt8] = []
+    private var inputBuffer = [UInt8](repeating: 0, count: 4096)
 
     func finish(_ code: Int32, _ message: String = "") -> Never {
+        lock.lock()
+        finishLocked(code, message)
+    }
+
+    private func finishLocked(_ code: Int32, _ message: String = "") -> Never {
         // Keep the output gate closed through _exit. In particular, avoid
         // teardown calls and Swift/Foundation shutdown on the input thread.
-        lock.lock()
+        if let inputFlags { _ = fcntl(STDIN_FILENO, F_SETFL, inputFlags) }
         if code != 0 {
             let flags = fcntl(STDERR_FILENO, F_GETFL)
             if flags >= 0, fcntl(STDERR_FILENO, F_SETFL, flags | O_NONBLOCK) == 0 {
@@ -217,13 +225,43 @@ private final class StreamPipe: @unchecked Sendable {
         _exit(code)
     }
 
-    func claimPull() {
-        let accepted = lock.withLock {
-            if pullOutstanding { return false }
-            pullOutstanding = true
-            return true
+    func prepareInput() {
+        lock.withLock {
+            let flags = fcntl(STDIN_FILENO, F_GETFL)
+            guard flags >= 0, fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK) == 0
+            else { finishLocked(2, "stdin") }
+            inputFlags = flags
         }
-        guard accepted else { finish(2, "pipelined pull") }
+    }
+
+    func readCommand() -> (tier: Int, reset: Bool)? {
+        lock.withLock {
+            // Poll happens outside the lock. Keep the read and parse together
+            // so a failure cannot commit after we have read STOP or EOF.
+            let count = inputBuffer.withUnsafeMutableBytes { read(STDIN_FILENO, $0.baseAddress, $0.count) }
+            if count == 0 { finishLocked(0) }
+            if count < 0 {
+                if errno == EINTR || errno == EAGAIN { return nil }
+                finishLocked(2, "stdin")
+            }
+            var pull: (tier: Int, reset: Bool)?
+            for byte in inputBuffer.prefix(count) {
+                if byte == 10 {
+                    if inputLine.elementsEqual("STOP".utf8) { finishLocked(0) }
+                    guard inputLine.count == 8, inputLine.prefix(5).elementsEqual("PULL ".utf8),
+                          (48...51).contains(inputLine[5]), inputLine[6] == 32, (48...49).contains(inputLine[7])
+                    else { finishLocked(2, "bad command") }
+                    guard !pullOutstanding else { finishLocked(2, "pipelined pull") }
+                    pullOutstanding = true
+                    pull = (Int(inputLine[5] - 48), inputLine[7] == 49)
+                    inputLine.removeAll(keepingCapacity: true)
+                } else {
+                    guard inputLine.count < 8 else { finishLocked(2, "command too long") }
+                    inputLine.append(byte)
+                }
+            }
+            return pull
+        }
     }
 
     func send(tag: UInt8, body: Data?) {
@@ -325,6 +363,8 @@ private struct Submission {
     let token: UInt
     let pts: UInt64
     let wantsSync: Bool
+    let serial: UInt64
+    let isDropRetry: Bool
 }
 
 private let vtOutputStreamCallback: VTCompressionOutputCallback = { refcon, frameRefcon, status, flags, sample in
@@ -374,6 +414,7 @@ private final class WindowStreamer: NSObject, SCStreamOutput, SCStreamDelegate, 
     private var rawFrame: RawFrame?
     private var rawSerial: UInt64 = 0
     private var lastSubmittedSerial: UInt64 = 0
+    private var dropRetrySerial: UInt64?
     private var lastPTS: UInt64 = 0
     private var nextPullToken: UInt = 0
     private var nextSubmissionToken: UInt = 0
@@ -395,47 +436,24 @@ private final class WindowStreamer: NSObject, SCStreamOutput, SCStreamDelegate, 
     // MARK: Input and lifecycle
 
     private func readInput() {
-        var line: [UInt8] = []
-        var buffer = [UInt8](repeating: 0, count: 4096)
+        pipe.prepareInput()
         var launched = false
         while true {
             // Consume already available cancellation before launching capture
             // (including an immediate STOP or EOF on an ungranted helper).
-            if !launched {
-                var fd = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
-                let ready = poll(&fd, 1, 0)
-                if ready < 0, errno == EINTR { continue }
-                if ready == 0 {
-                    launched = true
-                    monitorQueue.async { self.startMonitor() }
-                }
-            }
-
-            let count = buffer.withUnsafeMutableBytes { read(STDIN_FILENO, $0.baseAddress, $0.count) }
-            if count == 0 { pipe.finish(0) }
-            if count < 0 {
+            var fd = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
+            let ready = poll(&fd, 1, launched ? -1 : 0)
+            if ready < 0 {
                 if errno == EINTR { continue }
                 pipe.finish(2, "stdin")
             }
-            for byte in buffer.prefix(count) {
-                if byte == 10 {
-                    handleCommand(line)
-                    line.removeAll(keepingCapacity: true)
-                } else {
-                    guard line.count < 8 else { pipe.finish(2, "command too long") }
-                    line.append(byte)
-                }
+            if ready == 0 {
+                launched = true
+                monitorQueue.async { self.startMonitor() }
+            } else if let command = pipe.readCommand() {
+                stateQueue.async { self.pull(tier: command.tier, reset: command.reset) }
             }
         }
-    }
-
-    private func handleCommand(_ line: [UInt8]) {
-        if line == Array("STOP".utf8) { pipe.finish(0) }
-        guard line.count == 8, line.prefix(5).elementsEqual("PULL ".utf8),
-              (48...51).contains(line[5]), line[6] == 32, (48...49).contains(line[7])
-        else { pipe.finish(2, "bad command") }
-        pipe.claimPull()
-        stateQueue.async { self.pull(tier: Int(line[5] - 48), reset: line[7] == 49) }
     }
 
     private func startMonitor() {
@@ -610,6 +628,7 @@ private final class WindowStreamer: NSObject, SCStreamOutput, SCStreamDelegate, 
 
     private func suspendFrames() {
         rawFrame = nil
+        dropRetrySerial = nil
         resumeNeedsSync = true
         rebuildForResume = false
         // Keep any outstanding PULL across a resize or suspension.
@@ -691,10 +710,7 @@ private final class WindowStreamer: NSObject, SCStreamOutput, SCStreamDelegate, 
     private func attemptEncode() {
         guard !transitioning, !captureFailed, window?.isOnScreen == true, encoding == nil,
               let request = pending, let raw = rawFrame, let dims = dimensions,
-              request.reset || raw.serial > lastSubmittedSerial else { return }
-        // While idle the phone holds its current image. Allow cached recovery
-        // on explicit reset and allow the initial or already-latched sync.
-        if resumeNeedsSync && encoder != nil && !rebuildForResume && !request.reset { return }
+              request.reset || raw.serial > lastSubmittedSerial || raw.serial == dropRetrySerial else { return }
 
         if request.reset || rebuildForResume { invalidateEncoder() }
         let wantsSync = encoder == nil
@@ -710,7 +726,10 @@ private final class WindowStreamer: NSObject, SCStreamOutput, SCStreamDelegate, 
         idleDeadline = nil
         nextSubmissionToken += 1
         let token = nextSubmissionToken
-        encoding = Submission(token: token, pts: pts, wantsSync: wantsSync)
+        let submission = Submission(token: token, pts: pts, wantsSync: wantsSync,
+                                    serial: raw.serial, isDropRetry: raw.serial == dropRetrySerial)
+        dropRetrySerial = nil
+        encoding = submission
         let duration = CMTime(value: 1, timescale: CMTimeScale(tierSpec(tier).fps))
         let properties = wantsSync ? [kVTEncodeFrameOptionKey_ForceKeyFrame as String: true] as CFDictionary : nil
         var flags = VTEncodeInfoFlags()
@@ -719,7 +738,7 @@ private final class WindowStreamer: NSObject, SCStreamOutput, SCStreamDelegate, 
             duration: duration, frameProperties: properties, sourceFrameRefcon: UnsafeMutableRawPointer(bitPattern: token),
             infoFlagsOut: &flags)
         requireEncoderSuccess(status, operation: "submit encode")
-        if flags.contains(.frameDropped) { encoderDroppedFrame() }
+        if flags.contains(.frameDropped) { encoderDroppedFrame(submission) }
     }
 
     private func invalidateEncoder() {
@@ -728,8 +747,13 @@ private final class WindowStreamer: NSObject, SCStreamOutput, SCStreamDelegate, 
         VTCompressionSessionInvalidate(session)
     }
 
-    private func encoderDroppedFrame() {
+    private func encoderDroppedFrame(_ submission: Submission) {
         encoding = nil
+        // Give a still-cached dropped image one retry on the next PULL.
+        // A newer capture takes priority, and a second drop consumes the retry.
+        if !submission.isDropRetry && rawFrame?.serial == submission.serial {
+            dropRetrySerial = submission.serial
+        }
         invalidateEncoder()
         answer(tag: 0)
     }
@@ -741,7 +765,7 @@ private final class WindowStreamer: NSObject, SCStreamOutput, SCStreamDelegate, 
             self.encoding = nil
             self.requireEncoderSuccess(status, operation: "encode callback")
             if flags.contains(.frameDropped) {
-                self.encoderDroppedFrame()
+                self.encoderDroppedFrame(submission)
                 return
             }
             guard let sample else { self.pipe.finish(4, "encoder returned no sample") }
