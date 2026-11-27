@@ -68,9 +68,13 @@ jobs:
         run: brew install tmux
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      # Four workers on the 4-vCPU Linux and Windows runners: most test time
+      # waits on git and child processes, so the test step took 5.0-5.5m
+      # instead of 9.1-12.1m (probe 45905523085). macOS runners have 3 vCPUs
+      # and gained nothing reliable, so they keep 2.
       - name: Release candidate tests
         if: env.PHREN_RC == 'true'
-        run: pnpm test --coverage --maxWorkers=2
+        run: pnpm test --coverage --maxWorkers=${{ runner.os == 'macOS' && 2 || 4 }}
       - name: Development build summary
         if: env.PHREN_RC != 'true'
         run: echo 'Build passed. Tests deferred to the consolidated release candidate; tests were not run.' >> "$GITHUB_STEP_SUMMARY"
