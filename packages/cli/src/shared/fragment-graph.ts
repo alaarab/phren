@@ -153,6 +153,10 @@ function openingFence(line: string): { marker: string; indent: number } | undefi
   return { marker: match[2], indent: match[1]?.length ?? 0 };
 }
 
+export function normalizeWikilinkTarget(target: string): string {
+  return target.split("/").at(-1)!.trim().replace(/\.md$/i, "").toLowerCase();
+}
+
 /** Distinct, normalized note names in Markdown reading order. */
 export function extractWikilinks(markdown: string, limit = Infinity): string[] {
   if (limit <= 0 || !markdown.includes("[[")) return [];
@@ -209,7 +213,7 @@ export function extractWikilinks(markdown: string, limit = Infinity): string[] {
         link.lastIndex = tokens.lastIndex;
         const match = link.exec(line);
         if (!match) continue;
-        const name = match[1].split("/").at(-1)!.trim().replace(/\.md$/i, "").toLowerCase();
+        const name = normalizeWikilinkTarget(match[1]);
         tokens.lastIndex = link.lastIndex;
         if (name && name !== "." && name !== "..") names.add(name);
         if (names.size >= limit) return [...names];
