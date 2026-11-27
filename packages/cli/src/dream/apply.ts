@@ -7,12 +7,13 @@ import * as fs from "fs";
 import * as path from "path";
 import { assertFindingVersions, readFindingVersions } from "../finding/versions.js";
 import { sanitizeDream } from "./privacy.js";
-import { isCitationLine } from "../content/metadata.js";
+import { isCitationLine, stripComments } from "../content/metadata.js";
 import { addFindingToFile, upsertCanonical } from "../content/learning.js";
 import type { FindingProvenance } from "../content/citation.js";
 import { applyFindingTypePrefix } from "../core/finding.js";
 import { editFinding, readFindings } from "../data/access.js";
-import { retractFinding, supersedeFinding } from "../finding/lifecycle.js";
+import { parseFindingLifecycle, retractFinding, supersedeFinding } from "../finding/lifecycle.js";
+import { iterateProjectFindings } from "../finding/locate.js";
 import { withFileLock } from "../governance/locks.js";
 import { appendReviewQueue } from "../governance/policy.js";
 import { PhrenError } from "../phren-core.js";
@@ -20,12 +21,12 @@ import { atomicWriteText as writeAtomic, renameOverSync, runtimeFile } from "../
 import { appendArchivedEntriesToTopicDoc, readProjectTopics, topicReferencePath } from "../project-topics.js";
 import { storeAwareProjectPath } from "../store-routing.js";
 import { projectStoreDir } from "./collect.js";
-import { checkPromotion } from "./budget.js";
-import { writePage } from "./pages.js";
+import { checkPromotion, parseTruths } from "./budget.js";
+import { normalizePage, PAGES_DIR, writePage } from "./pages.js";
 import type { DreamChange, DreamChangeset, DreamEvidence } from "./types.js";
 
 import {
-  activeDreamDecisions, clean, dreamRecordFile, effectiveDreamOutcome, isPendingProposal, isStructuredProposal,
+  activeDreamDecisions, beginDreamApply, clean, dreamRecordFile, effectiveDreamOutcome, isPendingProposal, isStructuredProposal,
   readDreamDecisions, readDreamRecord, recoverDreamDecision, writeDreamDecision,
   type DreamDecision, type DreamEffectiveOutcome, type DreamMode, type DreamOutcome, type DreamOutcomeStatus, type DreamRecord,
 } from "./records.js";
@@ -103,19 +104,87 @@ function truthsPath(phrenPath: string, project: string): string {
   return storeAwareProjectPath(phrenPath, project, "truths.md") ?? path.join(phrenPath, project, "truths.md");
 }
 
+function readText(file: string): string | undefined {
+  try { return fs.readFileSync(file, "utf8"); }
+  catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err; }
+}
+
+const manualLink = (project: string, entity: string) => ({ entity: entity.toLowerCase(), entityType: "fragment", sourceDoc: `${project}/FINDINGS.md`, relType: "mentions" });
+type ManualLink = ReturnType<typeof manualLink>;
+const readManualLinks = (file: string) => JSON.parse(readText(file) ?? "[]") as ManualLink[];
+const sameLink = (a: ManualLink, b: ManualLink) => a.entity === b.entity && a.entityType === b.entityType && a.sourceDoc === b.sourceDoc && a.relType === b.relType;
+
 /** Persist a manual fragment link the way the link_findings tool does, so an index rebuild keeps it. */
 function persistLink(phrenPath: string, project: string, entity: string): void {
   const file = runtimeFile(phrenPath, "manual-links.json");
   withFileLock(file, () => {
-    let existing: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> = [];
-    if (fs.existsSync(file)) existing = JSON.parse(fs.readFileSync(file, "utf8"));
-    const entry = { entity: entity.toLowerCase(), entityType: "fragment", sourceDoc: `${project}/FINDINGS.md`, relType: "mentions" };
-    if (existing.some(e => e.entity === entry.entity && e.entityType === entry.entityType && e.sourceDoc === entry.sourceDoc && e.relType === entry.relType)) return;
+    const existing = readManualLinks(file);
+    const entry = manualLink(project, entity);
+    if (existing.some(e => sameLink(e, entry))) return;
     existing.push(entry);
     const tmp = `${file}.tmp-${crypto.randomUUID()}`;
     fs.writeFileSync(tmp, JSON.stringify(existing, null, 2));
     renameOverSync(tmp, file);
   });
+}
+
+/** Keep only a fingerprint of the affected records in the intent. */
+function proposalState(phrenPath: string, project: string, change: DreamChange): { fingerprint: string; applied: boolean } {
+  const state = (facts: unknown, applied: boolean) => ({
+    fingerprint: crypto.createHash("sha256").update(JSON.stringify(facts)).digest("hex"), applied,
+  });
+  const visible = (text: string) => stripComments(text).replace(/^-\s+/, "").replace(/\s+/g, " ").trim();
+  const matches = (text: string, expected: string) => {
+    const tag = /^\[[a-z][a-z0-9_-]*\]\s*/;
+    const wanted = visible(expected);
+    return (tag.test(wanted) ? visible(text) : visible(text).replace(tag, "")) === wanted;
+  };
+  const comment = (text: string) => text.replace(/\s+/g, " ").trim().replace(/"/g, "'");
+  if (change.op === "write_page") {
+    const slug = PAGE_PATH.exec(change.page)?.[1];
+    if (!slug) return state(null, false);
+    const file = storeAwareProjectPath(phrenPath, project, PAGES_DIR, `${slug}.md`);
+    if (!file) throw new Error(`Cannot verify page ${slug}.`);
+    const existing = fs.lstatSync(file, { throwIfNoEntry: false });
+    if (existing && !existing.isFile()) throw new Error(`Cannot verify page ${slug}: expected a regular file.`);
+    const saved = readText(file)?.replace(/\r\n/g, "\n");
+    const withoutDate = (text: string) => text.replace(/^updated: \d{4}-\d{2}-\d{2}\n/m, "");
+    return state(saved ?? null, saved !== undefined && withoutDate(saved) === withoutDate(normalizePage(slug, change.markdown, change.links)));
+  }
+  if (change.op === "link") {
+    const entry = manualLink(project, change.entity);
+    const linked = readManualLinks(runtimeFile(phrenPath, "manual-links.json")).some(l => sameLink(l, entry));
+    return state(linked, linked);
+  }
+  if (change.op === "promote_truth" || change.op === "demote_truth") {
+    const text = change.op === "promote_truth" ? change.text.replace(/^- /, "") : change.truth;
+    const truths = parseTruths(readText(truthsPath(phrenPath, project)) ?? "").filter(t => t.text === text);
+    if (change.op === "promote_truth") return state(truths, truths.length > 0);
+    const findings = [...iterateProjectFindings(phrenPath, project)].filter(f => !f.archived && matches(f.text, text));
+    return state([truths, findings.map(f => f.line)], !truths.length && findings.some(f => f.status === "active"));
+  }
+
+  const findings = [...iterateProjectFindings(phrenPath, project)].filter(f => !f.archived);
+  const targets = targetIds(change).map(id => findings.filter(f => f.fid === id.replace(/^fid:/, "")));
+  const first = targets[0]?.length === 1 ? targets[0][0] : undefined;
+  const facts = targets.map(items => items.map(f => [f.file, f.line, f.citation]));
+  switch (change.op) {
+    case "retract":
+      return state(facts, first?.status === "retracted" && parseFindingLifecycle(first.line).status_reason === comment(change.reason));
+    case "edit":
+      return state(facts, Boolean(first && matches(first.text, change.newText)));
+    case "move_topic":
+      return state(facts, Boolean(first && first.file === topicReferencePath(phrenPath, project, change.topic)));
+    case "supersede":
+    case "merge": {
+      const replacement = findings.filter(f => f.status === "active" && matches(f.text, change.newText));
+      const editedFirst = first && replacement.includes(first);
+      const replaced = targets.slice(editedFirst ? 1 : 0).every(items => items.length === 1 && items[0].status === "superseded" &&
+        parseFindingLifecycle(items[0].line).status_ref === comment(change.newText.trim().slice(0, 60)));
+      return state([facts, replacement.map(f => f.line)], replacement.length > 0 && replaced);
+    }
+    case "add_finding": return state(null, false);
+  }
 }
 
 async function applyOne(phrenPath: string, project: string, change: DreamChange, all: DreamChange[], options: ApplyOptions): Promise<{ status: DreamOutcomeStatus; detail: string }> {
@@ -274,7 +343,10 @@ export async function applyDreamProposals(
     if ((decision.reject || decision.resolve) && only && selected.some(o => o.op === "add_finding")) {
       throw new Error("Addition proposals are decided in the review queue.");
     }
-    for (const { index } of tracked) recoverDreamDecision(phrenPath, project, runId, index, record.changeset.changes[index]);
+    for (const { index } of tracked) {
+      const change = record.changeset.changes[index];
+      recoverDreamDecision(phrenPath, project, runId, index, change, () => proposalState(phrenPath, project, change));
+    }
     const decisions = readDreamDecisions(phrenPath, project, runId);
     const active = (o: DreamOutcome) => activeDreamDecisions(runId, o, decisions.get(o.index));
     const pending = tracked.filter(o => isPendingProposal(o) && !active(o).length);
@@ -324,6 +396,7 @@ export async function applyDreamProposals(
         continue;
       }
       const ids = targetIds(change).map(id => id.replace(/^fid:/, ""));
+      const finish = beginDreamApply(phrenPath, project, runId, index, change, proposalState(phrenPath, project, change).fingerprint);
       let outcome: { status: DreamOutcomeStatus; detail: string };
       try {
         outcome = await applyOne(phrenPath, project, change, applicable, {
@@ -334,7 +407,7 @@ export async function applyDreamProposals(
         attempts.set(index, { index, op: change.op, status: "failed", detail: errorText(err) });
         continue;
       }
-      if (outcome.status === "applied") writeDreamDecision(phrenPath, project, { runId, index, op: change.op, outcome: "applied" }, change);
+      if (outcome.status === "applied") finish();
       else attempts.set(index, { index, op: change.op, ...outcome });
       const after = findingVersions(phrenPath, project);
       for (const fid of ids) current[fid] = after[fid];

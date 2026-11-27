@@ -385,7 +385,7 @@ describe("review regressions", () => {
     ] }) });
     const result = await run({ runner: adds });
     expect(result.counts).toMatchObject({ deferred: 1 });
-    expect(pendingDreamProposals(store, PROJECT)).toBe(0);
+    expect(pendingDreamProposals(store, PROJECT)).toBe(1);
 
     expect((await applyDreamProposals(store, PROJECT, result.runId!)).outcomes.map(o => o.status)).toEqual(["deferred"]);
     fs.writeFileSync(path.join(store, PROJECT, "review.md"), "# Review\n\n## Review\n\n## Stale\n\n## Conflicts\n");
@@ -418,28 +418,50 @@ describe("review regressions", () => {
     expect(fs.readFileSync(journal, "utf8")).toBe(beforeJournal);
   });
 
-  it.each(["retract", "write_page"] as const)("recovers a successful %s after the decision-file rename fails", async (op) => {
+  it.each([
+    ["retract", "decision"], ["write_page", "decision"], ["retract", "receipt"], ["write_page", "receipt"],
+    ["write_page", "intent"], ["write_page", "receipt after later edits"],
+  ] as const)("retries %s after a %s checkpoint failure", async (op, fault) => {
     const page = "reference/pages/deploys.md";
     const change: DreamChange = op === "retract" ? { op, findingId: "aaaa1111", reason: "obsolete", evidence: EVIDENCE }
       : { op, page, markdown: "---\ntitle: Deploys\nsummary: Deploy policy\n---\nUse a staging environment.", links: [] };
     const { runId, record } = await run({ runner: async () => ({ ok: true, output: JSON.stringify({ changes: [change] }) }) });
     const original = fs.readFileSync(record!, "utf8");
     const directory = decisionsDir(runId!);
+    const receipt = path.join(store, ".runtime", "dream-receipts", PROJECT, runId!, "0.json");
     const rename = (await vi.importActual<typeof fs>("fs")).renameSync;
+    let receiptWrites = 0;
     vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
-      if (path.dirname(String(to)) === directory) throw new Error("decision rename interrupted");
+      if (fault === "decision" && path.dirname(String(to)) === directory) throw new Error("checkpoint interrupted");
+      if (String(to) === receipt && ++receiptWrites === (fault === "intent" ? 1 : 2) && fault !== "decision") {
+        throw new Error("checkpoint interrupted");
+      }
       return rename(from, to);
     });
-    try { await expect(applyDreamProposals(store, PROJECT, runId!, [0])).rejects.toThrow("decision rename interrupted"); }
+    try { await expect(applyDreamProposals(store, PROJECT, runId!, [0])).rejects.toThrow("checkpoint interrupted"); }
     finally { vi.mocked(fs.renameSync).mockImplementation(rename); }
-    expect(fs.readdirSync(directory)).toEqual([]);
+    expect(fs.existsSync(directory) ? fs.readdirSync(directory) : []).toEqual([]);
     const target = op === "retract" ? findingsFile() : path.join(store, PROJECT, page);
+    if (fault === "intent") {
+      expect(fs.existsSync(target)).toBe(false);
+      expect((await applyDreamProposals(store, PROJECT, runId!, [0])).outcomes[0].status).toBe("applied");
+      expect(fs.readFileSync(target, "utf8")).toContain("Use a staging environment.");
+      return;
+    }
     if (op === "retract") expect(finding("aaaa1111")?.status).toBe("retracted");
     else expect(fs.readFileSync(target, "utf8")).toContain("Use a staging environment.");
-    const edited = fs.readFileSync(target, "utf8") + "\n<!-- edited after applying -->\n";
-    fs.writeFileSync(target, edited);
+    if (fault !== "receipt" || op === "retract") fs.appendFileSync(target, "\n<!-- edited after applying -->\n");
+    const saved = fs.readFileSync(target, "utf8");
+    fs.utimesSync(target, NOW, NOW);
+    if (fault === "receipt after later edits") {
+      await expect(applyDreamProposals(store, PROJECT, runId!, [0])).rejects.toThrow("Cannot verify interrupted apply");
+      expect(fs.readFileSync(target, "utf8")).toBe(saved);
+      expect(fs.existsSync(directory)).toBe(false);
+      return;
+    }
     expect((await applyDreamProposals(store, PROJECT, runId!, [0])).outcomes[0].status).toBe("applied");
-    expect(fs.readFileSync(target, "utf8")).toBe(edited);
+    expect(fs.readFileSync(target, "utf8")).toBe(saved);
+    expect(fs.statSync(target).mtimeMs).toBe(NOW.getTime());
     expect(fs.readFileSync(record!, "utf8")).toBe(original);
     await applyDreamProposals(store, PROJECT, runId!, [0]);
     expect(fs.readdirSync(directory)).toHaveLength(1);

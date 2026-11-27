@@ -1784,7 +1784,7 @@ Enabled, mode, cadence, window, last run (`dreams/last-run.json`), next eligible
 
 ### `dream_apply`
 
-Apply or reject pending structured proposals from a stored dream (`dreams/<runId>.json`), or explicitly resolve opposing decisions. Applying rechecks its target findings and refuses missing or changed targets. A successful mutation whose decision could not be saved is recorded on retry through a local receipt. After reconciling the memory changes for a conflicted proposal, use `resolve` to append a decision that supersedes its active decisions. A plain apply can retry publication of deferred additions through the ordinary review queue.
+Apply or reject pending structured proposals from a stored dream (`dreams/<runId>.json`), or explicitly resolve opposing decisions. Applying rechecks its target findings and refuses missing or changed targets. A retry on the same computer uses the local intent to record a completed mutation, resume an untouched one, or report that its result could not be verified. After reconciling the memory changes for a conflicted proposal, use `resolve` to append a decision that supersedes its active decisions. A plain apply can retry publication of deferred additions through the ordinary review queue. The `pendingProposals` totals in status and log include those additions, while per-operation acceptance covers structured proposals only.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

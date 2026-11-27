@@ -139,7 +139,8 @@ describe("dream MCP actions", () => {
     decide("a-review", 5, "retract", "rejected");
     const call = admin();
     const status = parse(await call({ action: "dream_status", project: "demo", limit: 3 }));
-    expect(status.data.pendingProposals).toBe(3);
+    expect(status.data.pendingProposals).toBe(4);
+    expect(parse(await call({ action: "dream_log", project: "demo" })).data.pendingProposals).toBe(4);
     expect(status.data.acceptance).toEqual({ runs: 3, byOp: {
       edit: { proposed: 4, applied: 1, rejected: 1, pending: 2, conflicted: 0, skipped: 0, acceptRate: 0.5 },
       merge: { proposed: 1, applied: 0, rejected: 0, pending: 0, conflicted: 0, skipped: 1, acceptRate: null },

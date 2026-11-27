@@ -12,6 +12,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
+import { applyDreamProposals, findingVersions } from "../dream/apply.js";
 import { register } from "../tools/finding.js";
 import { addStoreToRegistry } from "../store-registry.js";
 import type { McpContext } from "../tools/types.js";
@@ -130,6 +131,38 @@ describe("push_changes syncs team stores", () => {
     // The remote actually has it, not just a local commit.
     const blob = git(bareRemote, ["show", `main:${PROJECT}/journal/2026-08-16-alice.md`]);
     expect(blob).toContain("Retries need jitter");
+  });
+
+  it("pushes a dream run and applied decision alongside its finding change", async () => {
+    const runId = "20261106T120000Z-ac613f";
+    const projectDir = path.join(storePath, PROJECT);
+    const dreams = path.join(projectDir, "dreams");
+    fs.mkdirSync(dreams);
+    fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), "# Findings\n\n## 2026-11-06\n\n- Deployments require VPN access. <!-- fid:aaaa1111 -->\n");
+    git(storePath, ["add", "--", `${PROJECT}/FINDINGS.md`]);
+    git(storePath, ["commit", "-m", "save a finding"]);
+    git(storePath, ["push"]);
+    fs.writeFileSync(path.join(dreams, `${runId}.json`), JSON.stringify({
+      changeset: { project: PROJECT, runId, changes: [{ op: "retract", findingId: "aaaa1111", reason: "Retired deployment path", evidence: [] }] },
+      mode: "propose", findingVersions: findingVersions(storePath, PROJECT),
+      outcomes: [{ index: 0, op: "retract", status: "proposed" }], dropped: [],
+    }));
+    fs.writeFileSync(path.join(dreams, "last-run.json"), "{}\n");
+    fs.writeFileSync(path.join(dreams, "journal.md"), "# Dream journal\n");
+    expect((await applyDreamProposals(storePath, PROJECT, runId, [0])).outcomes[0].status).toBe("applied");
+
+    const result = await server.call("push_changes", {});
+    expect(result.data.teamStores).toEqual([{ store: "acme", pushed: true }]);
+    const peer = path.join(tmpDir, "peer-team");
+    git(tmpDir, ["clone", bareRemote, peer]);
+    const peerDreams = path.join(peer, PROJECT, "dreams");
+    expect(JSON.parse(fs.readFileSync(path.join(peerDreams, `${runId}.json`), "utf8")).changeset.runId).toBe(runId);
+    const decisions = path.join(peerDreams, "decisions", runId);
+    const [decision] = fs.readdirSync(decisions);
+    expect(JSON.parse(fs.readFileSync(path.join(decisions, decision), "utf8"))).toMatchObject({ runId, index: 0, op: "retract", outcome: "applied" });
+    expect(fs.readFileSync(path.join(peer, PROJECT, "FINDINGS.md"), "utf8")).toContain('phren:status "retracted"');
+    expect(fs.existsSync(path.join(peerDreams, "last-run.json"))).toBe(false);
+    expect(fs.existsSync(path.join(peerDreams, "journal.md"))).toBe(false);
   });
 
   it("does not stage files outside the team-safe pathspecs", async () => {

@@ -143,7 +143,7 @@ const LEGACY_APPLIED = "legacy-applied";
 
 type StoredDreamDecision = DreamDecision & { decidedAt: string };
 type DecisionInput = Omit<StoredDreamDecision, "id" | "decidedAt" | "computer">;
-interface DreamReceipt { changeHash: string; decision: StoredDreamDecision }
+interface DreamReceipt { changeHash: string; decision: StoredDreamDecision; before?: string }
 
 function receiptPath(phrenPath: string, project: string, runId: string, index: number): string {
   return runtimeFile(phrenPath, path.join("dream-receipts", project, runId, `${index}.json`));
@@ -161,24 +161,45 @@ function appendDreamDecision(phrenPath: string, project: string, { id, ...decisi
   else if (!existing.isFile() || fs.readFileSync(file, "utf8") !== contents) throw new Error("Dream decision already exists with different contents.");
 }
 
-export function writeDreamDecision(phrenPath: string, project: string, input: DecisionInput, appliedChange?: DreamChange): void {
-  const decision = sanitizeDream({ ...input, id: crypto.randomUUID(), decidedAt: new Date().toISOString(), computer: getMachineName() });
-  const receipt = appliedChange && receiptPath(phrenPath, project, input.runId, input.index);
-  if (receipt && appliedChange) {
-    const pending: DreamReceipt = { changeHash: changeHash(appliedChange), decision };
-    atomicWriteText(receipt, `${JSON.stringify(pending)}\n`);
-  }
-  appendDreamDecision(phrenPath, project, decision);
-  if (receipt) tryUnlink(receipt);
+function newDreamDecision(input: DecisionInput): StoredDreamDecision {
+  return sanitizeDream({ ...input, id: crypto.randomUUID(), decidedAt: new Date().toISOString(), computer: getMachineName() });
 }
 
-export function recoverDreamDecision(phrenPath: string, project: string, runId: string, index: number, change: DreamChange): void {
+export function writeDreamDecision(phrenPath: string, project: string, input: DecisionInput): void {
+  appendDreamDecision(phrenPath, project, newDreamDecision(input));
+}
+
+export function beginDreamApply(phrenPath: string, project: string, runId: string, index: number, change: DreamChange, before: string): () => void {
+  const file = receiptPath(phrenPath, project, runId, index);
+  const receipt: DreamReceipt = { changeHash: changeHash(change), decision: newDreamDecision({ runId, index, op: change.op, outcome: "applied" }) };
+  atomicWriteText(file, `${JSON.stringify({ ...receipt, before })}\n`);
+  return () => {
+    atomicWriteText(file, `${JSON.stringify(receipt)}\n`);
+    appendDreamDecision(phrenPath, project, receipt.decision);
+    tryUnlink(file);
+  };
+}
+
+export function recoverDreamDecision(
+  phrenPath: string, project: string, runId: string, index: number, change: DreamChange,
+  inspect: () => { fingerprint: string; applied: boolean },
+): void {
   const file = receiptPath(phrenPath, project, runId, index);
   if (!fs.existsSync(file)) return;
-  const { changeHash: hash, decision } = JSON.parse(fs.readFileSync(file, "utf8")) as DreamReceipt;
+  const { before, ...receipt } = JSON.parse(fs.readFileSync(file, "utf8")) as DreamReceipt;
+  const { changeHash: hash, decision } = receipt;
   if (!validDecision(decision, runId, index) || !DECISION_ID.test(decision.id) || decision.op !== change.op ||
       decision.outcome !== "applied" || hash !== changeHash(change)) {
     throw new Error(`The saved apply receipt for ${runId}#${index} does not match its proposal.`);
+  }
+  if (before !== undefined) {
+    const state = inspect();
+    if (state.fingerprint === before) {
+      tryUnlink(file);
+      return;
+    }
+    if (!state.applied) throw new Error(`Cannot verify interrupted apply ${runId}#${index}. Inspect its changes before retrying.`);
+    atomicWriteText(file, `${JSON.stringify(receipt)}\n`);
   }
   appendDreamDecision(phrenPath, project, decision);
   tryUnlink(file);
@@ -318,6 +339,7 @@ export function dreamProposalStats(phrenPath: string, project: string, limit: nu
     const { runId, startedAt } = record.changeset;
     const outcomes: DreamEffectiveOutcome[] = [];
     if (record.mode === "propose") {
+      pendingProposals += record.outcomes.filter(o => o.op === "add_finding" && o.status === "deferred").length;
       const decisions = readDreamDecisions(phrenPath, project, runId);
       for (const outcome of record.outcomes.filter(isStructuredProposal)) {
         const active = activeDreamDecisions(runId, outcome, decisions.get(outcome.index));
