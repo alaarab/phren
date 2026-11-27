@@ -17,6 +17,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - A pane that finished its turn is no longer closed 500 ms after replying while it still has background work. Close-self waits for the turn to end with nothing running, for up to 10 minutes, and a new prompt cancels it. A refused close of a dispatched worker is retried.
 - A worker waiting on CI with an open task stays `waiting` instead of returning needs-you for the task. Stale-task rows in the owner inbox link their task.
+- A 0.3.96 conductor no longer reads a 0.3.97 worker's CI wait as done: waiting workers also send the older "Stopped waiting" reason, and a stored needs-you return for a wait is corrected in place after the upgrade.
+- Close-self never closes a pane that took a new prompt or has a queued hand-off while it waited, and leaves the pane open when it cannot verify the conversation and its prompt. OpenCode's second turn no longer cancels its own close.
+- An owner-inbox paste resolves the item only after its command succeeds and only if the item has not changed since it was copied. A Done task resolves an item even while its linked pull request is still open; adding the same pull request with or without a key no longer makes a second item; items added on another computer paste with `--computer`, and a 0.3.96 peer gets a clear error for the new fields. GitLab links are kept for reference but do not resolve items.
+- `dispatch wait` exits with an error when the Hook's 24-hour watch ends while the worker is still parked, instead of waiting forever.
 
 ### Changed
 

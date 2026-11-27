@@ -319,10 +319,10 @@ export async function runConductor(args: string[]): Promise<number> {
 export async function runOwnerInbox(args: string[]): Promise<number> {
   const [action = "list", ...rest] = args;
   const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { computer: { type: "string" }, project: { type: "string" }, id: { type: "string" }, resolution: { type: "string" }, all: { type: "boolean" },
-    command: { type: "string" }, task: { type: "string" }, pr: { type: "string" }, key: { type: "string" } } });
+    command: { type: "string" }, task: { type: "string" }, pr: { type: "string" }, key: { type: "string" }, "if-updated-at": { type: "string" } } });
   const input = ownerInboxSchema.parse({ action, ...(values.computer ? { computer: values.computer === "local" ? undefined : values.computer } : {}),
     ...(action === "add" ? { title: positionals.join(" "), project: values.project, id: values.id, command: values.command, task: values.task, pr: values.pr, key: values.key } : {}),
-    ...(action === "resolve" ? { id: positionals[0], resolution: values.resolution } : {}),
+    ...(action === "resolve" ? { id: positionals[0], resolution: values.resolution, ...(values["if-updated-at"] !== undefined ? { ifUpdatedAt: values["if-updated-at"] } : {}) } : {}),
     ...(values.all ? { includeResolved: true } : {}) });
   console.log(JSON.stringify(await hookRequest("/v1/owner-inbox", input), null, 2)); return 0;
 }

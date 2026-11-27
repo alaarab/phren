@@ -1,10 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { initializeTaskFormat } from "../data/task-format.js";
+import type { ForgeItem } from "../task/work.js";
+import { grantAdmin, makeTempDir, writeFile } from "../test-helpers.js";
+import { PROVIDERS, providerFor } from "./git-hosts.js";
 import { ownerInboxDone } from "./owner-inbox-done.js";
 import type { InboxItem } from "./owner-inbox.js";
+
+vi.mock("./git-hosts.js", async original => ({ ...await original<typeof import("./git-hosts.js")>(), providerFor: vi.fn() }));
 
 const at = "2026-11-26T10:00:00.000Z";
 const item = (over: Partial<InboxItem> & Pick<InboxItem, "id">): InboxItem =>
   ({ kind: "manual", title: "Merge the release", createdAt: at, updatedAt: at, state: "open", ...over });
+
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.resetAllMocks(); });
 
 describe("owner inbox auto-resolution", () => {
   it("resolves merged and closed pulls, leaves open and unread ones alone", async () => {
@@ -31,12 +40,50 @@ describe("owner inbox auto-resolution", () => {
     expect(await ownerInboxDone([linked], { task: async () => undefined })).toEqual(new Map());
     expect(await ownerInboxDone([linked], { task: async () => { throw new Error("store unreadable"); } })).toEqual(new Map());
   });
-  it("reads the pull first when an item links both a pr and a task", async () => {
-    const pull = vi.fn(async () => ({ state: "open" })), task = vi.fn(async () => true);
+  it("uses the Done task when the linked PR is open or unreadable", async () => {
     const both = item({ id: "66666666-6666-4666-8666-666666666666", pr: "https://github.com/o/r/pull/877", task: "bid:c2cc33d0" });
-    expect(await ownerInboxDone([both], { pull, task })).toEqual(new Map());
-    expect(pull).toHaveBeenCalledWith("https://github.com/o/r/pull/877");
-    expect(task).not.toHaveBeenCalled();
+    const task = async () => true;
+    for (const pull of [async () => ({ state: "open" as const }), async () => undefined, async () => { throw new Error("forge down"); }]) {
+      expect((await ownerInboxDone([both], { pull, task })).get(both.id)).toBe("done: task bid:c2cc33d0 is Done");
+    }
+    expect((await ownerInboxDone([both], { pull: async () => ({ state: "merged" }), task })).get(both.id)).toBe("done: PR merged");
+  });
+  it("waits for a post-reopen forge read before using a cached unmerged closure", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(at) + 1000);
+    let finish!: (result: ForgeItem) => void;
+    const refreshing = new Promise<ForgeItem>(resolve => { finish = resolve; });
+    const read = vi.fn().mockResolvedValueOnce({ state: "closed" }).mockReturnValueOnce(refreshing);
+    vi.mocked(providerFor).mockReturnValue({ ...PROVIDERS.github, item: read });
+    const linked = item({ id: "11111111-1111-4111-8111-111111111111", pr: "https://github.com/o/r/pull/881" });
+    await ownerInboxDone([linked]);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect((await ownerInboxDone([linked])).get(linked.id)).toBe("done: PR closed without merging");
+    const updated = { ...linked, title: "Merge after reopen", updatedAt: new Date(Date.parse(at) + 2000).toISOString() };
+    vi.setSystemTime(Date.parse(at) + 3000);
+    expect(await ownerInboxDone([updated])).toEqual(new Map());
+    expect(read).toHaveBeenCalledTimes(2);
+    finish({ state: "open" });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(await ownerInboxDone([updated])).toEqual(new Map());
+  });
+  it("reads the task store again when an updated item outlives its cached Done task", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(at) + 1000);
+    const store = makeTempDir("owner-inbox-task-");
+    try {
+      grantAdmin(store.path);
+      initializeTaskFormat(store.path);
+      vi.stubEnv("PHREN_PATH", store.path);
+      const file = path.join(store.path, "release", "tasks.md");
+      writeFile(file, "# release tasks\n\n## Done\n\n- [x] Ship the release <!-- bid:c2cc33d0 -->\n");
+      const linked = item({ id: "22222222-2222-4222-8222-222222222222", task: "bid:c2cc33d0" });
+      expect((await ownerInboxDone([linked])).get(linked.id)).toBe("done: task bid:c2cc33d0 is Done");
+      writeFile(file, "# release tasks\n\n## Active\n\n- [ ] Ship the release <!-- bid:c2cc33d0 -->\n");
+      const updated = { ...linked, title: "Finish the reopened task", updatedAt: new Date(Date.parse(at) + 2000).toISOString() };
+      vi.setSystemTime(Date.parse(at) + 3000);
+      expect(await ownerInboxDone([updated])).toEqual(new Map());
+    } finally { store.cleanup(); }
   });
   it("never asks about resolved or non-manual items", async () => {
     const pull = vi.fn(async () => ({ state: "merged" })), task = vi.fn(async () => true);

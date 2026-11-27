@@ -167,23 +167,17 @@ describe("session titles", () => {
 });
 
 describe("last reply on a session row", () => {
-  const ended = (reply: string) => nextTurn(nextTurn(undefined, { event: "UserPromptSubmit", input: "owner", terminal: "term_a", source: "claude", session })!,
-    { event: "Stop", terminal: "term_a", source: "claude", session, reply })!;
-
   it("is the ended turn's reply as one plain line", () => {
-    expect(replyExcerpt(ended("## Done\n\nI fixed **login** in `auth.ts`.\n\n```ts\nconst x = 1;\n```\n- Should I open a PR?"))).toBe("Done I fixed login in auth.ts. Should I open a PR?");
+    expect(replyExcerpt("## Done\n\nI fixed **login** in `auth.ts`.\n\n```ts\nconst x = 1;\n```\n- Should I open a PR?")).toBe("Done I fixed login in auth.ts. Should I open a PR?");
   });
 
   it("is cut to a short line", () => {
-    const line = replyExcerpt(ended("word ".repeat(200)))!;
+    const line = replyExcerpt("word ".repeat(200))!;
     expect(line).toHaveLength(240);
     expect(line.endsWith("…")).toBe(true);
   });
 
-  it("is absent while a new turn runs or when the Stop had no reply", () => {
-    const working = nextTurn(ended("Done."), { event: "UserPromptSubmit", input: "owner", terminal: "term_a", source: "claude", session });
-    expect(replyExcerpt(working)).toBeUndefined();
-    expect(replyExcerpt(record())).toBeUndefined();
+  it("is absent when there is no reply", () => {
     expect(replyExcerpt(undefined)).toBeUndefined();
   });
 });

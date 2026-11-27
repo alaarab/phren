@@ -132,15 +132,18 @@ full execution policy.
 (`{"dispatch":"<id>","state":"running"|"needs_you"|"waiting","question"?:...,"waitingOn"?:...,"waitingFor"?:...,"at":"<ISO>"}`)
 and a final line
 (`{"dispatch":"<id>","state":"done"|"failed"|"gone"|"timeout","final":true,"final_reply"?:...,"question"?:...,"error"?:...,"prs"?:[...]}`).
-`needs_you` and `waiting` (parked on CI, background work or a queue) are not final. It peeks with `POST /v1/dispatch/returns?peek=1`
+`wait` keeps following after `needs_you` and `waiting`. A worker parked on CI,
+background work or a queue needs a new turn to continue, such as a `hand_off`
+after CI passes. `wait` peeks with `POST /v1/dispatch/returns?peek=1`
 so a conductor's returns stay unread, reads
 `POST /v1/dispatch/workers` for live state, and acknowledges only this dispatch
 with `POST /v1/dispatch/returns/ack { "dispatch": "<uuid>" }`. Exit codes: 0
 `done`, 1 `failed` or `gone`, 124 `timeout` (no timeout by default, capped at 7
 days). Failures of any polled route count toward one 5-minute
 continuous-unavailability deadline. A targetless or pending receipt keeps
-`running`; only the Hook's terminal return (done, failed or gone), or the
-receipt's settled terminal state, ends the wait. An unknown id after a 30 s
+`running` until the Hook records a terminal outcome. If the 24-hour receipt
+watch expires with a parked return still on record, `wait` ends `failed` with
+an expiry message and leaves the worker open. An unknown id after a 30 s
 grace period ends `failed`. Live worker state is polled even when a return
 exists: a needs-you return from before the worker last ran is historical, and a
 resumed worker emits `running` again.
@@ -2454,10 +2457,11 @@ Each tab in the `/v1/workspaces` and `WS /v1/overview` replies carries
 time that tab's `agentStatus` last changed; older Hooks omit it. Only a status
 change resets it, not a title, label or activity-counter change, and a tab seen
 for the first time gets the current time. The Hook persists it across restarts.
-A tab whose turn ended carries `lastReply`: the
-agent's last message from its Stop hook (Claude and Codex), as one plain line
-of at most 240 characters with markdown dropped. It is absent while a turn or
-its background work runs, and when the Stop carried no message. A finished
+A tab whose turn ended carries `lastReply` when the Hook has its final message.
+The Hook uses the Stop reply or the final transcript reply when the Stop has
+no text, as with OpenCode. The reply is one plain line of at most 240
+characters with Markdown dropped. A live foreground turn has no `lastReply`.
+An ended turn can keep its reply while background work runs. A finished
 turn also carries `completion: {id, at, entry?}`: an opaque id of the latest finished
 turn of the conversation now in the pane (the conversation id and its Stop's
 sequence), and when it stopped. It is absent while a prompt is unanswered, when
@@ -2475,9 +2479,8 @@ covered code-mode wrapper results.
 `seenCompletion` is the completion id a person last marked seen on the phone or
 the desktop, absent until one is. A row is unread while `completion.id` differs
 from `seenCompletion`. A session whose main turn ended while background
-work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`,
-where Herdr or tmux say idle or done. `n` counts the work the session is
-waiting on: its running Codex or Claude sub-agents, teammates, workflow agents
+work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`.
+`n` counts the session's running Codex or Claude sub-agents, teammates, workflow agents
 and fanout jobs (`runningChildren`), plus, for Claude, the background shells
 and monitors started since the owner's last prompt that still run. A shell
 that follows a log, watches files or serves a dev build (`tail -f`,
@@ -2488,13 +2491,13 @@ transcript shows finishing after that Stop (a task-notification with a final
 status, including one still queued in an idle session), and none count two
 hours after the Stop, so an old count never keeps a finished session working. `backgroundTasks` is absent on a tab that is working, blocked or waiting
 on its own turn, and such a tab has no `currentStep`. The Hook's `live_sessions`
-list carries the same field. A tab whose turn ended but is not done has
-`waiting`: `ci` or `queue` when its reply's closing sentence waits on CI or a
+list carries the same field. A tab whose turn ended can carry `waiting`.
+It is `ci` or `queue` when its reply's closing sentence waits on CI or a
 queue, else `background` while its background work runs, else `other` when the
 sentence names something else. It is absent while a turn runs, on a `blocked` or
-`waiting` tab (the owner is needed), and when nothing is waited on; the kinds are
-a dispatch return's `waitingOn`. A `working` tab with `backgroundTasks` keeps its
-`lastReply`. `title` is the dispatch label for a dispatched
+`waiting` tab, and when nothing is waited on. As with dispatch returns, an
+owner question at the end of the reply takes precedence and suppresses the
+wait. These kinds match a dispatch return's `waitingOn`. `title` is the dispatch label for a dispatched
 worker (kept in `<bridge>/briefs/<id>/label`); a dispatch sent before labels
 were kept uses its tab or workspace label. Otherwise it is the harness's own
 title, except a title made from the brief launch's first prompt ("Read and
@@ -2790,23 +2793,30 @@ to `list`; optional `includeResolved` shows history. `add` requires `title`, wit
 optional `project`, stable UUID `id`, `command` (a paste-able shell command,
 at most 20 lines; phren never runs it), `task` (`bid:xxxxxxxx`), `pr` (an HTTPS
 pull or merge request URL, stored normalized) and `key` (a dedupe key).
-`resolve` requires `id`, with optional `resolution` and `computer` (the listed
-item's `inboxComputer`, omitted for local). A resolve does not answer or approve
-a prompt. Lists include local and linked computers' inboxes plus `unreachable`
-entries. Every listed manual item with a `command` carries a computed `paste`:
-the command, then the `resolve` that closes the item (`&&`-chained after a
-one-line command, on its own line after a multi-line one), addressed to the
-item's `inboxComputer`; it is never stored. Manual adds upsert: re-adding the
-same `key` or PR updates the open item with that key instead of duplicating it
-(unchanged re-adds write nothing), and an explicit `id` naming a resolved
-manual item with changed fields reopens it while an identical retry returns it
-unchanged; an explicit `id` naming an automatic row is still refused. Open
-manual items also resolve themselves on the list tick when their `pr` merges or
-closes (`done: PR merged`, `done: PR closed without merging`) or their linked
-`task` sits Done (`done: task <bid> is Done`), read through the live forge cache
-without ever waiting on it. Automatic items are deduplicated by pane, session
-and question and shown only while verified live. Answered or disappeared
-sources resolve automatically on reads or the five-second Hook tick. The first
+`resolve` requires `id` and accepts `resolution`, `computer` (the item's
+`inboxComputer`, omitted for local), and `ifUpdatedAt` (the item's `updatedAt`).
+A stale `ifUpdatedAt` returns 409. Use the prompt's own route to answer or
+approve it. Lists include local and linked computers' inboxes plus `unreachable`
+entries. Add and list responses compute a `paste` for manual items with a
+`command`. The paste chains a guarded resolve after successful execution,
+runs multiline commands with `sh -e`, and routes to the owning Hook. Named
+remote adds and resolves also return `inboxComputer`. Remote `command`, `task`,
+`pr`, `key` and `ifUpdatedAt` require the destination Hook's `ownerInboxActions`
+capability. Legacy adds and resolves work during a rolling upgrade.
+
+Manual adds match open items by normalized PR or `key`. A write whose identifiers
+match different items returns 409. An explicit `id` naming a resolved manual item
+reopens it when its fields change. An identical retry returns it unchanged, and
+an explicit `id` naming an automatic item is refused. Open manual items resolve
+on the list tick when a GitHub or gitboy PR merges or closes (`done: PR merged`,
+`done: PR closed without merging`). When the PR read supplies neither outcome,
+a linked Done task also resolves the item (`done: task <bid> is Done`). GitLab
+merge requests can be linked for reference. The PR probe refreshes in the
+background. Unmerged closure and Done task evidence must come from a read after
+the latest item update to clear a reopened or edited action. Automatic items
+are deduplicated by pane, session and question and shown only while verified
+live. Answered or disappeared sources resolve automatically on reads or the
+five-second Hook tick. The first
 reconciliation after upgrade resolves legacy stale automatic rows with
 `stale: source gone`. Unreachable workers are hidden as unverified without
 resolving their items.

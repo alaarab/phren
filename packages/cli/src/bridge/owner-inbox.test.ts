@@ -1,19 +1,20 @@
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { fork } from "node:child_process";
+import { fork, spawnSync } from "node:child_process";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { OwnerInbox, pasteCommand, type InboxItem, type InboxSource } from "./owner-inbox.js";
+import { OwnerInbox, type InboxItem, type InboxSource } from "./owner-inbox.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import { hookPeers, peerRequest } from "./peers.js";
 vi.mock("./peers.js", () => ({ hookPeers: vi.fn(), peerRequest: vi.fn() }));
 const linked = (name: string) => ({ name, address: `${name.toLowerCase()}.example`, username: "sam", port: 22 });
+const at = "2026-11-26T10:00:00.000Z";
 let root: string, sources: InboxSource[];
 const inbox = () => new OwnerInbox(async () => sources, path.join(root, "owner-inbox.json"));
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-inbox-")); sources = []; vi.mocked(hookPeers).mockResolvedValue([]); });
-afterEach(async () => { vi.resetAllMocks(); await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { vi.useRealTimers(); vi.resetAllMocks(); await rm(root, { recursive: true, force: true }); });
 describe("owner inbox", () => {
   it("adds, lists and resolves durably with idempotent adds and history", async () => {
     const box = inbox(), id = "11111111-1111-4111-8111-111111111111";
@@ -30,7 +31,6 @@ describe("owner inbox", () => {
     const box = inbox();
     const added = await box.run({ action: "add", title: "Merge the release", command: "gh pr merge 877 --squash\necho\tmerged", task: "bid:c2cc33d0", pr: "https://github.com/alaarab/phren/pull/877/" });
     expect(added.item).toMatchObject({ command: "gh pr merge 877 --squash\necho\tmerged", task: "bid:c2cc33d0", pr: "https://github.com/alaarab/phren/pull/877" });
-    expect(added.item).toHaveProperty("paste", `gh pr merge 877 --squash\necho\tmerged\nphren owner-inbox resolve ${(added.item as InboxItem).id} --resolution done`);
     for (const bad of [
       { task: "bid:zzzzzzzz" }, { task: "c2cc33d0" }, { pr: "https://github.com/o/r/issues/5" }, { pr: "http://github.com/o/r/pull/1" },
       { pr: "https://github.com/o/r/pull/not-a-number" }, { command: "echo hi\r\necho bye" }, { command: "echo \x07bell" },
@@ -38,6 +38,25 @@ describe("owner inbox", () => {
     ]) await expect(box.run({ action: "add", title: "Bad add", ...bad })).rejects.toThrow(z.ZodError);
     const twenty = await box.run({ action: "add", title: "Twenty lines is fine", command: Array.from({ length: 20 }, (_, i) => `step ${i + 1}\t`).join("\n") });
     expect((twenty.item as InboxItem).command).toContain("step 20");
+  });
+  it("matches the normalized PR even when only one add carries a key", async () => {
+    const box = inbox(), pr = "https://github.com/alaarab/phren/pull/877";
+    const first = (await box.run({ action: "add", title: "Merge", pr, key: "release" })).item as InboxItem;
+    const next = await box.run({ action: "add", title: "Merge now", pr: `${pr}/` });
+    expect(next).toMatchObject({ updated: true, item: { id: first.id, title: "Merge now", pr } });
+    expect((await box.run({})).items).toHaveLength(1);
+  });
+  it("rejects a key or explicit id that conflicts with another open item's PR", async () => {
+    const box = inbox(), pr = "https://github.com/alaarab/phren/pull/877";
+    const a = (await box.run({ action: "add", title: "Merge", pr })).item as InboxItem;
+    const b = (await box.run({ action: "add", title: "Publish", key: "release" })).item as InboxItem;
+    await expect(box.run({ action: "add", title: "Merge and publish", pr, key: "release" })).rejects.toMatchObject({ status: 409 });
+    await box.run({ action: "resolve", id: b.id });
+    await expect(box.run({ action: "add", id: b.id, title: "Merge and publish", pr })).rejects.toMatchObject({ status: 409 });
+    expect((await box.run({ includeResolved: true })).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: a.id, state: "open", title: "Merge", pr }),
+      expect.objectContaining({ id: b.id, state: "resolved", title: "Publish", key: "release" }),
+    ]));
   });
   it("upserts by explicit key, by the default pr key and by id; an unchanged re-add writes nothing", async () => {
     const box = inbox(), file = path.join(root, "owner-inbox.json");
@@ -80,12 +99,35 @@ describe("owner inbox", () => {
     const [auto] = (await inbox().run({})).items as InboxItem[];
     await expect(inbox().run({ action: "add", id: auto.id, title: "Approve it all" })).rejects.toThrow("another item");
   });
-  it("computes paste commands for one line and for several, with and without a computer", () => {
-    const id = "11111111-1111-4111-8111-111111111111";
-    expect(pasteCommand({ id, command: "gh pr merge 877" })).toBe(`gh pr merge 877 && phren owner-inbox resolve ${id} --resolution done`);
-    expect(pasteCommand({ id, command: "cd ~phren\npnpm test" })).toBe(`cd ~phren\npnpm test\nphren owner-inbox resolve ${id} --resolution done`);
-    expect(pasteCommand({ id, command: "gh pr merge 877" }, "Desk")).toBe(`gh pr merge 877 && phren owner-inbox resolve ${id} --resolution done --computer Desk`);
-    expect(pasteCommand({ id, command: "cd ~phren\npnpm test" }, "local")).toBe(`cd ~phren\npnpm test\nphren owner-inbox resolve ${id} --resolution done`);
+  it.skipIf(process.platform === "win32")("only runs the pasted resolve after a successful multiline command", async () => {
+    const box = inbox();
+    const run = async (command: string) => {
+      const { item } = await box.run({ action: "add", title: "Merge", command });
+      const { paste } = item as { paste: string };
+      return spawnSync("sh", ["-c", `phren() { printf 'resolved'; }\n${paste}`], { encoding: "utf8" });
+    };
+    const failed = await run("false\nprintf 'merged'");
+    expect(failed.status).toBe(1);
+    expect(failed.stdout).toBe("");
+    const succeeded = await run("true\nprintf '%s ' 'merged'");
+    expect(succeeded.status).toBe(0);
+    expect(succeeded.stdout).toBe("merged resolved");
+  });
+  it("rejects pasted resolves after an update or same-id reopen, even within one millisecond", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(at));
+    const box = inbox(), id = randomUUID();
+    const add = { action: "add", id, title: "Approve", command: "true" };
+    const revision = (item: unknown) => (item as { paste: string }).paste.match(/--if-updated-at (\S+)/)?.[1];
+    const resolve = (ifUpdatedAt: string | undefined) => box.run({ action: "resolve", id, ifUpdatedAt });
+    const first = revision((await box.run(add)).item);
+    const second = revision((await box.run({ ...add, title: "Approve the update" })).item);
+    await expect(resolve(first)).rejects.toMatchObject({ status: 409 });
+    await expect(resolve(second)).resolves.toMatchObject({ item: { state: "resolved" } });
+    const reopened = revision((await box.run({ ...add, title: "Approve the replacement" })).item);
+    await expect(resolve(second)).rejects.toMatchObject({ status: 409 });
+    expect((await box.run({})).items).toMatchObject([{ id, state: "open", title: "Approve the replacement" }]);
+    await expect(resolve(reopened)).resolves.toMatchObject({ item: { state: "resolved" } });
   });
   it("auto-resolves the manual items the done probe reports, and only those", async () => {
     const done = vi.fn(async (items: InboxItem[]) => new Map<string, string>(items.filter(item => item.title === "A").map(item => [item.id, "done: PR merged"])));
@@ -116,15 +158,50 @@ describe("owner inbox", () => {
     vi.mocked(hookPeers).mockResolvedValue([linked("Desk")] as never);
     const id = "33333333-3333-4333-8333-333333333333";
     vi.mocked(peerRequest).mockResolvedValue({ items: [
-      { id, kind: "manual", state: "open", title: "Remote merge", command: "gh pr merge 9", paste: "stale from the peer" },
+      { id, kind: "manual", state: "open", title: "Remote merge", command: "gh pr merge 9", updatedAt: at, paste: "stale from the peer" },
     ] });
     const box = inbox();
     const local = (await box.run({ action: "add", title: "Log in to the forge", command: "gh auth login" })).item as InboxItem;
     const view = await ownerInboxView(box, {});
     expect(view.items).toMatchObject([
-      { title: "Log in to the forge", inboxComputer: "local", paste: `gh auth login && phren owner-inbox resolve ${local.id} --resolution done` },
-      { id, inboxComputer: "Desk", paste: `gh pr merge 9 && phren owner-inbox resolve ${id} --resolution done --computer Desk` },
+      { title: "Log in to the forge", inboxComputer: "local", paste: `gh auth login && phren owner-inbox resolve ${local.id} --resolution done --if-updated-at ${local.updatedAt}` },
+      { id, inboxComputer: "Desk", paste: `gh pr merge 9 && phren owner-inbox resolve ${id} --resolution done --if-updated-at ${at} --computer Desk` },
     ]);
+  });
+  it("routes a directly added remote action's paste and guarded resolve to its owning Hook", async () => {
+    vi.mocked(hookPeers).mockResolvedValue([linked("Desk")] as never);
+    const box = inbox(), remote = new OwnerInbox(undefined, path.join(root, "desk.json"));
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route, body) => {
+      if (route === "/v1/health") return { capabilities: { ownerInboxActions: true } };
+      if (route === "/v1/owner-inbox?local=1") return remote.run({ action: "list" });
+      return remote.run(body);
+    });
+    const command = "gh pr merge 9";
+    const added = await ownerInboxView(box, { action: "add", computer: "Desk", title: "Merge remotely", command });
+    const { id, updatedAt } = added.item as InboxItem;
+    expect(added.item).toMatchObject({ inboxComputer: "Desk", paste: `${command} && phren owner-inbox resolve ${id} --resolution done --if-updated-at ${updatedAt} --computer Desk` });
+    expect((await ownerInboxView(box, { action: "list", computer: "Desk" })).items).toEqual([added.item]);
+    const resolved = await ownerInboxView(box, { action: "resolve", computer: "Desk", id, ifUpdatedAt: updatedAt });
+    expect(resolved.item).toMatchObject({ inboxComputer: "Desk", id, state: "resolved" });
+    expect((await remote.run({})).items).toEqual([]);
+    expect((await box.run({ includeResolved: true })).items).toEqual([]);
+  });
+  it("preserves legacy remote writes and reports unsupported fields before contacting the old write route", async () => {
+    vi.mocked(hookPeers).mockResolvedValue([linked("Desk")] as never);
+    const box = inbox(), remote = new OwnerInbox(undefined, path.join(root, "desk.json"));
+    const legacy = z.object({ action: z.enum(["add", "resolve"]), id: z.string().uuid(), title: z.string().optional(), resolution: z.string().optional() }).strict();
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route, body) => route === "/v1/health"
+      ? { capabilities: { ownerInbox: true } } : remote.run(legacy.parse(body)));
+    const id = randomUUID();
+    const add = { action: "add", computer: "Desk", id, title: "Approve remotely" };
+    const resolve = { action: "resolve", computer: "Desk", id, resolution: "Approved" };
+    await expect(ownerInboxView(box, add)).resolves.toMatchObject({ item: { inboxComputer: "Desk", id, state: "open" } });
+    for (const input of [
+      { ...add, command: "true" }, { ...add, task: "bid:c2cc33d0" }, { ...add, pr: "https://github.com/o/r/pull/9" },
+      { ...add, key: "release" }, { ...resolve, ifUpdatedAt: at },
+    ]) await expect(ownerInboxView(box, input)).rejects.toMatchObject({ status: 409, details: { code: "owner-inbox-actions-unsupported" } });
+    await expect(ownerInboxView(box, resolve)).resolves.toMatchObject({ item: { inboxComputer: "Desk", id, state: "resolved" } });
+    expect(vi.mocked(peerRequest).mock.calls.filter(([, route]) => route === "/v1/owner-inbox")).toHaveLength(2);
   });
   it("retires automatic waits when answered and preserves manual decisions and history", async () => {
     const box = inbox();

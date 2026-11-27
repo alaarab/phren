@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TurnQueue } from "./turn-queue.js";
 import { objects, type Json, type Target } from "./protocol.js";
+import { setTerminalProvider, terminalProvider } from "./terminal.js";
 
 const sessions: Record<string, string> = {
   "w13:p2": "00000001-1111-4111-8111-111111111111", "w1P:p1": "00000002-1111-4111-8111-111111111111",
@@ -20,9 +21,11 @@ vi.mock("./transcripts.js", async importOriginal => ({ ...await importOriginal<o
 // What each Claude transcript's tail says its ended turn still awaits.
 const awaited: Record<string, number | undefined> = {};
 const stalledReads = new Set<string>();
-vi.mock("./schedule-watch.js", async importOriginal => ({ ...await importOriginal<object>(),
-  readFinalTurn: async (_source: string, session: string) => stalledReads.has(session) ? new Promise<never>(() => {})
-    : ({ completed: true, ...(awaited[session] ? { awaited: awaited[session] } : {}) }) }));
+vi.mock("./schedule-watch.js", async importOriginal => {
+  const actual = await importOriginal<typeof import("./schedule-watch.js")>();
+  return { ...actual, readFinalTurn: async (source: string, session: string) => source === "opencode" ? actual.readFinalTurn(source, session)
+    : stalledReads.has(session) ? new Promise<never>(() => {}) : ({ completed: true, ...(awaited[session] ? { awaited: awaited[session] } : {}) }) };
+});
 
 const { effectiveStatusRows, workspacesReader, OVERVIEW_ENRICH_BUDGET_MS } = await import("./server-routes.js");
 const { noteTurn } = await import("./turn-records.js");
@@ -240,6 +243,48 @@ describe("session rows on a computer with background work and dispatched workers
     expect(tabOf(await read(snapshot), "w1P:p2", snapshot).lastReply).toBe("Tests pass. Merge it?");
     await turn("w1P:p2", String(pane.terminal_id), [["UserPromptSubmit"]]);
     expect(tabOf(await read(snapshot), "w1P:p2", snapshot)).not.toHaveProperty("lastReply");
+  });
+
+  it("shows the wait and reply from an ended OpenCode turn's transcript", async () => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;
+    pane.agent = "opencode";
+    const session = sessions["w1P:p2"], folder = path.join(root, ".runtime", "sessions");
+    vi.stubEnv("PHREN_PATH", root);
+    await mkdir(folder, { recursive: true });
+    const busyAt = "2026-11-26T12:00:01.000Z", idleAt = "2026-11-26T12:00:02.000Z";
+    const reply = "PR #940 is up. Waiting on CI for #940.";
+    await writeFile(path.join(folder, "opencode-status-41.json"), JSON.stringify({ status: "idle", session, at: idleAt, busyAt, idleAt }));
+    const message = { role: "assistant", content: [{ type: "text", text: reply }] };
+    const row = { seq: 1, time: idleAt, type: "assistant/message", data: { message, stop_reason: "end_turn" } };
+    await writeFile(path.join(folder, `opencode-${session}.events.jsonl`), JSON.stringify(row) + "\n");
+    const restore = setTerminalProvider({ ...terminalProvider(), processes: async () => ({ foregroundPids: [41] }) });
+    try {
+      expect(tabOf(await read(snapshot), "w1P:p2", snapshot)).toMatchObject({ waiting: "ci", lastReply: reply });
+    } finally { restore(); }
+  });
+
+  it("keeps an owner question in the reply and suppresses its CI wait", async () => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;
+    const reply = "Waiting on CI for #940. Should I merge it?";
+    await turn("w1P:p2", String(pane.terminal_id), [["UserPromptSubmit"], ["Stop", { reply }]]);
+    const tab = tabOf(await read(snapshot), "w1P:p2", snapshot);
+    expect(tab.lastReply).toBe(reply);
+    expect(tab).not.toHaveProperty("waiting");
+  });
+
+  it("keeps the reply when a working tab's ended turn has background work", async () => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;
+    pane.agent_status = "working";
+    objects(snapshot.tabs).find(tab => tab.tab_id === pane.tab_id)!.agent_status = "working";
+    const reply = "The review shell is running.";
+    await turn("w1P:p2", String(pane.terminal_id), [["UserPromptSubmit"], ["Stop", { reply, background: 1 }]]);
+    awaited[sessions["w1P:p2"]] = 1;
+    try {
+      expect(tabOf(await read(snapshot), "w1P:p2", snapshot)).toMatchObject({ agentStatus: "working", backgroundTasks: 1, waiting: "background", lastReply: reply });
+    } finally { delete awaited[sessions["w1P:p2"]]; }
   });
 
   it("carries each finished turn's final assistant entry in stream order, and none while a turn runs", async () => {

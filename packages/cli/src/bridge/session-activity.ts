@@ -239,17 +239,12 @@ export function turnCompletion(record: TurnRecord | undefined): TurnCompletion |
 export const REPLY_EXCERPT_CHARS = 240;
 
 /**
- * The ended turn's last reply as one short line for a session row
- * (`lastReply`): what the agent said before it stopped, so a waiting row can
- * say what it waits for. Markdown emphasis, headings and code fences are
- * dropped and whitespace collapsed. Undefined while a turn runs (its prompt
- * is newer than the Stop) or when the Stop carried no reply.
+ * The ended turn's reply as one short line for `lastReply`, with Markdown
+ * emphasis, headings and code fences dropped and whitespace collapsed.
  */
-export function replyExcerpt(record: TurnRecord | undefined): string | undefined {
-  if (!record) return undefined;
-  const phase = turnPhase(record);
-  if (phase.phase !== "ended" || !phase.reply) return undefined;
-  const line = phase.reply
+export function replyExcerpt(reply: string | undefined): string | undefined {
+  if (!reply) return undefined;
+  const line = reply
     .replace(/```[\s\S]*?(```|$)/g, " ")
     .replace(/(^|\n)\s*(#{1,6}|>|[-*+]|\d+\.)\s+/g, "$1")
     .replace(/(\*\*|__|\*|`)/g, "")

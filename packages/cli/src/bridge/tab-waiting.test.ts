@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { tabWaiting } from "./tab-waiting.js";
-import type { TurnRecord } from "./turn-records.js";
+import type { TurnPhase } from "./turn-records.js";
 
 const at = "2026-11-26T22:00:00.000Z";
-const ended = (reply?: string): TurnRecord => ({
-  terminal: "term-1", source: "claude", session: "00000003-1111-4111-8111-111111111111", seq: 2, at,
-  prompt: { seq: 1, at }, stop: { seq: 2, at, ...(reply ? { reply } : {}) },
-});
+const ended = (reply: string): TurnPhase => ({ phase: "ended", at, reply });
 
 describe("tabWaiting", () => {
   it("names what an ended turn waits on, CI or a queue before its background work", () => {
@@ -18,8 +15,7 @@ describe("tabWaiting", () => {
   });
 
   it("is absent while a turn runs, while the owner is needed, and when nothing is waited on", () => {
-    const running: TurnRecord = { ...ended(), prompt: { seq: 3, at } };
-    expect(tabWaiting(running, { agentStatus: "working", backgroundTasks: 1 })).toBeUndefined();
+    expect(tabWaiting({ phase: "working", since: at }, { agentStatus: "working", backgroundTasks: 1 })).toBeUndefined();
     expect(tabWaiting(ended("Waiting on CI."), { agentStatus: "blocked", backgroundTasks: 1 })).toBeUndefined();
     expect(tabWaiting(ended("Waiting on CI."), { agentStatus: "waiting" })).toBeUndefined();
     expect(tabWaiting(ended("Done. Merge it?"), { agentStatus: "idle" })).toBeUndefined();

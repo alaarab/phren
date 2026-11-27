@@ -29,23 +29,23 @@ export const ownerInboxSchema = z.object({
   action: z.enum(["add", "list", "resolve"]).default("list"),
   title: title.optional(), project: z.string().max(200).optional(),
   id: z.string().uuid().optional(), resolution: z.string().max(2000).optional(),
+  ifUpdatedAt: z.string().datetime().optional(),
   includeResolved: z.boolean().optional(), computer: computerName.optional(),
   command: command.optional(), task: taskRef.optional(), pr: prRef.optional(), key: dedupeKey.optional(),
 }).strict();
 export interface InboxSource { source: string; kind: "needs-you" | "blocked"; title: string; project?: string; computer?: string; target?: z.infer<typeof inboxTargetSchema>; dispatch?: string; actionId?: string; task?: string }
 export interface InboxSnapshot { sources: InboxSource[]; unavailableDispatches?: string[] }
 
-/** The paste the owner runs: the command, then the resolve that closes the
- * item. A one-line command chains with `&&`; a multi-line one ends with the
- * resolve on its own line so the whole paste stays one runnable block. */
-export function pasteCommand(item: { id: string; command: string }, inboxComputer?: string): string {
-  const resolve = `phren owner-inbox resolve ${item.id} --resolution done${inboxComputer && inboxComputer !== "local" ? ` --computer ${inboxComputer}` : ""}`;
-  return item.command.includes("\n") ? `${item.command}\n${resolve}` : `${item.command} && ${resolve}`;
+/** Use a separate shell for multiline commands so `&&` cannot suppress their errexit. */
+export function pasteCommand(item: { id: string; command: string; updatedAt: string }, inboxComputer?: string): string {
+  const resolve = `phren owner-inbox resolve ${item.id} --resolution done --if-updated-at ${item.updatedAt}${inboxComputer && inboxComputer !== "local" ? ` --computer ${inboxComputer}` : ""}`;
+  const run = item.command.includes("\n") ? `sh -ec '${item.command.replaceAll("'", "'\\''")}'` : item.command;
+  return `${run} && ${resolve}`;
 }
 
 /** `paste` is computed on the way out, never stored. */
 const withPaste = (item: InboxItem): Json => item.command
-  ? { ...item, paste: pasteCommand({ id: item.id, command: item.command }) }
+  ? { ...item, paste: pasteCommand({ id: item.id, command: item.command, updatedAt: item.updatedAt }) }
   : item;
 
 // Prompt prose, counters and timestamps are observations, not identities.
@@ -85,7 +85,9 @@ export class OwnerInbox {
         release = tryFileLock(this.file);
       }
       try {
-        const rows = await this.read(), at = new Date().toISOString();
+        const rows = await this.read(), now = Date.now(), at = new Date(now).toISOString();
+        // Edits in the same millisecond still need distinct paste revisions.
+        const nextUpdate = (row: InboxItem) => new Date(Math.max(now, Date.parse(row.updatedAt) + 1)).toISOString();
         let changed = false;
         // Manual adds/resolves must work even when source discovery is offline.
         if (data.action === "list") {
@@ -132,7 +134,7 @@ export class OwnerInbox {
               for (const [id, resolution] of resolutions ?? []) {
                 const row = rows.find(candidate => candidate.id === id);
                 if (row?.kind === "manual" && row.state === "open") {
-                  row.state = "resolved"; row.resolvedAt = at; row.updatedAt = at; row.resolution = resolution; changed = true;
+                  row.state = "resolved"; row.resolvedAt = at; row.updatedAt = nextUpdate(row); row.resolution = resolution; changed = true;
                 }
               }
             }
@@ -148,28 +150,27 @@ export class OwnerInbox {
           const differs = (row: InboxItem) => row.title !== next.title || row.project !== next.project || row.command !== next.command
             || row.task !== next.task || row.pr !== next.pr || row.key !== next.key;
           const apply = (row: InboxItem): void => {
-            row.title = next.title; row.updatedAt = at;
+            row.title = next.title; row.updatedAt = nextUpdate(row);
             for (const name of ["project", "command", "task", "pr", "key"] as const) {
               if (next[name] === undefined) delete row[name]; else row[name] = next[name];
             }
           };
-          // An explicit key, or the default `pr:` one, upserts the open item carrying it.
+          // The normalized PR and key each identify an open item, including the implicit `pr:` key.
           const effective = next.key ?? (next.pr ? `pr:${next.pr}` : undefined);
           const prior = data.id ? rows.find(row => row.id === data.id) : undefined;
           if (prior && prior.kind !== "manual") throw new BridgeError(409, "This inbox id names another item.");
-          if (prior && prior.state === "resolved") {
-            // An identical retry is idempotent; changed fields reopen the item,
-            // so a daily alert can reuse a weekly id with new text.
-            if (differs(prior)) {
-              apply(prior); prior.state = "open"; delete prior.resolvedAt; delete prior.resolution;
-              await atomicInPrivateDir(this.file, rows);
-              return { ok: true, item: withPaste(prior), reopened: true };
-            }
-            return { ok: true, item: withPaste(prior) };
+          if (prior?.state === "resolved" && !differs(prior)) return { ok: true, item: withPaste(prior) };
+          const matches = rows.filter(row => row.kind === "manual" && row.state === "open" && (
+            (next.pr && row.pr === next.pr) || (effective && (row.key ?? (row.pr ? `pr:${row.pr}` : undefined)) === effective)));
+          if (matches.length > 1 || (prior && matches.length && matches[0] !== prior)) {
+            throw new BridgeError(409, "These inbox identifiers name different items.");
           }
-          const keyed = effective ? rows.find(row => row.kind === "manual" && row.state === "open"
-            && (row.key ?? (row.pr ? `pr:${row.pr}` : undefined)) === effective) : undefined;
-          const target = prior ?? keyed;
+          if (prior && prior.state === "resolved") {
+            apply(prior); prior.state = "open"; delete prior.resolvedAt; delete prior.resolution;
+            await atomicInPrivateDir(this.file, rows);
+            return { ok: true, item: withPaste(prior), reopened: true };
+          }
+          const target = prior ?? matches[0];
           if (target) {
             if (differs(target)) {
               apply(target);
@@ -187,7 +188,8 @@ export class OwnerInbox {
         if (data.action === "resolve") {
           const item = rows.find(row => row.id === data.id);
           if (!item) throw new BridgeError(404, "No owner inbox item with that id.");
-          if (item.state !== "resolved") { item.state = "resolved"; item.resolvedAt = at; item.updatedAt = at; item.resolution = data.resolution; changed = true; }
+          if (data.ifUpdatedAt !== undefined && item.updatedAt !== data.ifUpdatedAt) throw new BridgeError(409, "This inbox item changed. Refresh it and try again.");
+          if (item.state !== "resolved") { item.state = "resolved"; item.resolvedAt = at; item.updatedAt = nextUpdate(item); item.resolution = data.resolution; changed = true; }
           if (changed) await atomicInPrivateDir(this.file, rows);
           return { ok: true, item };
         }

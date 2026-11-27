@@ -317,7 +317,7 @@ export async function closeFinishedWorker(input: unknown, queue?: HandOffQueue):
   const current = await validateTarget(data.target, false, true);
   if (current.terminal_id !== pane.terminal_id || !["idle", "done"].includes(String(current.agent_status))) throw new BridgeError(409, "The worker resumed before it could close.");
   const record = await paneTurn(data.target.server, current, data.target.source);
-  if (record?.prompt && (!record.stop || record.stop.seq <= record.prompt.seq || record.terminal !== current.terminal_id
+  if ((seen.stopSeq !== undefined || record?.prompt) && (!record?.stop || (record.prompt && record.stop.seq <= record.prompt.seq) || record.terminal !== current.terminal_id
     || record.session !== data.target.session || workerTurnKey({ endedAt: record.stop.at, stopSeq: record.stop.seq }) !== data.turn)) return { ok: true, closed: false };
   await closeBoundPane(data.target, pane);
   // Clean up files only for the dispatch durably bound to this exact pane and
@@ -332,21 +332,15 @@ export async function closeFinishedWorker(input: unknown, queue?: HandOffQueue):
   return { ok: true, closed: true };
 }
 
-/** What one fresh read of the pane that called close-self settles on, shared by
- * both of its paths so their ideas of "this turn ended with nothing running"
- * cannot drift apart: the record still names the same conversation and the
- * same submitted prompt (`cancel` when it does not — the pane took new work),
- * a Stop landed after that prompt (so the report the agent wrote after the
- * reply is complete), and the pane's own observation is a finished one with no
- * background work, no error and no unreadable checkout. `ended` names the turn
- * that stopped; a caller whose call had no record to pin passes none, and the
- * observation alone settles it. */
-function settledForClose(own: TurnRecord | undefined, turn: TurnRecord | undefined, seen: WorkerObservation):
-  "cancel" | { ended?: { endedAt: string; stopSeq: number } } | undefined {
-  if (turn?.prompt?.seq !== own?.prompt?.seq || turn?.session !== own?.session) return "cancel";
-  const ended = turn?.stop && (!turn.prompt || turn.stop.seq > turn.prompt.seq) ? { endedAt: turn.stop.at, stopSeq: turn.stop.seq } : undefined;
+/** A close-self settles only on a finished observation of the anchored prompt. */
+function settledForClose(own: TurnRecord, turn: TurnRecord | undefined, seen: WorkerObservation):
+  "cancel" | { endedAt: string; stopSeq: number } | undefined {
+  if (!own.prompt || !turn?.prompt || turn.terminal !== own.terminal || turn.source !== own.source || turn.session !== own.session
+    || turn.prompt.at !== own.prompt.at || (own.source !== "opencode" && turn.prompt.seq !== own.prompt.seq)) return "cancel";
+  // OpenCode's synthetic prompt sequence changes at idle; its busy timestamp stays put.
+  if (!turn.stop || turn.stop.seq <= turn.prompt.seq || seen.session !== turn.session || seen.endedAt !== turn.stop.at || seen.stopSeq !== turn.stop.seq) return undefined;
   if ((seen.state !== "done" && seen.state !== "idle") || !seen.completed || seen.background || seen.error || seen.unchecked) return undefined;
-  return { ...(ended ? { ended } : {}) };
+  return { endedAt: turn.stop.at, stopSeq: turn.stop.seq };
 }
 
 /** Injectable timing for the close-self tests: how often a deferred close
@@ -364,7 +358,7 @@ export interface CloseSelfTiming { recheckMs?: number; deadlineMs?: number }
  * pane also waits for this turn's recorded return; either path stops the
  * moment the pane is gone, replaced, or has taken new work, and leaves the pane
  * open past its bound rather than force the close. */
-export async function closeOwnPane(input: unknown, timing: number | CloseSelfTiming = {}): Promise<Json> {
+export async function closeOwnPane(input: unknown, timing: number | CloseSelfTiming = {}, queue?: HandOffQueue): Promise<Json> {
   const { recheckMs, deadlineMs } = typeof timing === "number" ? { recheckMs: timing } : timing;
   const data = z.object({ origin: originPaneSchema, dispatch: briefId.optional() }).strict().parse(input);
   const { snapshot, findPane } = await import("./herdr.js");
@@ -372,82 +366,57 @@ export async function closeOwnPane(input: unknown, timing: number | CloseSelfTim
   if (!pane) return { ok: true, closed: false, reason: "The pane is already gone." };
   const source = provider.safeParse(pane.agent);
   const record = source.success ? await paneTurn(data.origin.server, pane, source.data) : undefined;
-  const session = await paneIdentity(data.origin.server, pane);
-  const own = record && record.terminal === pane.terminal_id && (!session || record.session === session) ? record : undefined;
+  const session = await paneIdentity(data.origin.server, pane, true).catch(() => undefined);
+  const own = record && record.source === pane.agent && record.terminal === pane.terminal_id && (!session || record.session === session) ? record : undefined;
   const parsed = targetSchema.safeParse({ ...data.origin, source: pane.agent, session: session ?? own?.session });
-  // Both non-dispatch replies say the same thing: the pane closes later, once
-  // the turn that called has ended with nothing running.
-  const deferred = { ok: true, closed: false, pending: true, pane: data.origin.pane,
-    reason: "Close pending: write your final report now and end this turn; the pane closes once the turn has ended and no background tasks or child agents are running (rechecks for up to 10 minutes, then it stays open)." };
-  if (parsed.success) {
-    const target = parsed.data;
-    const terminal = pane.terminal_id;
-    const dispatch = data.dispatch ?? own?.dispatch ?? (await dispatchStatus()).find(value => value.target && paneRunsTarget(value.target, pane, { sessionId: target.session })
-      && value.target.server === target.server && value.target.workspace === target.workspace && value.target.tab === target.tab && value.target.pane === target.pane)?.id;
-    if (dispatch && z.string().uuid().safeParse(dispatch).success) {
-      // Retry for ten minutes, but never close without this turn's recorded return.
-      const deadline = Date.now() + (deadlineMs ?? 600_000);
-      const timer = setTimeout(() => { void (async () => {
-        if (!findPane(await snapshot(target.server), target)) return;
-        const current = await validateTarget(target, false, true);
-        if (current.terminal_id !== terminal) return;
-        const settled = settledForClose(own, await paneTurn(target.server, current, target.source),
-          (await workerStates({ targets: [target] })).workers[0]);
-        if (settled && settled !== "cancel" && settled.ended) {
-          const ended = workerTurnKey(settled.ended);
-          const returned = (await dispatchReceipt(dispatch))?.returned;
-          if (returned?.state === "done" && returned.turn === ended) {
-            // A refused close (unfinished work, a resumed pane) is retried
-            // until the bound instead of abandoning the pane mid-work.
-            if ((await closeFinishedWorker({ target, dispatch, turn: ended })).closed !== true && Date.now() < deadline) timer.refresh();
-            return;
-          }
-        }
-        if (settled !== "cancel" && Date.now() < deadline) timer.refresh();
-      })().catch(() => undefined); }, recheckMs ?? 15_000);
-      timer.unref();
-      return { ok: true, closed: false, pending: true, dispatch, pane: target.pane,
-        reason: "Close pending on this turn's recorded return; finish this turn. Rechecks every 15 seconds for up to 10 minutes, then leaves the pane open if no return is recorded." };
-    }
-    // A lead or an owner-launched session has no dispatcher to record its
-    // return or close its pane: wait here for this turn to end with nothing
-    // running, then close the pane ourselves.
-    const deadline = Date.now() + (deadlineMs ?? 600_000);
+  const unanchored = { ok: true, closed: false, reason: "Pane left open: the conversation and its current prompt could not be verified." };
+  if (!parsed.success) return unanchored;
+  const target = parsed.data;
+  const terminal = pane.terminal_id;
+  const dispatch = data.dispatch ?? own?.dispatch ?? (await dispatchStatus()).find(value => value.target && paneRunsTarget(value.target, pane, { sessionId: target.session })
+    && value.target.server === target.server && value.target.workspace === target.workspace && value.target.tab === target.tab && value.target.pane === target.pane)?.id;
+  const deadline = Date.now() + (deadlineMs ?? 600_000);
+  if (dispatch && z.string().uuid().safeParse(dispatch).success) {
+    if (!own?.prompt) return { ok: true, closed: false, pending: true, dispatch, pane: target.pane,
+      reason: "The conductor can close this pane after reading its done return. The Hook has no recorded prompt to recheck locally." };
+    // Retry for ten minutes, but never close without this turn's recorded return.
     const timer = setTimeout(() => { void (async () => {
-      let current: Json;
-      try { current = await validateTarget(target, false, true); } catch { return; }
+      if (!findPane(await snapshot(target.server), target)) return;
+      const current = await validateTarget(target, false, true);
       if (current.terminal_id !== terminal) return;
-      const settled = settledForClose(own, own ? await paneTurn(target.server, current, target.source) : undefined,
+      const settled = settledForClose(own, await paneTurn(target.server, current, target.source),
         (await workerStates({ targets: [target] })).workers[0]);
-      if (settled !== undefined && settled !== "cancel" && (settled.ended || !own)
-        && ["idle", "done"].includes(String(current.agent_status))) {
-        await markPaneClosed(target.server, current);
-        await terminalProvider().closePane(target.server, target.pane).catch(() => undefined);
-        return;
+      if (settled && settled !== "cancel") {
+        const ended = workerTurnKey(settled);
+        const returned = (await dispatchReceipt(dispatch))?.returned;
+        if (returned?.state === "done" && returned.turn === ended) {
+          if ((await closeFinishedWorker({ target, dispatch, turn: ended }, queue)).closed !== true && Date.now() < deadline) timer.refresh();
+          return;
+        }
       }
       if (settled !== "cancel" && Date.now() < deadline) timer.refresh();
-    })().catch(() => undefined); }, recheckMs ?? 10_000);
+    })().catch(() => undefined); }, recheckMs ?? 15_000);
     timer.unref();
-    return deferred;
+    return { ok: true, closed: false, pending: true, dispatch, pane: target.pane,
+      reason: "Close pending on this turn's recorded return; finish this turn. Rechecks every 15 seconds for up to 10 minutes, then leaves the pane open if no return is recorded." };
   }
-  // No conversation identity and no recorded turn to check a close against:
-  // the probe can fail while the pane is busy, so keep asking until it answers
-  // and the pane reads finished, or the bound passes. Never close a pane blind.
-  const terminal = pane.terminal_id;
-  const deadline = Date.now() + (deadlineMs ?? 600_000);
+  if (!own?.prompt) return unanchored;
+  // A lead has no dispatcher to close its pane, so recheck under the same queue guard here.
   const timer = setTimeout(() => { void (async () => {
-    const current = findPane(await snapshot(data.origin.server), data.origin);
-    if (!current || current.terminal_id !== terminal) return;
-    const sessionNow = await paneIdentity(data.origin.server, current).catch(() => undefined);
-    const targetNow = sessionNow === undefined ? undefined : targetSchema.safeParse({ ...data.origin, source: current.agent, session: sessionNow });
-    if (targetNow?.success && ["idle", "done"].includes(String(current.agent_status))
-      && settledForClose(undefined, undefined, (await workerStates({ targets: [targetNow.data] })).workers[0])) {
-      await markPaneClosed(data.origin.server, current);
-      await terminalProvider().closePane(data.origin.server, data.origin.pane).catch(() => undefined);
-      return;
-    }
-    if (Date.now() < deadline) timer.refresh();
+    const seen = (await workerStates({ targets: [target] })).workers[0];
+    const close = async () => {
+      const current = await validateTarget(target, false, true).catch(() => undefined);
+      if (!current || current.terminal_id !== terminal) return { closed: false, cancelled: true };
+      const settled = settledForClose(own, await paneTurn(target.server, current, target.source), seen);
+      if (settled === "cancel") return { closed: false, cancelled: true };
+      if (!settled || !["idle", "done"].includes(String(current.agent_status))) return { closed: false };
+      await closeBoundPane(target, current);
+      return { closed: true };
+    };
+    const result = await (queue ? queue.whenNoPending(target, close) : close());
+    if (!result.closed && !result.cancelled && Date.now() < deadline) timer.refresh();
   })().catch(() => undefined); }, recheckMs ?? 10_000);
   timer.unref();
-  return deferred;
+  return { ok: true, closed: false, pending: true, pane: target.pane,
+    reason: "Close pending. Write your final report and end this turn. The Hook rechecks for up to 10 minutes and closes once the turn, background work and queued hand-offs have cleared." };
 }

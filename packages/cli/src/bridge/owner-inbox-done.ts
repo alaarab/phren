@@ -21,13 +21,14 @@ let taskDocs: { at: number; docs: TaskDoc[] } | undefined;
 /** Positive evidence only: every task with this stable id sits in the Done
  * section of a store project. A missing task, an unreadable store or a task
  * still Active or Queue says nothing. */
-async function taskDone(bid: string): Promise<boolean> {
+async function taskDone(bid: string, after: number): Promise<boolean> {
   const stableId = bid.replace(/^bid:/, "");
   if (!/^[a-f0-9]{8}$/.test(stableId)) return false;
-  if (!taskDocs || Date.now() - taskDocs.at >= TASK_TTL_MS) {
+  const now = Date.now();
+  if (!taskDocs || now - taskDocs.at >= TASK_TTL_MS || taskDocs.at <= after) {
     let docs: TaskDoc[] = [];
     try { docs = readTasksAcrossProjects(phrenStoreRoot()); } catch { docs = []; }
-    taskDocs = { at: Date.now(), docs };
+    taskDocs = { at: now, docs };
   }
   let done = false, open = false;
   for (const doc of taskDocs.docs) for (const item of [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done]) {
@@ -39,18 +40,20 @@ async function taskDone(bid: string): Promise<boolean> {
 
 /** Item id → resolution for the open manual items whose action happened. */
 export async function ownerInboxDone(items: InboxItem[], readers: DoneReaders = {}): Promise<Map<string, string>> {
-  const pull: (url: string) => Promise<ForgeItem | undefined> = readers.pull ?? cachedPull;
-  const task: (bid: string) => Promise<boolean | undefined> = readers.task ?? taskDone;
+  const pull = readers.pull ?? cachedPull;
+  const task = readers.task ?? taskDone;
   const resolutions = new Map<string, string>();
   const open = items.filter(item => item.kind === "manual" && item.state === "open");
   await Promise.all(open.map(async item => {
+    const after = Date.parse(item.updatedAt);
     if (item.pr) {
-      const value = await pull(item.pr).catch(() => undefined);
-      if (value?.state === "merged") resolutions.set(item.id, "done: PR merged");
-      else if (value?.state === "closed") resolutions.set(item.id, "done: PR closed without merging");
-    } else if (item.task) {
-      if (await task(item.task).catch(() => false)) resolutions.set(item.id, `done: task ${item.task} is Done`);
+      const value = await pull(item.pr, after).catch(() => undefined);
+      if (value?.state === "merged" || value?.state === "closed") {
+        resolutions.set(item.id, value.state === "merged" ? "done: PR merged" : "done: PR closed without merging");
+        return;
+      }
     }
+    if (item.task && await task(item.task, after).catch(() => false)) resolutions.set(item.id, `done: task ${item.task} is Done`);
   }));
   return resolutions;
 }

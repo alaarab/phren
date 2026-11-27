@@ -13,12 +13,14 @@ import { dispatchStatus, type Receipt } from "./dispatch.js";
 import { noteTurn, turnPath } from "./turn-records.js";
 import { recordBriefArrival } from "./launch-brief.js";
 import { handOff } from "./hand-off.js";
+import { HandOffQueue } from "./hand-off-queue.js";
+import { readFinalTurn } from "./schedule-watch.js";
 import { recentUncommitted } from "./worker-unfinished.js";
 import { dispatchClonePaths } from "./dispatch-clone.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
 
 vi.mock("./herdr.js", async original => ({ ...await original<object>(), snapshot: vi.fn(), sharedSnapshot: vi.fn(), paneIdentity: vi.fn(), validateTarget: vi.fn() }));
-vi.mock("./schedule-watch.js", async original => ({ ...await original<object>(), readFinalTurn: async () => ({ completed: true, lastAssistant: "Checks passed" }) }));
+vi.mock("./schedule-watch.js", async original => ({ ...await original<object>(), readFinalTurn: vi.fn() }));
 vi.mock("./hand-off.js", async original => ({ ...await original<object>(), handOff: vi.fn() }));
 vi.mock("./worker-unfinished.js", async original => ({ ...await original<object>(), recentUncommitted: vi.fn() }));
 const target: Target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "11111111-1111-4111-8111-111111111111" };
@@ -37,7 +39,8 @@ beforeEach(async () => {
   pane = { pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab, terminal_id: "term1", agent: "claude", agent_status: "idle" }; panes = [pane];
   vi.mocked(snapshot).mockImplementation(async () => ({ panes })); vi.mocked(sharedSnapshot).mockImplementation(async () => ({ panes }));
   vi.mocked(paneIdentity).mockResolvedValue(target.session); vi.mocked(validateTarget).mockImplementation(async () => ({ ...pane }));
-  closePane.mockReset().mockImplementation(async () => { panes = []; }); restore = setTerminalProvider({ closePane, processes: async () => ({ foregroundPids: [] }) } as unknown as TerminalProvider);
+  closePane.mockReset().mockImplementation(async () => { panes = []; }); restore = setTerminalProvider({ closePane, processes: async () => ({ foregroundPids: pane.agent === "opencode" ? [41] : [] }) } as unknown as TerminalProvider);
+  vi.mocked(readFinalTurn).mockReset().mockResolvedValue({ completed: true, lastAssistant: "Checks passed" });
   vi.mocked(handOff).mockReset().mockResolvedValue({ ok: true, delivered: false, queued: true, target });
   vi.mocked(recentUncommitted).mockReset().mockResolvedValue(0);
   await event("UserPromptSubmit"); await event("Stop");
@@ -143,14 +146,81 @@ describe("an agent closing its own pane", () => {
     // The close was cancelled, not kept waiting: exactly one recheck ran.
     expect(validateTarget).toHaveBeenCalledTimes(1);
   });
-  it("closes a pane with no turn record only once it reads idle on a recheck", async () => {
+  it.each(["a new conversation discovered later", "a known conversation without a prompt record"])("leaves the pane open with %s", async reason => {
     vi.useFakeTimers();
     await rm(turnPath(target.server, target.pane));
     pane.agent_status = "working";
-    expect(await closeOwnPane({ origin }, 20)).toMatchObject({ closed: false, pending: true, pane: target.pane });
+    const replacement = reason === "a new conversation discovered later";
+    let session = replacement ? undefined : target.session;
+    vi.mocked(paneIdentity).mockImplementation(async () => session);
+    const result = await closeOwnPane({ origin }, 20);
+    if (replacement) session = "33333333-3333-4333-8333-333333333333";
+    pane.agent_status = "idle";
     await vi.advanceTimersByTimeAsync(20); await sleep(50);
     expect(closePane).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, closed: false });
+    expect(result).not.toHaveProperty("pending");
+  });
+  it.each(["new prompt", "resumed terminal"])("keeps a lead's pane open when evidence gathering overlaps a %s", async change => {
+    vi.useFakeTimers();
+    await rm(turnPath(target.server, target.pane));
+    await leadEvent("UserPromptSubmit"); pane.agent_status = "working";
+    expect(await closeOwnPane({ origin }, 20)).toMatchObject({ pending: true });
+    await leadEvent("Stop"); pane.agent_status = "idle";
+    vi.mocked(readFinalTurn).mockImplementationOnce(async () => {
+      if (change === "new prompt") await leadEvent("UserPromptSubmit");
+      else pane.agent_status = "working";
+      return { completed: true, lastAssistant: "Checks passed" };
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(readFinalTurn).toHaveBeenCalled());
+    await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+  });
+  it.each(["lead", "dispatch"])("keeps a %s pane open for a queued hand-off", async kind => {
+    vi.useFakeTimers();
+    const dispatched = kind === "dispatch";
+    if (!dispatched) await rm(turnPath(target.server, target.pane));
+    const turn = dispatched ? event : leadEvent;
+    await turn("UserPromptSubmit"); pane.agent_status = "working";
+    const queue = new HandOffQueue({ validate: async () => ({ ...pane }), send: async () => ({ delivered: true }) });
+    const deliveryId = "handoff-close-self";
+    expect(await queue.enqueue({ target, deliveryId, text: "Review the follow-up" })).toMatchObject({ queued: true });
+    expect(await closeOwnPane({ origin }, 20, queue)).toMatchObject({ pending: true });
+    await turn("Stop"); pane.agent_status = "idle";
+    if (dispatched) {
+      const value = receipt();
+      observe(value, (await workerStates({ targets: [target] })).workers[0], Date.now());
+      expect(value.returned?.state).toBe("done");
+      await save(value);
+    }
+    vi.mocked(readFinalTurn).mockClear();
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(readFinalTurn).toHaveBeenCalled());
+    await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    await queue.withdraw(deliveryId, target, "Follow-up withdrawn");
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(closePane).toHaveBeenCalledExactlyOnceWith(target.server, target.pane));
+  });
+  it("closes OpenCode after its second turn with the same busy timestamp", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("PHREN_PATH", root);
+    const opencode = { ...target, source: "opencode", session: "ses_closeSelf" };
+    pane.agent = opencode.source;
+    vi.mocked(paneIdentity).mockResolvedValue(opencode.session);
+    const folder = path.join(root, ".runtime", "sessions");
+    await mkdir(folder, { recursive: true });
+    const stamp = (busyAt: string, idleAt: string) => writeFile(path.join(folder, "opencode-status-41.json"),
+      JSON.stringify({ status: pane.agent_status, session: opencode.session, at: busyAt > idleAt ? busyAt : idleAt, busyAt, idleAt }));
+    const firstIdle = "2026-11-26T12:00:02.000Z", secondBusy = "2026-11-26T12:00:03.000Z";
+    await stamp("2026-11-26T12:00:01.000Z", firstIdle);
+    expect((await workerStates({ targets: [opencode] })).workers[0]).toMatchObject({ completed: true, stopSeq: 2 });
+    pane.agent_status = "working";
+    await stamp(secondBusy, firstIdle);
+    expect(await closeOwnPane({ origin }, 20)).toMatchObject({ pending: true });
     pane.agent_status = "idle";
+    await stamp(secondBusy, "2026-11-26T12:00:04.000Z");
     await vi.advanceTimersByTimeAsync(20);
     await vi.waitFor(() => expect(closePane).toHaveBeenCalledExactlyOnceWith(target.server, target.pane));
   });
@@ -236,10 +306,12 @@ describe("finished worker lifecycle", () => {
     expect((await workerStates({ targets: [target] })).workers[0].state).toBe("closed");
     const value = receipt(); observe(value, { state: "closed" }, Date.now()); expect(value.returned).toBeUndefined();
   });
-  it("keeps a worker open if another completed turn appears during the final binding check", async () => {
+  it.each(["a newer completed turn", "a missing record"])("keeps a worker open when the final binding check finds %s", async change => {
     const value = receipt(); observe(value, (await workerStates({ targets: [target] })).workers[0], Date.now()); await save(value);
     vi.mocked(validateTarget).mockResolvedValueOnce({ ...pane }).mockImplementationOnce(async () => {
-      await event("UserPromptSubmit"); await event("Stop"); return { ...pane };
+      if (change === "a missing record") await rm(turnPath(target.server, target.pane));
+      else { await event("UserPromptSubmit"); await event("Stop"); }
+      return { ...pane };
     });
     const returns = new DispatchReturns({ peers: async () => [], close: current => closeFinishedWorker({ target, dispatch, turn: current.closePending!.turn }) });
     await returns.take(); expect(closePane).not.toHaveBeenCalled();

@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchStatus, updateReceipt, type Receipt } from "./dispatch.js";
-import { BACKGROUND_WAIT_MS, LAUNCH_GRACE_MS, DispatchReturns, hookWorkers, NOTICE_MS, noticeLine, observe, POLL_MS, REPLY_LIMIT, returnRow, workerStates, type WorkerReaders } from "./dispatch-returns.js";
+import { BACKGROUND_WAIT_MS, LAUNCH_GRACE_MS, DispatchReturns, hookWorkers, NOTICE_MS, noticeLine, observe, POLL_MS, REPLY_LIMIT, returnRow, WATCH_MS, workerStates, type WorkerReaders } from "./dispatch-returns.js";
+import { waitForDispatch } from "./dispatch-wait.js";
 import { repointDispatchOrigins } from "./dispatch.js";
 import { findPane } from "./herdr.js";
 import { LOST_TURN } from "./codex-servers.js";
@@ -404,6 +405,36 @@ describe("the dispatching Hook's returns loop", () => {
     const [saved] = await dispatchStatus();
     expect(saved.returned).toMatchObject({ state: "done", waited: 5 });
     expect(deliver).toHaveBeenCalledWith(expect.anything(), `Return: Devbox parser checks done (after 5 background tasks finished), Gate passed. (dispatch ${placed.id}). Call dispatch_returns.`, expect.any(String));
+  });
+
+  it("ends dispatch wait with watch expiry when a parked worker finishes at the cutoff", async () => {
+    const placed = await service().dispatch(brief, conductorPane);
+    const id = String(placed.id);
+    // dispatch wait sleeps at most 10 s, so the worker finishes just after the cutoff.
+    clock = Date.parse(String(placed.createdAt)) + WATCH_MS - 5_000;
+    remote = herdrSnapshot();
+    finalTurn = { completed: true, lastAssistant: "PR #12 is open. Now waiting on CI." };
+    const returns = loop();
+    await returns.poll();
+    const lines: Json[] = [];
+    const code = await waitForDispatch(id, {
+      now: () => clock, intervalMs: POLL_MS, jitter: false, timeoutMs: 2 * POLL_MS, out: line => lines.push(line),
+      sleep: async ms => {
+        clock += ms;
+        finalTurn = { completed: true, lastAssistant: "CI passed. Pushed." };
+        await returns.poll();
+      },
+      request: async (route, data) => {
+        if (route === `/v1/dispatch?id=${id}`) return { dispatches: await dispatchStatus() };
+        if (route === "/v1/dispatch/returns?peek=1") return { returns: await returns.take(false) };
+        if (route === "/v1/dispatch/workers") return workerStates(data, readers(() => remote, finalTurn));
+        throw new Error(`Unexpected route ${route}`);
+      },
+    });
+    expect(code).toBe(1);
+    expect(lines).toMatchObject([{ dispatch: id, state: "waiting", waitingOn: "ci" },
+      { dispatch: id, state: "failed", final: true, error: expect.stringContaining("24-hour dispatch watch expired") }]);
+    expect((await dispatchStatus())[0].returned).toMatchObject({ state: "waiting", read: false });
   });
 
   it("does not let an in-flight old-chat notice acknowledge the new conductor's return", async () => {

@@ -1,8 +1,16 @@
-import { BridgeError, type Json, objects } from "./protocol.js";
+import { BridgeError, type Json, object, objects } from "./protocol.js";
 import { peerRead } from "./peer-reads.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { ownerInboxSchema, pasteCommand, type OwnerInbox } from "./owner-inbox.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
+
+/** The paste must send the resolve to the Hook that owns this row. */
+function placed(item: Json, inboxComputer: string): Json {
+  const { id, command, updatedAt } = item;
+  return item.kind === "manual" && typeof id === "string" && typeof command === "string" && typeof updatedAt === "string"
+    ? { ...item, inboxComputer, paste: pasteCommand({ id, command, updatedAt }, inboxComputer) }
+    : { ...item, inboxComputer };
+}
 
 /** Aggregate each Hook's own inbox once, without recursively listing peers.
  * inboxComputer identifies the Hook to send a resolution to; computer on a
@@ -11,26 +19,31 @@ export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnl
   const data = ownerInboxSchema.parse(input);
   const { computer, ...local } = data;
   const peers = await hookPeers().catch(() => []);
+  const localList = `/v1/owner-inbox?local=1${data.includeResolved ? "&includeResolved=true" : ""}`;
   if (computer && computer !== "local" && !isLocalComputer(computer)) {
     const peer = peers.find(peer => peer.name === computer);
     if (!peer) throw new BridgeError(404, "That inbox computer is not linked.");
-    return peerRequest(peer, "/v1/owner-inbox", local);
+    if (local.action === "list") {
+      const view = await peerRead(peer, localList);
+      return { ...view, items: objects(view.items).map(item => placed(item, computer)), unreachable: [] };
+    }
+    if (local.command !== undefined || local.task !== undefined || local.pr !== undefined || local.key !== undefined || local.ifUpdatedAt !== undefined) {
+      const health = await peerRequest(peer, "/v1/health", undefined, 5_000);
+      if (object(health.capabilities).ownerInboxActions !== true) {
+        throw new BridgeError(409, `Upgrade the Hook on ${computer} to use inbox commands, task or PR links, keys or guarded resolves.`, { code: "owner-inbox-actions-unsupported" });
+      }
+    }
+    const result = await peerRequest(peer, "/v1/owner-inbox", local);
+    const item = object(result.item);
+    return { ...result, item: local.action === "add" ? placed(item, computer) : { ...item, inboxComputer: computer } };
   }
   const result = await inbox.run(local);
   if (data.action !== "list" || localOnly) return result;
-  // paste names the computer the resolution must reach, so it is recomputed
-  // here: a peer's own paste would name the wrong resolve target.
-  const placed = (item: Json, inboxComputer: string): Json => {
-    const { id, command } = item;
-    return item.kind === "manual" && typeof command === "string"
-      ? { ...item, inboxComputer, paste: pasteCommand({ id: String(id), command }, inboxComputer) }
-      : { ...item, inboxComputer };
-  };
   const items: Json[] = objects(result.items).map(item => placed(item, "local")), unreachable: Json[] = [];
   await Promise.all(peers.map(async peer => {
     try {
       // No kept answer: the owner resolves a row and reads the list straight back.
-      const view = await peerRead(peer, `/v1/owner-inbox?local=1${data.includeResolved ? "&includeResolved=true" : ""}`);
+      const view = await peerRead(peer, localList);
       items.push(...objects(view.items).map(item => placed(item, peer.name)));
     } catch (error) { unreachable.push({ computer: peer.name, error: error instanceof Error ? error.message : "Unreachable." }); }
   }));

@@ -61,7 +61,7 @@ import { PROJECT_GIT_ROUTE, projectGit, projectHostToken } from "./project-git.j
 import { availablePaneEvidence, childActivity, effectivePaneEvidence } from "./session-evidence.js";
 import { liveWork, markBackground, ownRecord, paneRecord, provisionalWork, recordTitle, replyExcerpt, resolveEffectiveStatus, turnCompletion } from "./session-activity.js";
 import { markSessionSeen, readSessionSeen } from "./session-seen.js";
-import { opencodeTurn, turnPhase, type TurnRecord } from "./turn-records.js";
+import { opencodeTurn, truncateUtf8, turnPhase, type TurnPhase, type TurnRecord } from "./turn-records.js";
 import { paneAccountField, paneChatState, panes, rpc, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
@@ -207,6 +207,7 @@ export const capabilities = { browsers: true, turnCheckpoints: true, transcript:
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
+  if (result.ownerInbox === true) result.ownerInboxActions = true;
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
   if (snapshot.has("hook")) result.approvalRules = { version: 2, effects: ["always-ask", "deny"], harnesses: ["claude"], events: ["PermissionRequest"], tools: ["Bash"], inputField: "command", conductorTools: false, mcpTools: false, preExecution: false };
   if (snapshot.has("schedules")) { result.scheduleProjects = true; result.scheduleUpdate = true; result.scheduleEvents = true; }
@@ -320,18 +321,18 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     // alongside the slower reads so a stuck transcript cannot hide children, but
     // inside the budget, so a stuck disk cannot hold the overview either.
     const recordEnrichment: Array<() => Promise<void>> = [];
-    /** Each tab's turn record, for `waiting` once the background counts are in. */
-    const turnRecords = new Map<Json, TurnRecord>();
+    const turnPhases = new Map<Json, TurnPhase>();
     const records = Promise.all(tabs.map(async ({ group, tab }) => {
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
       const pane = agents.length === 1 ? agents[0] : undefined;
       const session = pane ? object(tab.target).session : undefined;
       const record = typeof session === "string" && pane ? await paneTurnRecord(server, pane, session).catch(() => undefined) : undefined;
       if (expired) return;
-      if (record) turnRecords.set(tab, record);
+      const phase = record ? turnPhase(record) : undefined;
+      if (phase) turnPhases.set(tab, phase);
       if (pane && typeof session === "string") {
         const available = availablePaneEvidence(server, pane, session, record, agentHooks);
-        if (available.held || ["blocked", "waiting"].includes(String(available.paneStatus)) || (record && turnPhase(record).phase === "working")) {
+        if (available.held || ["blocked", "waiting"].includes(String(available.paneStatus)) || phase?.phase === "working") {
           const status = resolveEffectiveStatus(available);
           if (status) tab.agentStatus = status;
         }
@@ -344,8 +345,6 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       const title = await recordTitle(record, { paneLabel: tab.paneLabel, harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label });
       if (expired) return;
       tab.title = title;
-      const reply = tab.agentStatus === "working" ? undefined : replyExcerpt(record);
-      if (reply) tab.lastReply = reply;
       // Apply every row's small-file metadata before starting transcript reads.
       // A stalled lookup must not hide another row's completion or pane label.
       if (completion && record && pane) recordEnrichment.push(async () => {
@@ -361,12 +360,14 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         if (evidence) {
           Object.assign(tab, evidence.children);
           const resolved = resolveEffectiveStatus(evidence);
-          if (background && ["idle", "done"].includes(String(tab.agentStatus))) tab.backgroundTasks = background;
+          if (background && resolved === "working" && (phase?.phase === "ended" || ["idle", "done"].includes(String(tab.agentStatus)))) tab.backgroundTasks = background;
           if (resolved) tab.agentStatus = resolved;
+          if (phase?.phase === "ended" && !phase.reply && evidence.final?.lastAssistant) {
+            const { text, truncated } = truncateUtf8(evidence.final.lastAssistant);
+            turnPhases.set(tab, { ...phase, reply: text, truncated });
+          }
         }
         markBackground(tab, background);
-        // Background work keeps an ended turn "working"; what it said stays.
-        if (tab.agentStatus === "working" && !tab.backgroundTasks) delete tab.lastReply;
         const target = targetSchema.safeParse(tab.target);
         const stall = target.success && agents.length === 1
           ? await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }, async () => background) : {};
@@ -413,7 +414,6 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         if (expired || !children) return;
         Object.assign(tab, children);
         markBackground(tab, children.runningChildren);
-        if (tab.agentStatus === "working" && !tab.backgroundTasks) delete tab.lastReply;
       }),
       eachTab(async ({ group, tab }) => {
         const identity = identified(group, tab);
@@ -430,11 +430,13 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     ]);
     await Promise.race([enrich, budget]);
     expired = true; clearTimeout(timer);
-    // What an ended turn still waits on (CI, its background work, a queue),
-    // from what it said and what still runs, so the phone can tell waiting
-    // from needing the owner.
+    // Derive reply and wait from the evidence that arrived inside the budget.
     for (const { tab } of tabs) {
-      const waiting = tabWaiting(turnRecords.get(tab), tab);
+      const phase = turnPhases.get(tab);
+      if (phase?.phase !== "ended") continue;
+      const reply = tab.agentStatus !== "working" || tab.backgroundTasks ? replyExcerpt(phase.reply) : undefined;
+      if (reply) tab.lastReply = reply;
+      const waiting = tabWaiting(phase, tab);
       if (waiting) tab.waiting = waiting;
     }
     // The row's status may have changed above (background work turns idle into
@@ -1119,7 +1121,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           if (request.headers?.["x-phren-origin"] === "peer") throw new BridgeError(403, "A peer cannot cancel a dispatch on this computer.");
           result = await cancelDispatch(data);
         } else if (url.pathname === "/v1/dispatch/close-self") {
-          result = await closeOwnPane(data);
+          result = await closeOwnPane(data, undefined, ctx.handOffs);
         } else if (url.pathname === "/v1/hand-off") {
           const forwarded = request.headers?.["x-phren-origin"] === "peer" && typeof data.deliveryId === "string" && /^handoff-notice-[a-f0-9]{40}$/.test(data.deliveryId)
             ? await ctx.succession?.forward(data.target, z.string().max(32768).parse(data.text), data.deliveryId) : undefined;

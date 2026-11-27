@@ -55,6 +55,7 @@ export const PR_RETRY_MS = 30_000;
 export const PR_RETRY_MAX_MS = 10 * 60_000;
 /** Receipts older than this are no longer watched. */
 export const WATCH_MS = 24 * 60 * 60 * 1000;
+export const WAIT_UNFINISHED_PREFIX = "Stopped waiting: ";
 /** How long a stopped worker whose harness still runs background tasks is
  * waited on before it counts as done anyway. Measured from the latest Stop,
  * and every task that finishes wakes the worker (a new prompt, a new Stop), so
@@ -97,7 +98,7 @@ export interface WorkerObservation {
   stalled?: boolean; stalledSince?: string; stallFor?: number;
   /** Why a turn that ended is not done (worker-unfinished.ts): it announced a
    * next step, left uncommitted work and no PR, or still owes a task its
-   * session took on (task/session-tasks.ts). Returned as needs-you. */
+   * session took on (task/session-tasks.ts). Also carries parked waits for older Hooks. */
   unfinished?: string;
   /** Tasks the worker's session took on (its ledger, task/session-tasks.ts):
    * where each stands now, without the store path. */
@@ -295,7 +296,8 @@ async function unfinished(seen: WorkerObservation, open: readonly SessionTaskSta
   // What the reply or the checkout said wins; the tasks it still owes only fill
   // in, and never for a turn that waits on CI, background work or a queue.
   const owed = unsettledTasks(open);
-  return owed && !marked.unfinished && !marked.waiting ? { ...marked, unfinished: owed } : marked;
+  if (owed && !marked.unfinished && !marked.waiting) return { ...marked, unfinished: owed };
+  return marked.waiting ? { ...marked, unfinished: `${WAIT_UNFINISHED_PREFIX}${marked.waiting}` } : marked;
 }
 const paneDirectory = (pane: Json): unknown => pane.foreground_cwd || pane.cwd;
 
@@ -527,7 +529,7 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
   const failed = stopped && seen.completed && seen.error ? seen.error : stopped && seen.interrupted ? INTERRUPTED : undefined;
   // An older peer Hook folded an awaited sentence into its unfinished reason
   // ("Stopped waiting: …"): that is a wait, never a reason the owner must act on.
-  const compat = seen.unfinished?.startsWith("Stopped waiting: ") ? seen.unfinished.slice("Stopped waiting: ".length) : undefined;
+  const compat = seen.unfinished?.startsWith(WAIT_UNFINISHED_PREFIX) ? seen.unfinished.slice(WAIT_UNFINISHED_PREFIX.length) : undefined;
   const unfinishedReason = compat !== undefined ? undefined : seen.unfinished;
   // A turn that stopped mid-task needs a nudge, not a close: it returns as
   // needs-you with the reason, never as done.
@@ -554,12 +556,17 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
   // and needs-you or waiting on the next (its checkout read late, the owner
   // committed its edits, or its wait was noticed late) is not a second return.
   const finished = (state: WorkerState | undefined) => state === "done" || state === "needs-you" || state === "waiting";
-  const reread = finished(previous) && finished(next) && !!turn && receipt.returned?.turn === turn;
+  const returned = receipt.returned;
+  const sameTurn = !!turn && returned?.turn === turn;
+  const reread = finished(previous) && finished(next) && sameTurn;
+  // Correct legacy waits in place so the same turn keeps its read and notice history.
+  const legacyWait = next === "waiting" && sameTurn && returned?.state === "needs-you"
+    && returned.question?.startsWith(WAIT_UNFINISHED_PREFIX) ? returned : undefined;
   const repeated = reread || (previous === next && !(turn && receipt.returned?.turn && turn !== receipt.returned.turn));
   // A turn whose Stop or completed final exists but whose background work
   // still runs is waiting on that work: said on the worker row, no return.
   const workingWait = next === "working" && seen.ended === true && !!seen.background ? "background" : undefined;
-  if (repeated) {
+  if (repeated && !legacyWait) {
     if (receipt.worker && receipt.worker.sawWorking !== sawWorking) { receipt.worker.sawWorking = sawWorking; changed = true; }
     if (receipt.worker && background > (receipt.worker.background ?? 0)) { receipt.worker.background = background; changed = true; }
     if (receipt.worker && receipt.worker.waitingSince !== waitingSince) {
@@ -576,7 +583,12 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
     ...(next === "working" && waitingSince ? { waitingSince } : {}),
     ...(next === "waiting" && waitingFor ? { waitingOn: waitingOn(waitingFor) } : {}),
     ...(workingWait ? { waitingOn: workingWait } : {}) };
-  if (next !== "working") {
+  if (legacyWait) {
+    legacyWait.state = "waiting";
+    legacyWait.waitingOn = waitingOn(waitingFor!);
+    legacyWait.waitingFor = waitingFor!.slice(0, 200);
+    delete legacyWait.question;
+  } else if (next !== "working") {
     receipt.returned = { state: next, at, read: false,
       // A worker stopped by its usage limit keeps its last reply: the dispatch that continues it hands it over.
       ...(seen.reply && (next === "done" || next === "needs-you" || next === "waiting" || next === "failed" && isClaudeUsageLimit(failed)) ? { reply: seen.reply, ...(seen.truncated ? { truncated: true } : {}) } : {}),
