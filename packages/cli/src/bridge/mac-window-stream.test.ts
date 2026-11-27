@@ -522,6 +522,38 @@ describe("acknowledgements and stats", () => {
     vi.advanceTimersByTime(1_000);
     expect(client.closed).toEqual({ code: 1013, reason: "slow-link" });
   });
+  it("closes without sending the sample when the start write fails", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}`, deps);
+    client.holdSends = true;
+    children[0].stdout.write(record(1, wire({ sync: true, pts: 1_000n })));
+    await flush();
+    expect(client.texts()).toHaveLength(1);
+    expect(client.binary()).toHaveLength(0);
+    client.held.shift()!(new Error("gone"));
+    await flush();
+    expect(client.closed).toEqual({ code: 1011, reason: "capture-failed" });
+    expect(client.binary()).toHaveLength(0);
+    vi.advanceTimersByTime(1_000);
+    expect(pulls(children[0])).toHaveLength(1);
+  });
+  it("closes with no further pull when the stats write fails", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}`, deps);
+    const child = children[0];
+    child.stdout.write(record(1, wire({ sync: true, pts: 1_000n })));
+    await flush();
+    expect(client.binary()).toHaveLength(1);
+    client.holdSends = true;
+    client.control({ type: "ack", seq: 1 });
+    expect(client.held).toHaveLength(1);
+    client.held.shift()!(new Error("gone"));
+    await flush();
+    expect(client.closed).toEqual({ code: 1011, reason: "capture-failed" });
+    vi.advanceTimersByTime(1_000);
+    expect(pulls(child)).toHaveLength(1);
+    expect(client.binary()).toHaveLength(1);
+  });
   it.each([
     ["binary", (client: FakeClient) => client.raw(Buffer.from("{}"), true)],
     ["a long text control", (client: FakeClient) => client.raw(Buffer.alloc(257, 0x20), false)],

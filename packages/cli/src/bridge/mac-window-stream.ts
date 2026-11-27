@@ -239,6 +239,8 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
   let refilledAt = deps.now();
   let staged: ParsedSample | undefined;
   let outstanding: { seq: number; tier: number; sentAt: number } | undefined;
+  /** A text send (start or stats) is in flight; nothing else may go out yet. */
+  let sending = false;
   let lastSeq = 0;
   let pullOutstanding = false;
   let lastPullAt = -Infinity;
@@ -265,11 +267,15 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
     clear(pullDeadline); pullDeadline = undefined;
   };
 
-  const sendControl = (message: Record<string, unknown>): boolean => {
-    if (ended) return false;
-    if (client.readyState !== OPEN) { end(); return false; }
-    try { client.send(JSON.stringify(message), { binary: false }); } catch { end(1011, "capture-failed"); return false; }
-    return true;
+  const sendText = (message: Record<string, unknown>, done?: () => void) => {
+    if (ended) return;
+    if (client.readyState !== OPEN) { sending = false; end(); return; }
+    try {
+      client.send(JSON.stringify(message), { binary: false }, error => {
+        if (error) { sending = false; if (!ended) end(1011, "capture-failed"); return; }
+        if (!ended) done?.();
+      });
+    } catch { sending = false; end(1011, "capture-failed"); }
   };
 
   const sendFrame = (message: Buffer): boolean => {
@@ -286,7 +292,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
     outcome = why;
     for (const timer of [firstSendTimer, pullTimer, pullDeadline, ackDeadline, tokenTimer, termTimer, killTimer]) clear(timer);
     firstSendTimer = pullTimer = pullDeadline = ackDeadline = tokenTimer = termTimer = killTimer = undefined;
-    staged = undefined; outstanding = undefined; pullOutstanding = false;
+    staged = undefined; outstanding = undefined; pullOutstanding = false; sending = false;
     live.delete(shutdown);
     if (child && !childExited) {
       const running = child;
@@ -332,7 +338,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
 
   const tryPull = () => {
     if (inChunk) { pullWanted = true; return; }
-    if (ended || !spawned || pullOutstanding || staged || outstanding) return;
+    if (ended || !spawned || pullOutstanding || staged || outstanding || sending) return;
     // Pace off the tier the latest clamped request would use, so an upshift
     // shortens a pending wait and a superseded downshift never commits.
     const due = lastPullAt + 1000 / MAC_WINDOW_TIERS[requestedTier].fps;
@@ -371,7 +377,7 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
 
   /** Debit the bucket for the whole staged message, then send it. */
   const pump = () => {
-    if (ended || !staged || outstanding) return;
+    if (ended || !staged || outstanding || sending) return;
     refill();
     if (tokens + 1e-6 < staged.body.length) {
       if (!tokenTimer) {
@@ -396,24 +402,35 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
       needsSync = true;
     }
     if (needsSync && !sample.sync) { end(1011, "bad-helper-frame"); return; }
+    /** Assign the sequence and put the sample on the wire. */
+    const deliver = () => {
+      if (ended) return;
+      const seq = lastSeq + 1;
+      lastSeq = seq;
+      const message = Buffer.from(sample.body);
+      message.writeUInt32BE(seq, 12);
+      outstanding = { seq, tier, sentAt: deps.now() };
+      if (sample.sync) needsSync = false;
+      oversize = 0;
+      clear(firstSendTimer); firstSendTimer = undefined;
+      ackDeadline = later(ACK_DEADLINE_MS, () => {
+        ackDeadline = undefined;
+        if (!ended && outstanding?.seq === seq) end(1013, "slow-link");
+      });
+      sendFrame(message);
+    };
     if (!started) {
       if (!sample.sync) { end(1011, "bad-helper-frame"); return; }
-      if (!sendControl({ type: "start", version: 1, codec: options.codec, epoch, width: sample.width, height: sample.height, tier, maxTier })) return;
       started = { width: sample.width, height: sample.height };
+      // The sample only follows a start the socket accepted.
+      sending = true;
+      sendText({ type: "start", version: 1, codec: options.codec, epoch, width: sample.width, height: sample.height, tier, maxTier }, () => {
+        sending = false;
+        deliver();
+      });
+      return;
     }
-    const seq = lastSeq + 1;
-    lastSeq = seq;
-    const message = Buffer.from(sample.body);
-    message.writeUInt32BE(seq, 12);
-    outstanding = { seq, tier, sentAt: deps.now() };
-    if (sample.sync) needsSync = false;
-    oversize = 0;
-    clear(firstSendTimer); firstSendTimer = undefined;
-    ackDeadline = later(ACK_DEADLINE_MS, () => {
-      ackDeadline = undefined;
-      if (!ended && outstanding?.seq === seq) end(1013, "slow-link");
-    });
-    sendFrame(message);
+    deliver();
   };
 
   const onSample = (body: Buffer) => {
@@ -465,8 +482,14 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
     outstanding = undefined;
     clear(ackDeadline); ackDeadline = undefined;
     const ackMs = Math.max(0, Math.round(deps.now() - sample.sentAt));
-    if (!sendControl({ type: "stats", seq: sample.seq, ackMs, tier: sample.tier })) return;
-    tryPull();
+    // The next pull waits for the stats write to be accepted, not just started.
+    sending = true;
+    sendText({ type: "stats", seq: sample.seq, ackMs, tier: sample.tier }, () => {
+      sending = false;
+      if (ended) return;
+      pump();
+      tryPull();
+    });
   };
 
   const onKeyframe = (seq: number) => {
