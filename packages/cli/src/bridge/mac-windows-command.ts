@@ -1,4 +1,4 @@
-import { macWindowsEnabled, macWindowsPermissionReport, macWindowsSupported, setMacWindowsEnabled, type MacWindowPermissionState } from "./mac-windows.js";
+import { macWindowsEnabled, macWindowsLocalPermissionReport, macWindowsSupported, setMacWindowsEnabled, type MacWindowPermissionState } from "./mac-windows.js";
 
 /** A grant's line: a denied permission and a helper that could not build are different problems. */
 function permissionLine(state: MacWindowPermissionState): string {
@@ -35,7 +35,7 @@ export async function runMacWindows(args: string[]): Promise<number> {
       return 0;
     }
     try {
-      const report = await macWindowsPermissionReport();
+      const report = await macWindowsLocalPermissionReport();
       console.log(`Screen Recording: ${permissionLine(report.screenRecording)}`);
       console.log(`Accessibility: ${permissionLine(report.accessibility)}`);
       const states = [report.screenRecording, report.accessibility];

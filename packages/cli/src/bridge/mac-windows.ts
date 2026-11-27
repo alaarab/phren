@@ -79,7 +79,7 @@ export function macWindowsSupported(platform: NodeJS.Platform = process.platform
   return platform === "darwin" && Number(release.split(".")[0]) >= MACOS_14_DARWIN_MAJOR;
 }
 
-export interface MacWindowsHelperCall { helper: NativeHelper; args: string[]; input?: string; timeoutMs?: number }
+export interface MacWindowsHelperCall { helper: NativeHelper; args: string[]; input?: string; timeoutMs?: number; local?: boolean }
 export interface MacWindowsHelperResult { stdout: Buffer; stderr: string; code: number }
 /** The winbadge child: its stdin stays open for the session, `ready` when it shows. */
 export interface MacWindowsBadge {
@@ -95,11 +95,17 @@ interface MacWindowsDeps {
   spawnBadge: (signal: AbortSignal) => Promise<MacWindowsBadge>;
   now: () => number;
   pollMs: () => number;
+  /** The pre-spawn setting read (local probes skip it). */
+  enabled: () => Promise<boolean>;
 }
 
 /** An ended session (Stop, idle, disable, shutdown) refuses its helpers. */
 function cancelled(): BridgeError {
   return new BridgeError(409, "Phone control ended before that finished.", { code: "mac-windows-cancelled" });
+}
+
+function disabledError(): BridgeError {
+  return new BridgeError(409, "Phone control is off on this Mac. Run `phren mac-windows on` there.", { code: "mac-windows-disabled" });
 }
 
 function within<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -110,12 +116,15 @@ function within<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-async function runHelperProcess(call: MacWindowsHelperCall, signal: AbortSignal): Promise<MacWindowsHelperResult> {
+/** Runs one helper with the session signal; local probes skip the setting gate. */
+export async function runMacWindowsHelper(call: MacWindowsHelperCall, signal: AbortSignal): Promise<MacWindowsHelperResult> {
   if (signal.aborted) throw cancelled();
   const binary = await verifiedHelper(call.helper);
   if (signal.aborted) throw cancelled();
-  // Turned off while the helper was building: never spawn it.
-  if (!await macWindowsEnabled()) throw new BridgeError(409, "Phone control is off on this Mac. Run `phren mac-windows on` there.", { code: "mac-windows-disabled" });
+  // The CLI's status probes are local and read-only; session work is gated on the setting.
+  if (!call.local && !await deps.enabled()) throw disabledError();
+  // The read took time: an `off`, Stop or shutdown that landed meanwhile must not spawn.
+  if (signal.aborted) throw cancelled();
   return new Promise(resolve => {
     const child = spawn(binary, call.args, { stdio: ["pipe", "pipe", "pipe"] });
     const out: Buffer[] = [], said: Buffer[] = [];
@@ -183,10 +192,11 @@ async function spawnBadgeProcess(signal: AbortSignal): Promise<MacWindowsBadge> 
 const defaultDeps: MacWindowsDeps = {
   platform: () => process.platform,
   release: () => osRelease(),
-  run: runHelperProcess,
+  run: runMacWindowsHelper,
   spawnBadge: spawnBadgeProcess,
   now: () => Date.now(),
   pollMs: () => MAC_WINDOWS_ENABLE_POLL_MS,
+  enabled: () => macWindowsEnabled(),
 };
 let deps: MacWindowsDeps = defaultDeps;
 
@@ -389,9 +399,11 @@ async function runHelper(call: MacWindowsHelperCall, timeoutMs: number, signal: 
   return result;
 }
 
-async function permissionCheck(helper: "wincap" | "wininput", signal?: AbortSignal): Promise<MacWindowPermissionState> {
+async function permissionCheck(helper: "wincap" | "wininput", signal?: AbortSignal, local = false): Promise<MacWindowPermissionState> {
   try {
-    const result = await deps.run({ helper, args: ["check"], timeoutMs: 15_000 }, signal ?? new AbortController().signal);
+    const result = await deps.run({ helper, args: ["check"], timeoutMs: 15_000, ...(local ? { local: true } : {}) }, signal ?? new AbortController().signal);
+    // A probe that finished after Stop reports the cancellation, never a grant.
+    if (signal?.aborted) throw cancelled();
     if (result.code === 0) return { granted: true };
     if (result.code === 3) return { granted: false };
     const said = result.stderr.replace(/[\x00-\x1f\x7f]/g, " ").trim().slice(0, 160);
@@ -405,10 +417,15 @@ async function permissionCheck(helper: "wincap" | "wininput", signal?: AbortSign
 }
 
 /** Both grants, with a helper that could not build or run told apart from a denied grant. */
-export async function macWindowsPermissionReport(signal?: AbortSignal): Promise<MacWindowPermissionReport> {
+export async function macWindowsPermissionReport(signal?: AbortSignal, local = false): Promise<MacWindowPermissionReport> {
   requireSupport();
-  const [screenRecording, accessibility] = await Promise.all([permissionCheck("wincap", signal), permissionCheck("wininput", signal)]);
+  const [screenRecording, accessibility] = await Promise.all([permissionCheck("wincap", signal, local), permissionCheck("wininput", signal, local)]);
   return { screenRecording, accessibility };
+}
+
+/** The CLI status probes: local and read-only, so the setting and a session do not gate them. */
+export function macWindowsLocalPermissionReport(): Promise<MacWindowPermissionReport> {
+  return macWindowsPermissionReport(undefined, true);
 }
 
 /** The two macOS grants the window helpers need. */
@@ -523,6 +540,7 @@ export async function macWindowsList(): Promise<MacWindowsSnapshot> {
     if (unavailable) throw new BridgeError(409, `The Mac window helper could not run: ${unavailable}`, { code: "mac-windows-helper" });
     const permissions = { screenRecording: report.screenRecording.granted, accessibility: report.accessibility.granted };
     const windows = permissions.screenRecording ? await listWindows(target.abort.signal) : [];
+    requireLive(target);
     await appendSessionRow({ session: target.id, action: "list", ok: true });
     return { enabled: true, permissions, windows };
   } catch (error) {
@@ -547,7 +565,7 @@ export async function macWindowsSnapshot(id: unknown, size: unknown = 1600, qual
   if (!jpegQuality.success) throw new BridgeError(400, "The snapshot quality is 30 to 90.");
   if (!await macWindowsEnabled()) {
     await endSession();
-    throw new BridgeError(409, "Phone control is off on this Mac. Run `phren mac-windows on` there.", { code: "mac-windows-disabled" });
+    throw disabledError();
   }
   const target = openSession();
   try {
@@ -609,7 +627,7 @@ export async function macWindowsAct(input: unknown): Promise<Json> {
   const action = parsed.data;
   if (!await macWindowsEnabled()) {
     await endSession();
-    throw new BridgeError(409, "Phone control is off on this Mac. Run `phren mac-windows on` there.", { code: "mac-windows-disabled" });
+    throw disabledError();
   }
   const target = openSession();
   return serialized(async () => {
@@ -619,7 +637,7 @@ export async function macWindowsAct(input: unknown): Promise<Json> {
       // Re-read at the head of the queue: an `off` that landed while this waited refuses it.
       if (!await macWindowsEnabled()) {
         await endSession(target);
-        throw new BridgeError(409, "Phone control is off on this Mac. Run `phren mac-windows on` there.", { code: "mac-windows-disabled" });
+        throw disabledError();
       }
       beginRequest(target);
       const chars = action.action === "type" ? graphemeCount(action.text) : undefined;
@@ -653,7 +671,7 @@ export async function macWindowsRequestPermission(permission: unknown): Promise<
   if (!kind.success) throw new BridgeError(400, "Ask for screen-recording or accessibility.");
   if (!await macWindowsEnabled()) {
     await endSession();
-    throw new BridgeError(409, "Phone control is off on this Mac. Run `phren mac-windows on` there.", { code: "mac-windows-disabled" });
+    throw disabledError();
   }
   const target = openSession();
   try {
@@ -662,6 +680,7 @@ export async function macWindowsRequestPermission(permission: unknown): Promise<
     beginRequest(target);
     await runHelper({ helper: kind.data === "screen-recording" ? "wincap" : "wininput", args: ["prompt"] }, 15_000, target.abort.signal).catch(() => undefined);
     const permissions = await macWindowPermissions(target.abort.signal);
+    requireLive(target);
     await appendSessionRow({ session: target.id, action: "permissions", ok: true });
     return permissions;
   } finally {

@@ -2,11 +2,29 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// The real helper runner is exercised by the pre-spawn and CLI probe tests.
+const runner = vi.hoisted(() => ({ spawns: [] as string[][], code: 0 }));
+vi.mock("./native-helpers.js", () => ({ verifiedHelper: async () => "/fake/phren-helper" }));
+vi.mock("node:child_process", async () => {
+  const { EventEmitter } = await import("node:events");
+  return {
+    spawn: (file: string, args: string[]) => {
+      runner.spawns.push([file, ...args]);
+      const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; stdin: { on(): void; end(): void }; kill(): void };
+      Object.assign(child, { stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { on() {}, end() {} }, kill() {} });
+      queueMicrotask(() => child.emit("close", runner.code));
+      return child;
+    },
+  };
+});
+
 import type { Json } from "./protocol.js";
 import {
-  graphemeCount, MAC_WINDOWS_BUILD_MS, MAC_WINDOWS_IDLE_MS, MAC_WINDOWS_STOP_MS, macWindowAction, macWindowsAct, macWindowsEnabled,
-  macWindowsList, macWindowsOwnerOnly, macWindowsRequestPermission, macWindowsSnapshot, macWindowsSupported, resetMacWindowsState,
-  setMacWindowsDeps, setMacWindowsEnabled, stopMacWindows, type MacWindowsBadge, type MacWindowsHelperCall, type MacWindowsHelperResult,
+  graphemeCount, MAC_WINDOWS_BUILD_MS, MAC_WINDOWS_IDLE_MS, MAC_WINDOWS_STOP_MS, macWindowAction, macWindowPermissions, macWindowsAct,
+  macWindowsEnabled, macWindowsList, macWindowsLocalPermissionReport, macWindowsOwnerOnly, macWindowsRequestPermission, macWindowsSnapshot,
+  macWindowsSupported, resetMacWindowsState, runMacWindowsHelper, setMacWindowsDeps, setMacWindowsEnabled, stopMacWindows,
+  type MacWindowsBadge, type MacWindowsHelperCall, type MacWindowsHelperResult,
 } from "./mac-windows.js";
 
 /** Phone control of Mac windows, with the helpers faked (no Mac, no swiftc). */
@@ -72,6 +90,7 @@ beforeEach(async () => {
   vi.useFakeTimers();
   calls = []; spawns = 0; badge = new FakeBadge(); releaseValue = "23.6.0";
   behaviour = () => undefined; custom = undefined; spawnDelay = undefined;
+  runner.spawns = []; runner.code = 0;
   resetMacWindowsState();
   restore = setMacWindowsDeps({
     platform: () => "darwin",
@@ -359,6 +378,20 @@ describe("mac windows: requests", () => {
     });
   });
 
+  it("does not spawn when the session ends during the pre-spawn setting read", async () => {
+    vi.useRealTimers();
+    let releaseRead!: (enabled: boolean) => void, reads = 0;
+    setMacWindowsDeps({ run: runMacWindowsHelper, enabled: () => { reads++; return new Promise<boolean>(resolve => { releaseRead = resolve; }); } });
+    await setMacWindowsEnabled(true);
+    const acting = macWindowsAct({ action: "raise", id: 7 }).catch(error => error);
+    await until(() => reads === 1, "the pre-spawn setting read");
+    const stopping = stopMacWindows();
+    releaseRead(true);
+    await stopping;
+    await expect(acting).resolves.toMatchObject({ status: 409, details: { code: "mac-windows-cancelled" } });
+    expect(runner.spawns).toEqual([]);
+  });
+
   it("maps helper exit codes to permission and missing-window errors, prompting once", async () => {
     behaviour = call => call.helper === "wininput" && call.args[0] === "tap" ? { code: 3, stderr: "accessibility\n" } : undefined;
     await expect(macWindowsAct({ action: "tap", id: 7, x: 0.1, y: 0.1 })).rejects.toMatchObject({ status: 403, details: { code: "mac-windows-accessibility" } });
@@ -407,5 +440,28 @@ describe("mac windows: permissions", () => {
     behaviour = call => call.helper === "wincap" && call.args[0] === "check" ? { code: 127, stderr: "spawn failed\n" } : undefined;
     await expect(macWindowsList()).rejects.toMatchObject({ status: 409, details: { code: "mac-windows-helper" }, message: expect.stringContaining("spawn failed") });
     expect(calls.some(call => call.args[0] === "list")).toBe(false);
+  });
+
+  it("answers the CLI status probes while phone control is off", async () => {
+    vi.useRealTimers();
+    setMacWindowsDeps({ run: runMacWindowsHelper });
+    const report = await macWindowsLocalPermissionReport();
+    expect(report).toEqual({ screenRecording: { granted: true }, accessibility: { granted: true } });
+    expect(runner.spawns).toHaveLength(2);
+    expect(runner.spawns.every(args => args[1] === "check")).toBe(true);
+    // Session work still refuses without the setting.
+    await expect(macWindowPermissions()).rejects.toMatchObject({ status: 409, details: { code: "mac-windows-disabled" } });
+  });
+
+  it("refuses the permission route when Stop arrives during its probes", async () => {
+    vi.useRealTimers();
+    await setMacWindowsEnabled(true);
+    custom = (call, signal) => call.args[0] === "check"
+      ? new Promise(resolve => signal.addEventListener("abort", () => resolve({ stdout: Buffer.alloc(0), stderr: "", code: 0 }), { once: true }))
+      : undefined;
+    const asking = macWindowsRequestPermission("accessibility").catch(error => error);
+    await until(() => calls.filter(call => call.args[0] === "check").length === 2, "both probes");
+    badge.exit(10);
+    await expect(asking).resolves.toMatchObject({ status: 409, details: { code: "mac-windows-cancelled" } });
   });
 });
