@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.97] - 2026-11-27
+
+### Added
+
+- The owner inbox is the one place for owner actions (#932). An item can carry the command to paste, the task (`bid:`) and the pull request it is about, and a `key` that updates the same item instead of adding another. Its paste line ends with the `phren owner-inbox resolve` command for it. An item resolves itself once its pull request is merged or closed or its task is Done. The conductor and fanout skills tell workers to post merge commands, logins, tokens and decisions there.
+- A dispatched worker that ends its turn waiting on CI, its own background work or a queue now returns `waiting`, with `waitingOn` (`ci`, `background`, `queue` or `other`) and the sentence it waits on, instead of needs-you (#933). A waiting worker is never an owner-inbox item and is never closed, and `dispatch wait` keeps following it. Return rows and `GET /v1/dispatch` carry `phase`: working, waiting, needs-owner or done.
+- The Hook's session overview gives each tab whose turn ended but is not done a `waiting` field (`ci`, `queue`, `background` or `other`), so the phone can tell a session waiting on CI from one that needs the owner. A tab still running background work keeps its last reply.
+
+### Fixed
+
+- A pane that finished its turn is no longer closed 500 ms after replying while it still has background work. Close-self waits for the turn to end with nothing running, for up to 10 minutes, and a new prompt cancels it. A refused close of a dispatched worker is retried.
+- A worker waiting on CI with an open task stays `waiting` instead of returning needs-you for the task. Stale-task rows in the owner inbox link their task.
+
+### Changed
+
+- The release candidate runs the macOS tests in two shards (#940), and pull requests run the tests that import a changed source file, on Linux (#941).
+
 ## [0.3.96] - 2026-11-27
 
 ### Added
