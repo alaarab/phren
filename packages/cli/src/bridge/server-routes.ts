@@ -586,8 +586,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
               .parse({ name: url.searchParams.get("name") ?? undefined, hostKey: url.searchParams.get("hostKey") ?? undefined });
             result = { computer: info.computer, version, ...await listsCaller(caller) }; break;
           }
-          case "/v1/owner-inbox": result = await ownerInboxView(ctx.inbox!, { action: "list", includeResolved: url.searchParams.get("includeResolved") === "true" },
-            url.searchParams.get("local") === "1", url.searchParams.get("compact") === "1"); break;
+          case "/v1/owner-inbox": {
+            const local = url.searchParams.get("local") === "1";
+            // `reconcile=1` only means anything to a peer reading this Hook: it
+            // keeps the keys the aggregate filters and dedupes on.
+            result = await ownerInboxView(ctx.inbox!, { action: "list", includeResolved: url.searchParams.get("includeResolved") === "true" },
+              local, url.searchParams.get("compact") === "1", local && url.searchParams.get("reconcile") === "1"); break;
+          }
           // A terminal reference from chat text (alaarab/phren-apps#676): this computer's pane or tab, or a linked peer's.
           case "/v1/terminals/resolve": result = await resolveTerminalReference(url.searchParams.get("ref"),
             { computer: info.computer, from: url.searchParams.get("from") }); break;

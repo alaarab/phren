@@ -8,11 +8,16 @@ import { isLocalComputer } from "./dispatch-hosts.js";
  * computes for its own screen (commands, paste, dispatch links, live
  * bookkeeping, history) stays on the Hook. */
 const COMPACT_FIELDS = ["id", "title", "kind", "state", "createdAt", "updatedAt", "inboxComputer", "project", "computer", "target"] as const;
+/** Keys peer aggregation filters and dedupes on. Kept in the peer exchange,
+ * never in what a phone reads. */
+const RECONCILE_FIELDS = ["live", "source", "actionId"] as const;
 
-/** A compact item: the fields above, and nothing an older or newer peer added. */
-export function compactInboxItem(item: Json): Json {
+/** A compact item: the fields above, and nothing an older or newer peer added.
+ * `reconcile` keeps the aggregation keys, for a Hook reading another Hook. */
+export function compactInboxItem(item: Json, reconcile = false): Json {
   const compact: Json = {};
   for (const field of COMPACT_FIELDS) if (item[field] !== undefined) compact[field] = item[field];
+  if (reconcile) for (const field of RECONCILE_FIELDS) if (item[field] !== undefined) compact[field] = item[field];
   return compact;
 }
 
@@ -30,13 +35,19 @@ function placed(item: Json, inboxComputer: string): Json {
  *
  * `compact` asks for the phone's wire item. It is sent to peers too, but every
  * read is projected again here: an older peer ignores it and answers in full,
- * and a newer peer may add fields this build does not know. */
-export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnly = false, compact = false): Promise<Json> {
+ * and a newer peer may add fields this build does not know.
+ *
+ * A compact peer read also carries `reconcile=1`, which keeps the keys the
+ * aggregation below filters and dedupes on (live, source, actionId); they are
+ * stripped again before the phone sees the aggregate. A Hook answering its own
+ * `?local=1&compact=1&reconcile=1` read keeps them for the same reason. */
+export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnly = false, compact = false, reconcile = false): Promise<Json> {
   const data = ownerInboxSchema.parse(input);
   const { computer, ...local } = data;
   const peers = await hookPeers().catch(() => []);
   const localList = `/v1/owner-inbox?local=1${data.includeResolved ? "&includeResolved=true" : ""}${compact ? "&compact=1" : ""}`;
-  const project = (items: Json[]) => compact ? items.map(compactInboxItem) : items;
+  const peerList = compact ? `${localList}&reconcile=1` : localList;
+  const project = (items: Json[], withReconciliation = false) => compact ? items.map(item => compactInboxItem(item, withReconciliation)) : items;
   if (computer && computer !== "local" && !isLocalComputer(computer)) {
     const peer = peers.find(peer => peer.name === computer);
     if (!peer) throw new BridgeError(404, "That inbox computer is not linked.");
@@ -56,12 +67,12 @@ export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnl
   }
   const result = await inbox.run(local);
   if (data.action !== "list") return result;
-  if (localOnly) return compact ? { ...result, items: project(objects(result.items)) } : result;
+  if (localOnly) return compact ? { ...result, items: project(objects(result.items), reconcile) } : result;
   const items: Json[] = objects(result.items).map(item => placed(item, "local")), unreachable: Json[] = [];
   await Promise.all(peers.map(async peer => {
     try {
       // No kept answer: the owner resolves a row and reads the list straight back.
-      const view = await peerRead(peer, localList);
+      const view = await peerRead(peer, peerList);
       items.push(...objects(view.items).map(item => placed(item, peer.name)));
     } catch (error) { unreachable.push({ computer: peer.name, error: error instanceof Error ? error.message : "Unreachable." }); }
   }));

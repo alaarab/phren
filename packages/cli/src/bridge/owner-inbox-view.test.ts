@@ -4,18 +4,18 @@ import type { OwnerInbox } from "./owner-inbox.js";
 
 const state = vi.hoisted(() => ({
   peers: [] as { name: string }[],
-  reads: [] as { peer: string; route: string }[],
+  reads: [] as { peer: string; route: string; timeout?: number }[],
   answers: new Map<string, Json>(),
-  failures: new Set<string>(),
+  failures: new Map<string, string>(),
 }));
 
 vi.mock("./peers.js", () => ({ hookPeers: async () => state.peers, peerRequest: vi.fn() }));
 vi.mock("./peer-reads.js", () => ({
-  peerRead: async (peer: { name: string }, route: string) => {
-    state.reads.push({ peer: peer.name, route });
-    const key = `${peer.name}\n${route}`;
-    if (state.failures.has(peer.name)) throw new Error(`${peer.name} is unreachable.`);
-    return state.answers.get(key) ?? { ok: true, items: [] };
+  peerRead: async (peer: { name: string }, route: string, options?: { timeout?: number }) => {
+    state.reads.push({ peer: peer.name, route, timeout: options?.timeout });
+    const failure = state.failures.get(peer.name);
+    if (failure) throw new Error(failure);
+    return state.answers.get(`${peer.name}\n${route}`) ?? { ok: true, items: [] };
   },
 }));
 vi.mock("./dispatch-hosts.js", () => ({ isLocalComputer: (name: string) => name.toLowerCase() === "local" }));
@@ -25,6 +25,9 @@ const { ownerInboxView, compactInboxItem } = await import("./owner-inbox-view.js
 const AT = "2026-11-27T10:00:00.000Z";
 const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "claude", session: "11111111-1111-4111-8111-111111111111" };
 const id = "aaaaaaaa-1111-4111-8111-111111111111";
+const NEW = "bbbbbbbb-2222-4222-8222-222222222222";
+const ASK = "cccccccc-3333-4333-8333-333333333333";
+const STALE = "dddddddd-4444-4444-8444-444444444444";
 /** A full stored row: everything a Hook keeps, most of which the phone never needs. */
 const fullRow = (overrides: Json = {}): Json => ({
   id, kind: "manual", title: "OVH US VPS-2 is in stock", state: "open", createdAt: AT, updatedAt: AT,
@@ -32,8 +35,14 @@ const fullRow = (overrides: Json = {}): Json => ({
   source: "task-stale:phren:bid:1234abcd", live: true, dispatch: "22222222-2222-4222-8222-222222222222",
   actionId: "question-1", inboxComputer: "elsewhere", ...overrides,
 });
+/** What the phone may see. */
 const COMPACT = ["id", "title", "kind", "state", "createdAt", "updatedAt", "inboxComputer", "project", "computer", "target"];
+/** The keys a peer read keeps for aggregation only. */
+const RECONCILE = ["live", "source", "actionId"];
 const inbox = (items: Json[]) => ({ run: vi.fn(async () => ({ ok: true, items })) }) as unknown as OwnerInbox;
+/** An upgraded peer's real compact local answer, produced by this same code. */
+const upgradedPeer = async (rows: Json[]) => ownerInboxView(inbox(rows), { action: "list" }, true, true, true);
+const peerURL = (extra = "") => `/v1/owner-inbox?local=1&compact=1${extra}`;
 
 beforeEach(() => {
   state.peers = [{ name: "Desk" }, { name: "Studio" }];
@@ -43,27 +52,34 @@ beforeEach(() => {
 });
 
 describe("owner inbox compact reads", () => {
-  it("forwards compact=1 to peers and projects every row again at the boundary", async () => {
-    const local = fullRow({ id, kind: "manual" });
-    const automatic = fullRow({ id: "bbbbbbbb-2222-4222-8222-222222222222", kind: "needs-you", live: true, target });
-    // A peer that ignored compact=1 answers in full, as an older Hook does.
-    state.answers.set("Desk\n/v1/owner-inbox?local=1&compact=1", { ok: true, items: [fullRow({ id: "cccccccc-3333-4333-8333-333333333333", target })] });
-    const view = await ownerInboxView(inbox([local, automatic]), { action: "list" }, false, true);
+  it("keeps a live row from an upgraded peer's compact answer and dedupes it against a legacy peer", async () => {
+    // The upgraded peer (this build) filters its own rows and answers compact.
+    const forwarded = fullRow({ id: ASK, kind: "needs-you", title: "Approve the deploy?", actionId: "approval-7", target, computer: "Worker" });
+    const stale = fullRow({ id: STALE, kind: "blocked", title: "Claim the stale task", source: "task-stale:phren:bid:c2cc33d0", actionId: undefined, target: undefined });
+    const desk = await upgradedPeer([forwarded, stale]);
+    expect(desk.items).toEqual([expect.objectContaining({ actionId: "approval-7", live: true }), expect.objectContaining({ source: "task-stale:phren:bid:c2cc33d0", live: true })]);
+    state.answers.set(`Desk\n${peerURL("&reconcile=1")}`, desk);
+    // A legacy peer ignores both flags and answers in full, describing the same ask and the same unclaimed task.
+    state.answers.set(`Studio\n${peerURL("&reconcile=1")}`, {
+      ok: true, items: [fullRow({ id: NEW, kind: "blocked", title: "Only on Studio", source: "pane:Studio", actionId: undefined, target: { ...target, pane: "w1:p2" } }), forwarded, stale],
+    });
+    const view = await ownerInboxView(inbox([fullRow({ id, kind: "manual" })]), { action: "list" }, false, true);
 
-    expect(view.unreachable).toEqual([]);
     const items = view.items as Json[];
-    expect(items).toHaveLength(3);
+    expect(view.unreachable).toEqual([]);
+    // The upgraded peer's blocked row would have vanished while its peer looked reachable.
+    expect(items.some(item => item.title === "Claim the stale task")).toBe(true);
+    expect(items.find(item => item.title === "Claim the stale task")).toMatchObject({ id: STALE, kind: "blocked" });
+    // The forwarded approval and the unclaimed stale task are described by both Hooks once each.
+    expect(items.filter(item => item.title === "Approve the deploy?")).toHaveLength(1);
+    expect(items.filter(item => item.title === "Claim the stale task")).toHaveLength(1);
+    expect(items.some(item => item.title === "Only on Studio")).toBe(true);
+    // What crosses the peer exchange is stripped before the phone sees it.
     for (const item of items) expect(Object.keys(item).every(key => COMPACT.includes(key))).toBe(true);
-    expect(items.map(item => item.inboxComputer)).toEqual(["local", "local", "Desk"]);
-    expect(items[0]).toMatchObject({ id, title: "OVH US VPS-2 is in stock", kind: "manual", state: "open", project: "phren" });
-    expect(items[1].target).toEqual(target);
-    // Nothing the phone cannot use: no command, paste, dispatch link or bookkeeping.
-    for (const key of ["command", "paste", "task", "pr", "key", "source", "live", "dispatch", "actionId", "resolvedAt", "resolution"]) {
-      expect(items.some(item => key in item)).toBe(false);
-    }
-    // Every peer read asked for the compact form.
-    expect(state.reads.map(read => read.route)).toEqual(expect.arrayContaining(["/v1/owner-inbox?local=1&compact=1"]));
-    expect(state.reads.every(read => read.route.includes("compact=1"))).toBe(true);
+    for (const key of RECONCILE) expect(items.some(item => key in item)).toBe(false);
+    for (const key of ["command", "paste", "task", "pr", "key", "dispatch", "resolvedAt", "resolution"]) expect(items.some(item => key in item)).toBe(false);
+    // Every peer read asked for the compact form and the aggregation keys.
+    expect(state.reads.every(read => read.route.includes("compact=1") && read.route.includes("reconcile=1"))).toBe(true);
   });
 
   it("keeps the full legacy shape and asks peers for it when compact is absent", async () => {
@@ -73,18 +89,17 @@ describe("owner inbox compact reads", () => {
     expect(items).toHaveLength(2);
     expect(items[0]).toMatchObject({ command: "ssh ovh", source: "task-stale:phren:bid:1234abcd", live: true, dispatch: "22222222-2222-4222-8222-222222222222" });
     expect(items[0].paste).toContain("phren owner-inbox resolve");
-    expect(state.reads.every(read => !read.route.includes("compact"))).toBe(true);
+    expect(state.reads.every(read => !read.route.includes("compact") && !read.route.includes("reconcile"))).toBe(true);
   });
 
-  it("suppresses duplicate live rows and keeps unreachable peers as compact reads do", async () => {
-    state.peers = [{ name: "Desk" }, { name: "Studio" }, { name: "Loft" }];
-    const duplicate = fullRow({ id: "dddddddd-4444-4444-8444-444444444444", kind: "blocked", target, computer: "Worker" });
-    state.answers.set("Desk\n/v1/owner-inbox?local=1&compact=1", { ok: true, items: [duplicate] });
-    state.answers.set("Loft\n/v1/owner-inbox?local=1&compact=1", { ok: true, items: [duplicate] });
-    state.failures.add("Studio");
+  it("suppresses duplicate live rows across two compact peers", async () => {
+    state.peers = [{ name: "Desk" }, { name: "Loft" }];
+    const duplicate = fullRow({ id: STALE, kind: "blocked", target, computer: "Worker" });
+    const answer = await upgradedPeer([duplicate]);
+    state.answers.set(`Desk\n${peerURL("&reconcile=1")}`, answer);
+    state.answers.set(`Loft\n${peerURL("&reconcile=1")}`, answer);
     const view = await ownerInboxView(inbox([]), { action: "list" }, false, true);
-    expect((view.items as Json[]).map(item => item.inboxComputer)).toEqual(["Desk"]);
-    expect(view.unreachable).toEqual([{ computer: "Studio", error: "Studio is unreachable." }]);
+    expect((view.items as Json[]).map(item => item.id)).toEqual([STALE]);
   });
 
   it("compacts a local-only read without asking any peer", async () => {
@@ -95,10 +110,22 @@ describe("owner inbox compact reads", () => {
     expect(view.items).toEqual([{ id, title: "OVH US VPS-2 is in stock", kind: "manual", state: "open", createdAt: AT, updatedAt: AT, project: "phren", target }]);
   });
 
+  it("keeps the aggregation keys only when the peer read asks for them", async () => {
+    const row = fullRow({ kind: "blocked", target });
+    const plain = await ownerInboxView(inbox([row]), { action: "list" }, true, true);
+    expect(plain.items).toEqual([compactInboxItem(row)]);
+    expect(RECONCILE.every(key => !(key in (plain.items as Json[])[0]))).toBe(true);
+    const peer = await ownerInboxView(inbox([row]), { action: "list" }, true, true, true);
+    expect(peer.items).toEqual([compactInboxItem(row, true)]);
+    expect((peer.items as Json[])[0]).toMatchObject({ live: true, source: "task-stale:phren:bid:1234abcd", actionId: "question-1" });
+  });
+
   it("compacts a single named peer read too", async () => {
     state.answers.set("Desk\n/v1/owner-inbox?local=1&compact=1", { ok: true, items: [fullRow()] });
     const view = await ownerInboxView(inbox([]), { action: "list", computer: "Desk" }, false, true);
     expect(view.items).toEqual([compactInboxItem(fullRow({ inboxComputer: "Desk" }))]);
     expect(view.unreachable).toEqual([]);
+    // A phone's single-Hook read asks for no aggregation keys.
+    expect(state.reads[0].route).not.toContain("reconcile");
   });
 });
