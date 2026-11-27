@@ -12,6 +12,10 @@ const COMPACT_FIELDS = ["id", "title", "kind", "state", "createdAt", "updatedAt"
  * never in what a phone reads. */
 const RECONCILE_FIELDS = ["live", "source", "actionId"] as const;
 
+/** The phone gives one aggregate read ten seconds, so a compact peer read gets
+ * six: a slow Hook lands in `unreachable` while the others' rows stay. */
+export const COMPACT_PEER_TIMEOUT_MS = 6_000;
+
 /** A compact item: the fields above, and nothing an older or newer peer added.
  * `reconcile` keeps the aggregation keys, for a Hook reading another Hook. */
 export function compactInboxItem(item: Json, reconcile = false): Json {
@@ -47,12 +51,13 @@ export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnl
   const peers = await hookPeers().catch(() => []);
   const localList = `/v1/owner-inbox?local=1${data.includeResolved ? "&includeResolved=true" : ""}${compact ? "&compact=1" : ""}`;
   const peerList = compact ? `${localList}&reconcile=1` : localList;
+  const options = compact ? { timeout: COMPACT_PEER_TIMEOUT_MS } : undefined;
   const project = (items: Json[], withReconciliation = false) => compact ? items.map(item => compactInboxItem(item, withReconciliation)) : items;
   if (computer && computer !== "local" && !isLocalComputer(computer)) {
     const peer = peers.find(peer => peer.name === computer);
     if (!peer) throw new BridgeError(404, "That inbox computer is not linked.");
     if (local.action === "list") {
-      const view = await peerRead(peer, localList);
+      const view = await peerRead(peer, localList, options);
       return { ...view, items: project(objects(view.items).map(item => placed(item, computer))), unreachable: [] };
     }
     if (local.command !== undefined || local.task !== undefined || local.pr !== undefined || local.key !== undefined || local.ifUpdatedAt !== undefined) {
@@ -72,7 +77,7 @@ export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnl
   await Promise.all(peers.map(async peer => {
     try {
       // No kept answer: the owner resolves a row and reads the list straight back.
-      const view = await peerRead(peer, peerList);
+      const view = await peerRead(peer, peerList, options);
       items.push(...objects(view.items).map(item => placed(item, peer.name)));
     } catch (error) { unreachable.push({ computer: peer.name, error: error instanceof Error ? error.message : "Unreachable." }); }
   }));

@@ -20,7 +20,7 @@ vi.mock("./peer-reads.js", () => ({
 }));
 vi.mock("./dispatch-hosts.js", () => ({ isLocalComputer: (name: string) => name.toLowerCase() === "local" }));
 
-const { ownerInboxView, compactInboxItem } = await import("./owner-inbox-view.js");
+const { ownerInboxView, compactInboxItem, COMPACT_PEER_TIMEOUT_MS } = await import("./owner-inbox-view.js");
 
 const AT = "2026-11-27T10:00:00.000Z";
 const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "claude", session: "11111111-1111-4111-8111-111111111111" };
@@ -78,8 +78,9 @@ describe("owner inbox compact reads", () => {
     for (const item of items) expect(Object.keys(item).every(key => COMPACT.includes(key))).toBe(true);
     for (const key of RECONCILE) expect(items.some(item => key in item)).toBe(false);
     for (const key of ["command", "paste", "task", "pr", "key", "dispatch", "resolvedAt", "resolution"]) expect(items.some(item => key in item)).toBe(false);
-    // Every peer read asked for the compact form and the aggregation keys.
+    // Every peer read asked for the compact form, the aggregation keys, and the phone's six-second deadline.
     expect(state.reads.every(read => read.route.includes("compact=1") && read.route.includes("reconcile=1"))).toBe(true);
+    expect(state.reads.every(read => read.timeout === COMPACT_PEER_TIMEOUT_MS)).toBe(true);
   });
 
   it("keeps the full legacy shape and asks peers for it when compact is absent", async () => {
@@ -90,6 +91,7 @@ describe("owner inbox compact reads", () => {
     expect(items[0]).toMatchObject({ command: "ssh ovh", source: "task-stale:phren:bid:1234abcd", live: true, dispatch: "22222222-2222-4222-8222-222222222222" });
     expect(items[0].paste).toContain("phren owner-inbox resolve");
     expect(state.reads.every(read => !read.route.includes("compact") && !read.route.includes("reconcile"))).toBe(true);
+    expect(state.reads.every(read => read.timeout === undefined)).toBe(true);
   });
 
   it("suppresses duplicate live rows across two compact peers", async () => {
@@ -100,6 +102,18 @@ describe("owner inbox compact reads", () => {
     state.answers.set(`Loft\n${peerURL("&reconcile=1")}`, answer);
     const view = await ownerInboxView(inbox([]), { action: "list" }, false, true);
     expect((view.items as Json[]).map(item => item.id)).toEqual([STALE]);
+  });
+
+  it("puts a slow compact peer in unreachable and keeps the other sections", async () => {
+    state.peers = [{ name: "Desk" }, { name: "Slow" }];
+    state.answers.set(`Desk\n${peerURL("&reconcile=1")}`, await upgradedPeer([fullRow({ id: NEW, kind: "blocked", source: "pane:Desk" })]));
+    state.failures.set("Slow", "Slow did not answer within 6 seconds.");
+    const view = await ownerInboxView(inbox([]), { action: "list" }, false, true);
+    expect((view.items as Json[]).map(item => item.id)).toEqual([NEW]);
+    expect(view.unreachable).toEqual([{ computer: "Slow", error: "Slow did not answer within 6 seconds." }]);
+    // The deadline asked for is the one that lets the phone keep healthy sections.
+    expect(state.reads.find(read => read.peer === "Slow")?.timeout).toBe(COMPACT_PEER_TIMEOUT_MS);
+    expect(COMPACT_PEER_TIMEOUT_MS).toBe(6_000);
   });
 
   it("compacts a local-only read without asking any peer", async () => {
