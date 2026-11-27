@@ -267,6 +267,59 @@ describe("owner inbox push sweep", () => {
     expect(sender.sent.map(item => item.value.title)).toEqual(["OVH has a second plan"]);
   });
 
+  it("rechecks the newest snapshot right before a later provider call", async () => {
+    const sender = fakeSender();
+    sender.devices.push(DEVICE_A);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let started!: () => void;
+    const firstStarted = new Promise<void>(resolve => { started = resolve; });
+    sender.notifyOwnerInbox = vi.fn(async (value: OwnerInboxPushValue) => {
+      sender.attempts.push(`${value.id}:${DEVICE_A}`);
+      if (value.id === first.id) { started(); await gate; }
+      return true;
+    });
+    const box = sweep(sender);
+    await box.observe([]);
+    advance(1000);
+    const first = row({ id: "1e1e1e1e-1e1e-4e1e-8e1e-1e1e1e1e1e1e" });
+    const second = row({ id: "1f1f1f1f-1f1f-4f1f-8f1f-1f1f1f1f1f1f", createdAt: iso(now + 1000), updatedAt: iso(now + 1000) });
+    const running = box.observe([first, second]);
+    await firstStarted;
+    // A newer reconciliation closes the second row while the first send waits.
+    void box.observe([first, { ...second, state: "resolved", resolvedAt: iso(now) }]);
+    release();
+    await running;
+    expect(sender.attempts).toEqual([`${first.id}:${DEVICE_A}`]);
+  });
+
+  it("rechecks the candidate deadline right before a later provider call", async () => {
+    const sender = fakeSender();
+    sender.devices.push(DEVICE_A);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let started!: () => void;
+    const firstStarted = new Promise<void>(resolve => { started = resolve; });
+    sender.notifyOwnerInbox = vi.fn(async (value: OwnerInboxPushValue) => {
+      sender.attempts.push(`${value.id}:${DEVICE_A}`);
+      if (value.id === first.id) { started(); await gate; }
+      return true;
+    });
+    const box = sweep(sender);
+    await box.observe([]);
+    advance(1000);
+    const first = row({ id: "2a2a2a2a-2a2a-4a2a-8a2a-2a2a2a2a2a2a" });
+    const second = row({ id: "2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b2b" });
+    const running = box.observe([first, second]);
+    await firstStarted;
+    // The second row is still open in the newest snapshot, but its deadline passes.
+    void box.observe([first, second]);
+    advance(DAY);
+    release();
+    await running;
+    expect(sender.attempts).toEqual([`${first.id}:${DEVICE_A}`]);
+  });
+
   it("fails closed on a corrupt ledger and explains how to recover", async () => {
     await writeFile(file, "{not json");
     const sender = fakeSender();

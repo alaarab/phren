@@ -69,6 +69,9 @@ export class OwnerInboxPushSweep {
   private chain: Promise<void> = Promise.resolve();
   private active = false;
   private queued?: ObservedItem[];
+  /** The newest snapshot seen, including one queued while a sweep runs; each
+   * provider call rechecks it so a closed row is never sent late. */
+  private latest: ObservedItem[] = [];
   /** `${id}:${deviceID}` → earliest epoch ms the pair may be attempted again. */
   private readonly retryAfter = new Map<string, number>();
   private corruptReported = false;
@@ -88,6 +91,7 @@ export class OwnerInboxPushSweep {
    */
   observe(openItems: ObservedItem[]): Promise<void> {
     this.queued = openItems;
+    this.latest = openItems;
     if (this.active) return this.chain;
     this.active = true;
     this.chain = (async () => {
@@ -191,9 +195,14 @@ export class OwnerInboxPushSweep {
     attempts.sort((a, b) => Date.parse(a.entry.expiresAt) - Date.parse(b.entry.expiresAt)
       || a.entry.id.localeCompare(b.entry.id) || a.deviceID.localeCompare(b.deviceID));
     for (const attempt of attempts.slice(0, MAX_ATTEMPTS)) {
+      // Recheck immediately before provider I/O: the newest snapshot may have
+      // closed this row, and its ledger deadline may have passed.
+      if (Date.parse(attempt.entry.expiresAt) <= this.now()) continue;
+      const live = this.latest.find(item => item.id === attempt.entry.id && item.state === "open");
+      if (!live) continue;
       let accepted = false;
       try {
-        accepted = await this.sender.notifyOwnerInbox({ id: attempt.entry.id, title: attempt.item.title, expiresAt: attempt.entry.expiresAt }, attempt.deviceID);
+        accepted = await this.sender.notifyOwnerInbox({ id: attempt.entry.id, title: live.title, expiresAt: attempt.entry.expiresAt }, attempt.deviceID);
       } catch { accepted = false; }
       const key = `${attempt.entry.id}:${attempt.deviceID}`;
       if (accepted) {
