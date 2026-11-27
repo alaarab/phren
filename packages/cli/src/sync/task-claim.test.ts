@@ -53,7 +53,7 @@ it("gives a task to the first conductor that claims it and turns the other away 
   expect(git(mini, "show", `${write!.commit}:phren/tasks.md`)).toContain("Claimed: Mini 2026-09-25T04:30:00Z session:w22-p1");
   // The claim reached the remote as the Active task's Claimed line.
   expect(git(tmp.path, "--git-dir=remote.git", "show", "main:phren/tasks.md")).toContain(
-    "## Active\n\n- [ ] Port the parser <!-- bid:aaaa1111 rank:1 -->\n  Claimed: Mini 2026-09-25T04:30:00Z session:w22-p1\n");
+    "## Active\n\n- [ ] Port the parser <!-- bid:aaaa1111 rank:1 lastActivity:2026-09-25T05:02:00.000Z -->\n  Claimed: Mini 2026-09-25T04:30:00Z session:w22-p1\n");
 
   const { result: refused, write: refusedWrite } = await captureTaskWrites(() => claimTaskSynced(laptop, "phren", "bid:aaaa1111", { computer: "Laptop", at: "2026-09-25T04:31:00Z" }));
   expect(refusedWrite).toBeNull();
