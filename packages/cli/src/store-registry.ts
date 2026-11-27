@@ -6,6 +6,7 @@ import { expandHomePath, atomicWriteText, runtimeDir } from "./phren-paths.js";
 import { withFileLock } from "./governance/locks.js";
 import { isRecord, loadYamlDocument, PhrenError } from "./phren-core.js";
 import { getProjectDirs } from "./shared.js";
+import { isValidProjectName } from "./utils-paths.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -106,9 +107,9 @@ export interface RegistryReadResult {
   lossy: boolean;
 }
 
-export function readStoreRegistryDetailed(phrenPath: string, options: { migrateAttachments?: boolean } = {}): RegistryReadResult {
-  const synced = readSyncedRegistry(phrenPath);
-  const attached = readAttachedStores(phrenPath, synced.registry, options.migrateAttachments !== false);
+export function readStoreRegistryDetailed(phrenPath: string, options: { migrateAttachments?: boolean; strictSubscriptions?: boolean } = {}): RegistryReadResult {
+  const synced = readSyncedRegistry(phrenPath, options.strictSubscriptions);
+  const attached = readAttachedStores(phrenPath, synced.registry, options.migrateAttachments !== false, options.strictSubscriptions);
   const problems = [...synced.problems, ...attached.problems];
   const lossy = synced.lossy || attached.lossy;
   if (!synced.registry && attached.stores.length === 0) return { registry: null, problems, lossy };
@@ -124,14 +125,14 @@ export function readStoreRegistryDetailed(phrenPath: string, options: { migrateA
 }
 
 /** The synced stores.yaml as written, including entries this machine ignores. */
-function readSyncedRegistry(phrenPath: string): RegistryReadResult {
+function readSyncedRegistry(phrenPath: string, strictSubscriptions = false): RegistryReadResult {
   const parsed = readYamlFile(storesFilePath(phrenPath), STORES_FILENAME);
   if (!parsed.exists || parsed.problems.length > 0) {
     return { registry: null, problems: parsed.problems, lossy: parsed.exists };
   }
 
   const problems: string[] = [];
-  const { registry, skippedEntries } = normalizeRegistry(parsed.value, problems, STORES_FILENAME);
+  const { registry, skippedEntries } = normalizeRegistry(parsed.value, problems, STORES_FILENAME, { strictSubscriptions });
   if (!registry) {
     return { registry: null, problems, lossy: true };
   }
@@ -177,14 +178,14 @@ interface AttachedStoresRead {
   lossy: boolean;
 }
 
-function readAttachedStores(phrenPath: string, synced: StoreRegistry | null, migrate = true): AttachedStoresRead {
+function readAttachedStores(phrenPath: string, synced: StoreRegistry | null, migrate = true, strictSubscriptions = false): AttachedStoresRead {
   const parsed = readYamlFile(attachedStoresFilePath(phrenPath), ATTACHED_STORES_FILENAME);
   if (!parsed.exists) return { stores: migrate ? migrateSyncedAttachments(phrenPath, synced)
     : (synced?.stores.filter(s => s.role !== "primary" && storePathExists(s.path)) ?? []), problems: [], lossy: false };
   if (parsed.problems.length > 0) return { stores: [], problems: parsed.problems, lossy: true };
 
   const problems: string[] = [];
-  const { registry, skippedEntries } = normalizeRegistry(parsed.value, problems, ATTACHED_STORES_FILENAME, true);
+  const { registry, skippedEntries } = normalizeRegistry(parsed.value, problems, ATTACHED_STORES_FILENAME, { allowEmpty: true, strictSubscriptions });
   if (!registry) return { stores: [], problems, lossy: true };
   const stores = registry.stores.filter((s) => s.role !== "primary");
   if (stores.length < registry.stores.length) {
@@ -213,11 +214,16 @@ function migrateSyncedAttachments(phrenPath: string, synced: StoreRegistry | nul
 }
 
 function readYamlFile(filePath: string, label: string): { exists: boolean; value?: unknown; problems: string[] } {
-  if (!fs.existsSync(filePath)) return { exists: false, problems: [] };
   let raw: string;
   try {
+    if (!fs.statSync(filePath).isFile()) return { exists: true, problems: [`${label} is not a regular file`] };
     raw = fs.readFileSync(filePath, "utf8");
   } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      try {
+        if (!fs.lstatSync(filePath, { throwIfNoEntry: false })) return { exists: false, problems: [] };
+      } catch { /* Treat uninspectable paths as unreadable. */ }
+    }
     return { exists: true, problems: [`${label} is unreadable: ${String(err)}`] };
   }
   try {
@@ -319,11 +325,13 @@ export function storePathExists(storePath: string): boolean {
  * returned**: callers must be able to see that a store claims a project before
  * deciding what to do, otherwise its writes would land in the primary store.
  */
-export function resolveAllStores(phrenPath: string, options: { migrateAttachments?: boolean } = {}): StoreEntry[] {
-  const registry = options.migrateAttachments === false
-    ? readStoreRegistryDetailed(phrenPath, options).registry
-    : readStoreRegistry(phrenPath);
-  return resolveStoreEntries(phrenPath, registry);
+export function resolveAllStores(phrenPath: string, options: { migrateAttachments?: boolean; requireComplete?: boolean } = {}): StoreEntry[] {
+  if (options.migrateAttachments === false || options.requireComplete) {
+    const result = readStoreRegistryDetailed(phrenPath, { ...options, strictSubscriptions: options.requireComplete });
+    if (options.requireComplete && result.lossy) throw new Error(`The Phren store registry could not be fully read. ${result.problems.join(" | ")}`);
+    return resolveStoreEntries(phrenPath, result.registry);
+  }
+  return resolveStoreEntries(phrenPath, readStoreRegistry(phrenPath));
 }
 
 /** Task discovery must neither migrate attachments nor treat a partial registry
@@ -600,7 +608,7 @@ function normalizeRegistry(
   parsed: unknown,
   problems: string[],
   label: string,
-  allowEmpty = false
+  { allowEmpty = false, strictSubscriptions = false } = {},
 ): { registry: StoreRegistry | null; skippedEntries: number } {
   if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.stores)) {
     problems.push(
@@ -624,6 +632,11 @@ function normalizeRegistry(
     const id = typeof raw.id === "string" ? raw.id : "";
     const name = typeof raw.name === "string" ? raw.name : "";
     const entryLabel = name ? `"${name}"` : `#${index + 1}`;
+    if (strictSubscriptions && raw.projects !== undefined && (!Array.isArray(raw.projects)
+      || raw.projects.some(project => typeof project !== "string" || !isValidProjectName(project)))) {
+      skip(entryLabel, "has an invalid project subscription");
+      continue;
+    }
     const rawPath = typeof raw.path === "string" ? raw.path : "";
     const rawRole = typeof raw.role === "string" ? raw.role : "";
     const aliasedRole = ROLE_ALIASES[rawRole];

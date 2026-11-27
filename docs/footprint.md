@@ -34,6 +34,10 @@ Set the preset at install (`phren init --preset <name>`), switch it anytime
 
 ## Paths phren may write
 
+### Obsidian vault export
+
+`phren export vault <dir>` writes generated Markdown notes and `.phren-vault.json` to the directory you choose outside the Phren stores. It stages files in that directory and holds `.phren-vault.json.lock` while it writes. Use `--force-unlock` to recover a lock left by an interrupted export. [Obsidian vault export](obsidian.md)
+
 ### Hook turn checkpoints (Git module)
 
 In linked Git worktrees only, prompt/Stop hooks write raw file blobs and parentless

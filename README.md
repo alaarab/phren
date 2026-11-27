@@ -160,10 +160,15 @@ phren team join <url>                   Join a team store
 phren shell --view tasks --here         Open the shell on this project's tasks
 phren shell --view graph                Walk the knowledge graph in the terminal
 phren web-ui [--port 3499]              Launch the web UI (3D graph, dashboard)
+phren export vault <dir>                Generate a linked Obsidian vault
 phren doctor                            Health check & auto-fix
 ```
 
 See full CLI docs at [alaarab.github.io/phren](https://alaarab.github.io/phren/).
+
+### Obsidian vault export
+
+Run `phren export vault <dir>` to generate linked Markdown notes for your projects, findings, and fragments. Repeat `--project <name>` to narrow the export or add `--dry-run` to preview the note counts. [Obsidian vault export guide](docs/obsidian.md)
 
 ---
 
