@@ -43,7 +43,7 @@ beforeEach(async () => {
   vi.stubEnv("CLAUDE_CONFIG_DIR", path.join(root, "claude"));
   stalledReads.clear();
 });
-afterEach(async () => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); });
 
 const dispatchId = "40000000-0000-4000-8000-000000000001";
 const read = (snapshot: Json, turnQueue?: TurnQueue) => workspacesReader({
