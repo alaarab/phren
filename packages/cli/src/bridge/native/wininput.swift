@@ -120,8 +120,9 @@ func fraction(_ value: String) -> Double? {
     Double(value).flatMap { $0.isFinite && $0 >= 0 && $0 <= 1 ? $0 : nil }
 }
 
-// Text arrives as Unicode key events in chunks of at most 20 UTF-16 units; a
-// newline is Return, as the phone sends for submit.
+// Text arrives as Unicode key events, packed by scalar into chunks of at most
+// 20 UTF-16 units so a surrogate pair is never split; a grapheme may span two
+// chunks. A newline is Return, as the phone sends for submit.
 func typeText(_ text: String) {
     var chunk: [UniChar] = []
     func flush() {
@@ -134,18 +135,17 @@ func typeText(_ text: String) {
         post(down, pause: 0); post(up, pause: 8_000)
         chunk.removeAll()
     }
-    for character in text {
-        if character == "\n" {
+    for scalar in text.unicodeScalars {
+        if scalar.value == 10 {
             flush()
             ensureFocus()
             post(CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Return), keyDown: true), pause: 0)
             post(CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Return), keyDown: false), pause: 8_000)
             continue
         }
-        let units = Array(String(character).utf16)
+        let units = Array(String(scalar).utf16)
         if chunk.count + units.count > 20 { flush() }
         chunk.append(contentsOf: units)
-        if chunk.count >= 20 { flush() }
     }
     flush()
 }
@@ -179,7 +179,7 @@ case "tap":
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left))
 case "type":
     guard let stdinText = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) else { fail(2, "type needs UTF-8 on stdin") }
-    // A submit's trailing newline is punctuation, not a typed character.
+    // The limit is user-perceived characters, without a single submit newline.
     var typed = stdinText
     if typed.hasSuffix("\n") { typed.removeLast() }
     guard typed.count <= 2000 else { fail(2, "type needs at most 2000 characters") }
