@@ -73,10 +73,13 @@ function wire(options: { sync?: boolean; codec?: MacWindowCodec; width?: number;
 class FakeClient extends EventEmitter {
   readyState = 1;
   sent: (string | Buffer)[] = [];
+  /** Every send with its monotonic time, for the bandwidth windows. */
+  log: { at: number; data: string | Buffer }[] = [];
   closed?: { code?: number; reason?: string };
   holdSends = false;
   held: ((error?: Error) => void)[] = [];
   send(data: string | Buffer, _options: { binary: boolean }, done?: (error?: Error) => void) {
+    this.log.push({ at: Date.now(), data });
     this.sent.push(data);
     if (!done) return;
     if (this.holdSends) this.held.push(done); else done();
@@ -808,6 +811,79 @@ describe("token bucket", () => {
     expect(pulls(child)).toHaveLength(1);
     const sentBytes = client.binary().reduce((sum, frame) => sum + frame.length, 0);
     expect(sentBytes).toBeLessThanOrEqual(MAX_MESSAGE_BYTES + 48_000 * 3);
+  });
+});
+
+describe("bandwidth", () => {
+  it("keeps every 3 s of video under 168576 bytes and stages a recovery sync for credit", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}&tier=3`, deps);
+    const child = children[0];
+    const dims = [[320, 200], [480, 300], [640, 400], [960, 600]];
+    const NEAR_CAP = 24_000;
+    const RTT = 150;
+    let pts = 0n;
+    const sample = (tier: number, sync: boolean) => {
+      const [width, height] = dims[tier];
+      pts += 1_000n;
+      return wire({ sync, width, height, pts, unitBytes: NEAR_CAP - 24 - (sync ? 10 : 0) - 4 });
+    };
+    const frames: { at: number; bytes: number }[] = [];
+    const base = Date.now();
+    let handled = 0;
+    let ack: { at: number; seq: number } | undefined;
+    const scan = () => {
+      const sent = client.log.filter((entry): entry is { at: number; data: Buffer } => Buffer.isBuffer(entry.data));
+      while (frames.length < sent.length) {
+        const entry = sent[frames.length];
+        frames.push({ at: entry.at, bytes: entry.data.length });
+        ack = { at: entry.at + RTT, seq: entry.data.readUInt32BE(12) };
+      }
+    };
+    const step = (ms: number) => {
+      vi.advanceTimersByTime(ms);
+      if (ack && Date.now() >= ack.at) {
+        const { seq } = ack; ack = undefined;
+        client.control({ type: "ack", seq });
+      }
+      for (; handled < child.commands.length; handled += 1) {
+        const match = /^PULL (\d) ([01])\n$/.exec(child.commands[handled]);
+        if (!match) continue;
+        child.stdout.write(record(1, sample(Number(match[1]), match[2] === "1")));
+      }
+      scan();
+    };
+
+    // Four seconds of near-cap tier-3 video, one frame in flight, 150 ms RTT.
+    while (Date.now() < base + 4_000) step(25);
+    expect(frames.length).toBeGreaterThan(4);
+
+    // Downshift with a partly drained bucket. The tier-0 pull's recovery sync
+    // cannot go out until the floor tier's own credit covers it.
+    client.control({ type: "set", tier: 0 });
+    const before = child.commands.length;
+    while (child.commands.length === before && Date.now() < base + 8_000) step(5);
+    expect(child.commands.at(-1)).toBe("PULL 0 1\n");
+    const stagedAt = frames.length;
+    step(100);
+    expect(frames.length).toBe(stagedAt);
+    let waited = 0;
+    while (frames.length === stagedAt && waited < 3_000) { step(10); waited += 10; }
+    expect(frames.length).toBe(stagedAt + 1);
+    expect(waited).toBeGreaterThan(200);
+
+    // Three more seconds at the floor tier.
+    while (Date.now() < base + 11_000) step(25);
+
+    expect(frames.length).toBeGreaterThan(8);
+    let worst = 0;
+    for (let i = 0; i < frames.length; i += 1) {
+      let sum = 0;
+      for (let j = i; j < frames.length && frames[j].at - frames[i].at <= 3_000; j += 1) sum += frames[j].bytes;
+      worst = Math.max(worst, sum);
+    }
+    expect(worst).toBeLessThanOrEqual(168_576);
+    expect(client.closed).toBeUndefined();
   });
 });
 
