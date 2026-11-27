@@ -74,7 +74,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     cliCommands: [
       "bridge", "bridge install", "bridge update", "bridge uninstall", "bridge rollback", "bridge status",
       "browser", "bridge doctor", "bridge usage", "bridge usage-statusline", "bridge hook", "bridge serve", "bridge ssh", "pair", "unpair",
-      "bridge fanouts archive", "bridge accounts", "bridge askpass", "canary", "computers", "computers mcp", "housekeeping", "usage", "sudo", "secret-exec",
+      "bridge fanouts archive", "bridge accounts", "bridge askpass", "canary", "computers", "computers mcp", "housekeeping", "mac-windows", "usage", "sudo", "secret-exec",
     ],
     agentHooks: [
       { agents: ["codex"], events: ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest"], handler: "bridge-hook.mjs hook codex" },
@@ -87,7 +87,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ...routes("POST", ["/v1/approval-rules"]), ...routes("DELETE", ["/v1/approval-rules"]),
       ...routes("GET", [
         "/v1/health", "/v1/health/details", "/v1/health/peers", "/v1/muxes", "/v1/terminals/resolve", "/v1/activity", "/v1/metrics", "/v1/web-servers", "/v1/simulators", "/v1/browsers", "/v1/browsers/recordings", "/v1/browsers/recordings/index", "/v1/browsers/recordings/frame",
-        "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/files", "/v1/models", "/v1/harnesses", "/v1/projects/files",
+        "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/mac/windows", "/v1/mac/windows/snapshot", "/v1/files", "/v1/models", "/v1/harnesses", "/v1/projects/files",
         "/v1/uploads/image", "/v1/files/range", "/v1/files/resolve", "/v1/usage", "/v1/resources", "/v1/housekeeping", "/v1/speech/voices", "/v1/push/status", "/v1/projects/locate", "/v1/projects/repos",
         "/v1/workspaces", "/v1/workspaces/panes", "/v1/workspaces/layout", "/v1/transcripts/blob", "/v1/transcripts/history", "/v1/sudo", "/v1/secrets", "/v1/owner-confirms",
         "/v1/conversations/search",
@@ -95,7 +95,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ]),
       ...routes("POST", [
         "/v1/housekeeping/approve", "/v1/housekeeping/dismiss", "/v1/housekeeping/restore", "/v1/housekeeping/scan",
-        "/v1/push/register", "/v1/push/forget", "/v1/push/answer", "/v1/push/target", "/v1/push/presence", "/v1/files", "/v1/files/delete", "/v1/projects/add", "/v1/simulators/action",
+        "/v1/push/register", "/v1/push/forget", "/v1/push/answer", "/v1/push/target", "/v1/push/presence", "/v1/files", "/v1/files/delete", "/v1/projects/add", "/v1/simulators/action", "/v1/mac/windows/action", "/v1/mac/windows/permissions",
         "/v1/workspaces/launch", "/v1/workspaces/create", "/v1/workspaces/focus", "/v1/workspaces/rename",
         "/v1/workspaces/close", "/v1/sessions/rename", "/v1/sessions/seen", "/v1/sessions/move", "/v1/accounts/claude/add", "/v1/accounts/claude/settings", "/v1/accounts/allowed-pools", "/v1/sessions/move/abort", "/v1/sessions/move/launch", "/v1/prompt", "/v1/prompt/status", "/v1/prompt/after-turn", "/v1/prompt/after-turn/list", "/v1/prompt/after-turn/edit", "/v1/prompt/after-turn/cancel", "/v1/prompt/queue", "/v1/model", "/v1/settings", "/v1/agents/permission-mode", "/v1/side-question/dismiss", "/v1/keys", "/v1/secret", "/v1/upload",
         "/v1/approvals/answer", "/v1/questions/answer", "/v1/subagents/resume", "/v1/subagents/archive-finished", "/v1/canary",
@@ -106,10 +106,10 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     capabilities: [
       "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "paneTerminal", "paneLayout", "deskPresence", "herdr", "terminalResolve",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
-      "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "browsers", "simulators", "simulatorStream", "simulatorDevices", "simulatorDrag", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "afterTurnQueue", "queuedMessageActions", "deliveryFrames", "resources", "housekeeping", "housekeepingInventory", "sessionRename", "sessionSeen", "sudo", "sudoOutcome", "secretExec", "ownerProof", "ownerConfirm", "previewDeltas", "quickChat", "agentFolder", "launchPermissionMode", "sessionMove", "moveNewChat", "moveConductor", "moveToComputer", "moveResume", "moveSummaryByTarget", "moveConversationCopy", "claudeAccountAdd", "accountPools", "workerRelocation", "conversationSearch",
+      "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "browsers", "simulators", "simulatorStream", "simulatorDevices", "simulatorDrag", "macWindows", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "afterTurnQueue", "queuedMessageActions", "deliveryFrames", "resources", "housekeeping", "housekeepingInventory", "sessionRename", "sessionSeen", "sudo", "sudoOutcome", "secretExec", "ownerProof", "ownerConfirm", "previewDeltas", "quickChat", "agentFolder", "launchPermissionMode", "sessionMove", "moveNewChat", "moveConductor", "moveToComputer", "moveResume", "moveSummaryByTarget", "moveConversationCopy", "claudeAccountAdd", "accountPools", "workerRelocation", "conversationSearch",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
-    localFiles: ["<bridge>/turn-queue.json", "<bridge>/gitboy-webhooks.json", "<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/askpass", "<bridge>/browser.sock", "<bridge>/browser-recordings/**", "<bridge>/computer-id", "<bridge>/move-intents/*.json", "<bridge>/move-intents/*.conversation.md", "<bridge>/canary.json", "<bridge>/canary-daily", "<bridge>/moves/*.json", "<bridge>/move-launches/*.json", "<bridge>/conversation-search.sqlite", "<bridge>/conversation-search-rows/**"],
+    localFiles: ["<bridge>/turn-queue.json", "<bridge>/gitboy-webhooks.json", "<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/askpass", "<bridge>/browser.sock", "<bridge>/browser-recordings/**", "<bridge>/computer-id", "<bridge>/move-intents/*.json", "<bridge>/move-intents/*.conversation.md", "<bridge>/canary.json", "<bridge>/canary-daily", "<bridge>/moves/*.json", "<bridge>/move-launches/*.json", "<bridge>/conversation-search.sqlite", "<bridge>/conversation-search-rows/**", "<bridge>/mac-windows.json", "<bridge>/mac-windows/**"],
     phoneScreens: [{ screen: "LiveSessionsView", capability: "hook" }, { screen: "AgentChatView", capability: "transcript" }],
     skills: [],
   },

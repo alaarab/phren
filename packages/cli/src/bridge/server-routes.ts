@@ -70,6 +70,7 @@ import { gitRoot, launchDirectory, repositoryBranch, webServers, withGitReadDead
 import { approvalDecisions, atomicInPrivateDir, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, type Target, targetFromURL, targetSchema, sessionId } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorDevices, simulatorScreenshot } from "./simulators.js";
+import { macWindowsAct, macWindowsList, macWindowsOwnerOnly, macWindowsRefusal, macWindowsRequestPermission, macWindowsSnapshot, macWindowsSupported } from "./mac-windows.js";
 import { panesByTab, tabActivityKey, type TabActivityStore } from "./tab-activity.js";
 import { childAgentTree, completionEntry, historicalImage, publicChildAgents, refreshTranscript, targetTranscriptPath, transcriptPath, TranscriptReader } from "./transcripts.js";
 import { conversationSearch } from "./conversation-search.js";
@@ -202,7 +203,7 @@ export async function effectiveStatusRows(server: string, s: Json, budgetMs = ST
 export const capabilities = { browsers: true, turnCheckpoints: true, transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, sessionSeen: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, ownerConfirm: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true, housekeeping: 1, housekeepingInventory: 1 };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", macWindows: macWindowsSupported() ? 1 : undefined, code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, ownerConfirm: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true, housekeeping: 1, housekeepingInventory: 1 };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -483,6 +484,17 @@ async function moveDestination(move: MoveRecord, caller: PeerIdentity | undefine
 /** Destinations whose enrollment was checked for a move's conversation pages, until when. */
 const verifiedPages = new Map<string, number>();
 
+/** The audit row a request to one of the Mac window routes would carry, set before proof and body parsing. */
+function macWindowsAuditTarget(url: URL): { action: string; id?: unknown } | undefined {
+  switch (url.pathname) {
+    case "/v1/mac/windows": return { action: "list" };
+    case "/v1/mac/windows/snapshot": return { action: "snapshot", id: url.searchParams.get("id") };
+    case "/v1/mac/windows/action": return { action: "invalid" };
+    case "/v1/mac/windows/permissions": return { action: "invalid" };
+    default: return undefined;
+  }
+}
+
 async function peerContinuationIntent(caller: PeerIdentity, id: string, conversation?: number): Promise<Json> {
   const candidates = (await hookPeers()).filter(peer => peerFingerprint(peer) === caller.fingerprint && (!caller.name || caller.name === peer.name));
   if (candidates.length !== 1) throw new BridgeError(403, "The launch origin is not uniquely verified.");
@@ -499,9 +511,12 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
   return async (request, response) => {
     response.setHeader("X-Phren-Protocol", String(PROTOCOL));
     response.setHeader("Cache-Control", "no-store");
+    // Set as soon as the path is known, so proof and body-parse refusals are audited too.
+    let macWindowAudit: { action: string; id?: unknown } | undefined;
     try {
       const url = new URL(request.url || "/", "http://phren.local");
       if (url.origin !== "http://phren.local") throw new BridgeError(400, "Invalid request origin.");
+      macWindowAudit = macWindowsAuditTarget(url);
       requireRoute(modules, request.method ?? "", url.pathname);
       if (url.pathname === "/v1/browsers" || url.pathname.startsWith("/v1/browsers/")) { browserRoute(ctx.browsers, request.method ?? "", url, response); return; }
       let result: unknown;
@@ -537,6 +552,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       } else if (request.method === "GET") {
         // The owner asked for a fresh reading (pull to refresh, `phren computers`): peers are dialed again.
         if (url.searchParams.get("refresh") === "1") refreshPeerReads();
+        // Owner actions that a phone signs carry no body on GET: the signed digest is of zero bytes.
+        await ownerProof.check(request, url.pathname, {}, bodyDigest(Buffer.alloc(0)));
         switch (url.pathname) {
           case "/v1/tasks": result = await getTaskListRoute(modules.store, url); break;
           case "/v1/tasks/detail": result = await getTaskDetailRoute(modules.store, url); break;
@@ -710,6 +727,18 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/simulators/screenshot": {
             const bytes = await simulatorScreenshot(String(url.searchParams.get("udid") ?? ""));
             response.setHeader("Content-Type", "image/png"); response.end(bytes); return;
+          }
+          // Phone control of this Mac's windows (mac-windows.ts); owner-only on every one of them.
+          // The handler's catch audits refusals (proof, body parse, owner, disabled, invalid input).
+          case "/v1/mac/windows": {
+            macWindowsOwnerOnly(ownerRequest(request, {}));
+            result = await macWindowsList();
+            break;
+          }
+          case "/v1/mac/windows/snapshot": {
+            macWindowsOwnerOnly(ownerRequest(request, {}));
+            const bytes = await macWindowsSnapshot(url.searchParams.get("id"), url.searchParams.get("size") ?? undefined, url.searchParams.get("quality") ?? undefined);
+            response.setHeader("Content-Type", "image/jpeg"); response.end(bytes); return;
           }
           case "/v1/files": result = { files: await listUploads("files") }; break;
           case "/v1/git/status": {
@@ -1233,6 +1262,14 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await simulatorAct(z.string().parse(data.udid), z.object({ action: z.string(), bundleId: z.string().optional(), url: z.string().optional(), x: z.number().optional(), y: z.number().optional(),
             x1: z.number().optional(), y1: z.number().optional(), x2: z.number().optional(), y2: z.number().optional(), durationMs: z.number().optional(),
             text: z.string().optional(), submit: z.boolean().optional() }).parse(data) as unknown as SimulatorAction);
+        } else if (url.pathname === "/v1/mac/windows/action") {
+          macWindowAudit = { action: typeof data.action === "string" ? data.action : "invalid", id: data.id };
+          macWindowsOwnerOnly(ownerRequest(request, data));
+          result = await macWindowsAct(data);
+        } else if (url.pathname === "/v1/mac/windows/permissions") {
+          macWindowAudit = { action: "permissions" };
+          macWindowsOwnerOnly(ownerRequest(request, data));
+          result = { permissions: await macWindowsRequestPermission(data.permission) };
         } else {
         if (url.pathname === "/v1/workspaces/launch") {
           result = await launches.run(async () => {
@@ -1276,6 +1313,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       if (Buffer.byteLength(payload) > MAX_FRAME) throw new BridgeError(413, "The response is too large.");
       response.setHeader("Content-Type", "application/json"); response.end(payload);
     } catch (error) {
+      if (macWindowAudit) await macWindowsRefusal(macWindowAudit.action, macWindowAudit.id, error);
       response.statusCode = error instanceof BridgeError ? error.status : error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 503;
       response.setHeader("Content-Type", "application/json");
       const failure = { error: error instanceof BridgeError ? error.message : "Phren Hook could not complete this request. Run phren bridge doctor on the computer.",

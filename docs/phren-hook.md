@@ -1131,6 +1131,89 @@ Updating the input helper rebuilds it, and macOS ties the Accessibility grant
 to the binary. So after this change macOS asks once more: switch simtap on
 again in System Settings → Privacy & Security → Accessibility.
 
+### Mac windows on a Mac
+
+On a Mac the phone can list the Mac's own windows, see a still snapshot of one,
+tap a point in it and type into it. It is off on every Mac until the owner turns
+it on there; work machines simply never do.
+
+```bash
+phren mac-windows on       # writes <bridge>/mac-windows.json (0600)
+phren mac-windows status   # on/off, plus the Screen Recording and Accessibility grants
+phren mac-windows off
+```
+
+The routes are listed in `packages/cli/src/bridge/AGENT_CONNECTIONS.md`; the
+`/v1/status` capability is `macWindows` on macOS. Every route is owner-only:
+MCP agents, peers and scoped gitboy keys get 403 with code
+`mac-windows-owner-only`.
+
+- `GET /v1/mac/windows` answers `{ enabled, permissions, windows }`. When off
+  it answers 200 with `enabled: false` and an empty list, so the phone can explain
+  how to turn it on. When Screen Recording is missing the list is empty and
+  `permissions` says so.
+- `GET /v1/mac/windows/snapshot?id=<1..2^32-1>&size=<160..2400, default 1600>&quality=<30..90, default 70>`
+  answers one JPEG (`image/jpeg`). 409 `mac-windows-disabled` when off, 403
+  `mac-windows-screen-recording` when the grant is missing (it asks macOS once
+  per Hook run), 404 when the window is gone.
+- `POST /v1/mac/windows/action` takes `{ id, action: "tap", x, y }` (fractions
+  of the snapshot), `{ id, action: "type", text, submit? }` (1–2000 characters;
+  `submit` types Return), `{ id, action: "key", key, modifiers? }` or
+  `{ id, action: "raise" }`, and answers `{ ok: true }`. 403
+  `mac-windows-accessibility` when the grant is missing. Inputs run one at a
+  time; typed text goes on the helper's stdin, never its arguments.
+- `POST /v1/mac/windows/permissions` with `{ permission: "screen-recording" }`
+  or `{ permission: "accessibility" }` asks macOS for that grant and answers the
+  current `permissions`.
+
+A session starts at the first request and ends after 120 seconds without one.
+Every request is appended to `<bridge>/mac-windows/sessions.jsonl` (folder 0700,
+file 0600) with its session id, action, window id, result and error; typed text
+is never written, only `chars: <length>`. The `winbadge` helper shows a red
+"Your phone is controlling this Mac" pill and a menu-bar item for the whole
+session; its "Stop phone control" item ends the session and refuses requests
+for 60 seconds with 409 `mac-windows-stopped`.
+
+`phren mac-windows off` does not wait for the Hook: it writes the file, and an
+open session re-reads it every half second and again before every input, so
+control stops within half a second. Stop in the menu-bar indicator is immediate.
+
+**Trust boundary.** Every Mac window route requires the paired phone's
+signature (owner proof); the first request already needs one, and a signed Mac
+request does not change the signing requirement of any other route. The
+snapshot's `id`, `size` and `quality` query is not covered by the signature: it
+travels inside the SSH channel the phone already authenticates, and each proof
+nonce is single-use. The helpers live under the Hook user's bridge folder, so
+code running as that user could replace them. Screen Recording and Accessibility
+are granted by macOS to each helper binary, and a rebuilt helper is a new
+binary, so macOS asks again.
+
+Screen Recording is for `wincap` (listing and snapshots); Accessibility is for
+`wininput` (taps, keys, typing). A rebuilt helper is a new binary, so macOS asks
+for its grant once more. `phren mac-windows status` reports a helper that cannot
+build or run as `helper unavailable: <reason>`, separately from a missing grant.
+
+The three helpers compile on demand from `packages/cli/src/bridge/native/*.swift`
+(they also ride inside the Hook bundle, and the CLI build copies them beside the
+compiled CLI). Their commands and exit codes:
+
+- `wincap check` exits 0 when Screen Recording is granted and 3 when not;
+  `wincap prompt` asks macOS; `wincap list` prints one JSON object
+  `{ "windows": [ { id, app, bundleId, pid, title, frame, onScreen } ] }`;
+  `wincap snapshot <id> <maxSide> <quality 0.1-1>` writes one JPEG to stdout.
+- `wininput check` and `wininput prompt` are the Accessibility equivalents.
+  `wininput tap <id> <fx> <fy>` taps a fraction of the window,
+  `wininput type <id>` reads the text from stdin (a trailing newline is Return),
+  `wininput key <id> <name> [cmd] [shift] [option] [control]` presses one key,
+  and `wininput raise <id>` only activates and raises the window.
+- Both exit 2 on bad usage, 3 on a missing grant (stderr `screen-recording` or
+  `accessibility`), 4 on another failure and 5 when the window is gone (stderr
+  `no window`). A `wininput` that loses focus before the input lands exits 6
+  (stderr `focus`), and one whose parent died exits 7 (stderr `orphaned`).
+- `winbadge` shows the indicator and prints `ready` once its panels are on
+  screen; it exits 10 when the person presses Stop, and on SIGTERM, stdin EOF
+  or after four hours.
+
 ### sudo from the phone
 
 A `sudo` with no terminal, such as a Claude Code `!` command or an agent's

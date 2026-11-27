@@ -1,11 +1,15 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
-import { BridgeError, bridgeRoot, type Json } from "./protocol.js";
+import { verifiedHelper } from "./native-helpers.js";
 import { execProbe } from "./probe-processes.js";
+import { BridgeError, type Json } from "./protocol.js";
+
+// simulator-stream.ts imports verifiedHelper from this module.
+export { verifiedHelper };
 
 const execFileAsync = promisify(execFile);
 /** Every simulator child is killed outright at its timeout. SIGTERM, the
@@ -112,68 +116,15 @@ export type SimulatorAction =
 /** A drag's duration bounds, in ms. */
 export const DRAG_DEFAULT_MS = 300, DRAG_MIN_MS = 50, DRAG_MAX_MS = 5_000;
 
-/** The native helpers, compiled once per Hook version with swiftc, which any
- * Mac with the simulators has. simtap (native/simtap.swift) finds the
- * Simulator window through the Accessibility API and posts touches and keys
- * with CGEvent. AppleScript would need Automation consent, which a launchd
- * agent can never be prompted for; the helper needs one Accessibility grant.
- * Its `prompt` command puts it in the Accessibility list and shows the system
- * dialog. simcast (native/simcast.swift) streams a simulator's framebuffer
- * for simulator-stream.ts and needs no grant. */
-export type NativeHelper = "simtap" | "simcast";
-const HELPER_LABEL: Record<NativeHelper, string> = { simtap: "simulator input helper", simcast: "simulator stream helper" };
-const building = new Map<NativeHelper, Promise<string>>();
-function helper(name: NativeHelper): Promise<string> {
-  let build = building.get(name);
-  if (!build) { build = buildHelper(name).finally(() => building.delete(name)); building.set(name, build); }
-  return build;
-}
-async function helperSource(name: NativeHelper): Promise<string> {
-  const bundled = name === "simtap" ? (typeof SIMTAP_SOURCE === "string" ? SIMTAP_SOURCE : undefined) : (typeof SIMCAST_SOURCE === "string" ? SIMCAST_SOURCE : undefined);
-  return bundled ?? await readFile(new URL(`./native/${name}.swift`, import.meta.url), "utf8");
-}
-async function buildHelper(name: NativeHelper): Promise<string> {
-  const dir = path.join(bridgeRoot(), "native");
-  const binary = path.join(dir, name);
-  const code = await helperSource(name);
-  const digest = createHash("sha256").update(code).digest("hex");
-  // Rebuilt only when the source changes: the Accessibility grant is tied
-  // to this binary, and a needless rebuild would make macOS ask again.
-  const saved = await readFile(binary + ".sha256", "utf8").then(JSON.parse).catch(() => undefined);
-  if (await stat(binary).catch(() => undefined) && saved?.sourceSha === digest) return binary;
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  const temporary = path.join(dir, `${name}.${randomUUID()}`), source = temporary + ".swift";
-  const sidecar = temporary + ".sha256";
-  try {
-    await writeFile(source, code, { mode: 0o600, flag: "wx" });
-    await exec("/usr/bin/swiftc", ["-O", "-o", temporary, source], { timeout: 180_000 }).catch(() => {
-      throw new BridgeError(409, `Couldn't build the ${HELPER_LABEL[name]} (needs Xcode's swiftc).`);
-    });
-    await chmod(temporary, 0o700);
-    const binarySha = createHash("sha256").update(await readFile(temporary)).digest("hex");
-    await writeFile(sidecar, JSON.stringify({ sourceSha: digest, binarySha }), { mode: 0o600, flag: "wx" });
-    await rename(temporary, binary);
-    await rename(sidecar, binary + ".sha256");
-  } finally { await Promise.all([source, temporary, sidecar].map(file => unlink(file).catch(() => undefined))); }
-  return binary;
-}
-declare const SIMTAP_SOURCE: string | undefined;
-declare const SIMCAST_SOURCE: string | undefined;
-
+/** The native helpers are built in native-helpers.ts (simtap for input, simcast
+ * for simulator-stream.ts). */
 let inputQueue: Promise<void> = Promise.resolve();
 function simtap(name: string, ...args: string[]): Promise<void> {
   const task = inputQueue.catch(() => {}).then(() => executeSimtap(name, ...args));
   inputQueue = task;
   return task;
 }
-/** A helper, hashed again right before it runs. */
-export async function verifiedHelper(name: NativeHelper = "simtap"): Promise<string> {
-  const binary = await helper(name);
-  const saved = await readFile(binary + ".sha256", "utf8").then(JSON.parse).catch(() => undefined);
-  const binarySha = createHash("sha256").update(await readFile(binary)).digest("hex");
-  if (!saved || saved.binarySha !== binarySha) throw new BridgeError(409, `${HELPER_LABEL[name][0].toUpperCase()}${HELPER_LABEL[name].slice(1)} integrity check failed.`);
-  return binary;
-}
+
 async function executeSimtap(name: string, ...args: string[]): Promise<void> {
   const binary = await verifiedHelper();
   try { await exec(binary, [name, ...args], { timeout: 60_000 }); } catch (error) {

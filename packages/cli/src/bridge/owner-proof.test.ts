@@ -66,6 +66,31 @@ describe("owner proof", () => {
     await expect(check(undefined, {}, "/v1/push/forget")).resolves.toBeUndefined();
   });
 
+  it("covers the Mac window routes, GET included, once a phone has signed", async () => {
+    await check(signed(owner));
+    const empty = bodyDigest(Buffer.alloc(0));
+    const get = (proofHeader?: string) => proof.check(request(proofHeader, "GET"), "/v1/mac/windows", {}, empty);
+    await expect(get(undefined)).rejects.toMatchObject({ status: 403, details: { code: "owner-proof-required" } });
+    // GETs have no body, so the signed digest is of zero bytes; the query is not part of the path.
+    const proofHeader = signed(owner, { method: "GET", path: "/v1/mac/windows", body: empty });
+    await expect(get(proofHeader)).resolves.toBeUndefined();
+    await expect(proof.check(request(undefined, "GET"), "/v1/mac/windows/snapshot", {}, empty)).rejects.toMatchObject({ status: 403 });
+    for (const [pathname, digest] of [["/v1/mac/windows/action", bodyDigest(Buffer.from(BODY))], ["/v1/mac/windows/permissions", bodyDigest(Buffer.from(BODY))]] as const) {
+      await expect(proof.check(request(undefined), pathname, {}, digest)).rejects.toMatchObject({ status: 403, details: { code: "owner-proof-required" } });
+    }
+  });
+
+  it("requires proof on the Mac window routes from the first request and starts no migration", async () => {
+    const empty = bodyDigest(Buffer.alloc(0));
+    await expect(proof.check(request(undefined, "GET"), "/v1/mac/windows", {}, empty))
+      .rejects.toMatchObject({ status: 403, details: { code: "owner-proof-required" } });
+    const macProof = signed(owner, { method: "GET", path: "/v1/mac/windows", body: empty });
+    await expect(proof.check(request(macProof, "GET"), "/v1/mac/windows", {}, empty)).resolves.toBeUndefined();
+    // A signed Mac request must not make older routes start demanding proof.
+    await expect(check(undefined)).resolves.toBeUndefined();
+    await expect(stat(path.join(root, "owner-proof.json"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("only paired phone keys on the restricted dispatch command can sign", () => {
     const key = (comment: string, options = 'restrict,pty,command="sh ~/.local/share/phren/bridge/dispatch"') => {
       const wire = Buffer.concat([Buffer.from([0, 0, 0, 11]), Buffer.from("ssh-ed25519"), Buffer.from([0, 0, 0, 32]), Buffer.from(owner.raw, "base64")]);

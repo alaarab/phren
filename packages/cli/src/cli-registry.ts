@@ -312,6 +312,12 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./bridge/housekeeping/command.js")).runHousekeeping(args),
   },
   {
+    name: "mac-windows", topic: "core", standalone: true,
+    usage: "phren mac-windows on|off|status",
+    summary: "Turn phone control of this Mac's windows on or off (off by default) and show the Screen Recording and Accessibility grants it needs",
+    run: async args => (await import("./bridge/mac-windows-command.js")).runMacWindows(args),
+  },
+  {
     name: "owner-inbox", topic: "core", usage: "phren owner-inbox [list [--all] [--computer <name>] | add <title> [--computer <name>] [--project <slug>] [--id <uuid>] [--command <text>] [--task bid:xxxxxxxx] [--pr <url>] [--key <key>] | resolve <id> [--computer <name>] [--resolution <text>] [--if-updated-at <timestamp>]]",
     summary: "List, add and resolve what waits on the owner",
     run: async args => (await import("./bridge/dispatch-command.js")).runOwnerInbox(args),
