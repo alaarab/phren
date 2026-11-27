@@ -1194,7 +1194,8 @@ compiled CLI). Their commands and exit codes:
   and `wininput raise <id>` only activates and raises the window.
 - Both exit 2 on bad usage, 3 on a missing grant (stderr `screen-recording` or
   `accessibility`), 4 on another failure and 5 when the window is gone (stderr
-  `no window`).
+  `no window`). A `wininput` that loses focus before the input lands exits 6
+  (stderr `focus`), and one whose parent died exits 7 (stderr `orphaned`).
 - `winbadge` shows the indicator and prints `ready` once its panels are on
   screen; it exits 10 when the person presses Stop, and on SIGTERM, stdin EOF
   or after four hours.
