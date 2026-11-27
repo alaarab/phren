@@ -31,8 +31,9 @@ import type { CodexQuestions } from "./questions.js";
 import { paneProject } from "./approval-summary.js";
 
 export const DREAM_TICK_MS = 10 * 60_000;
-/** After starting a dream for a project, the ticker leaves it alone this long, whatever the outcome. */
+/** After starting a dream, the ticker waits this long unless the child reports lock contention. */
 export const DREAM_RETRY_MS = 60 * 60_000;
+export const DREAM_BUSY_EXIT_CODE = 75;
 /** A scheduled dream that runs longer than this is stopped. */
 export const DREAM_CHILD_TIMEOUT_MS = 45 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
@@ -43,8 +44,8 @@ const SAFE_STATUSES = new Set(["idle", "done"]);
 /** One live agent session as the Hook sees it. */
 export interface DreamSession { project?: string; status?: string }
 
-export { readLastRun, type DreamLastRun } from "../dream/apply.js";
-import { pendingDreamProposals, readLastRun, type DreamLastRun } from "../dream/apply.js";
+export { readLastRun, type DreamLastRun } from "../dream/records.js";
+import { DREAM_ACCEPTANCE_DEFAULT_LIMIT, dreamProposalStats, readLastRun, type DreamAcceptance, type DreamDecisionConflict, type DreamLastRun } from "../dream/records.js";
 
 export function dreamsDir(phrenPath: string, project: string): string | null {
   return storeAwareProjectPath(phrenPath, project, "dreams");
@@ -178,6 +179,8 @@ export interface DreamStatus {
   /** The helper account and model a dream would use, or why there is none. */
   runsOn?: string;
   pendingProposals: number;
+  acceptance: DreamAcceptance;
+  conflicts: DreamDecisionConflict[];
 }
 
 /**
@@ -185,7 +188,7 @@ export interface DreamStatus {
  * are not consulted (that needs the Hook), so "eligible now" means as far as
  * timing goes; the Hook still waits for working agents.
  */
-export function dreamStatus(phrenPath: string, project: string, now = new Date()): DreamStatus {
+export function dreamStatus(phrenPath: string, project: string, now = new Date(), limit = DREAM_ACCEPTANCE_DEFAULT_LIMIT): DreamStatus {
   const config = getDreamingConfig(phrenPath, project);
   const lastRun = readLastRun(phrenPath, project);
   const lastRunAt = lastRun ? new Date(lastRun.at) : undefined;
@@ -197,7 +200,7 @@ export function dreamStatus(phrenPath: string, project: string, now = new Date()
   return {
     project,
     enabled: config.enabled,
-    pendingProposals: pendingDreamProposals(phrenPath, project),
+    ...dreamProposalStats(phrenPath, project, limit),
     mode: config.mode,
     cadence: config.cadence,
     window: config.window,
@@ -219,7 +222,7 @@ export interface DreamSchedulerDeps {
   /** This computer's live agent sessions with their project. Rejects when unknown; the tick is then skipped. */
   liveSessions: () => Promise<DreamSession[]>;
   /** Start one dream and resolve when it ends. */
-  run: (project: string) => Promise<void>;
+  run: (project: string) => Promise<"busy" | void>;
 }
 
 export class DreamScheduler {
@@ -268,7 +271,8 @@ export class DreamScheduler {
         }
         this.lastAttempt.set(project, this.deps.now());
         started.push(project);
-        await this.deps.run(project).catch(() => {});
+        const result = await this.deps.run(project).catch(() => undefined);
+        if (result === "busy") this.lastAttempt.delete(project);
       }
     } catch {
       // Sessions unknown: never guess that nobody is working.
@@ -326,7 +330,7 @@ export function dreamCommand(project: string, env: NodeJS.ProcessEnv = process.e
 }
 
 /** Run one scheduled dream as a low-priority child process of the Hook. */
-export function runDreamChild(store: string, project: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
+export function runDreamChild(store: string, project: string, env: NodeJS.ProcessEnv = process.env): Promise<"busy" | void> {
   const { command, args } = dreamCommand(project, env);
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
@@ -340,9 +344,8 @@ export function runDreamChild(store: string, project: string, env: NodeJS.Proces
     try { if (child.pid) os.setPriority(child.pid, 10); } catch { /* Not permitted here; run at normal priority. */ }
     const timer = setTimeout(() => { try { child.kill("SIGTERM"); } catch { /* gone */ } }, DREAM_CHILD_TIMEOUT_MS);
     timer.unref();
-    const done = () => { clearTimeout(timer); resolve(); };
-    child.once("error", done);
-    child.once("exit", done);
+    child.once("error", () => { clearTimeout(timer); resolve(); });
+    child.once("exit", (code) => { clearTimeout(timer); resolve(code === DREAM_BUSY_EXIT_CODE ? "busy" : undefined); });
   });
 }
 

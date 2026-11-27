@@ -1,15 +1,27 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir } from "../test-helpers.js";
 import { DEFAULT_DREAMING_CONFIG, type DreamingConfig } from "../config/dreaming.js";
+import { handleDreamCommand } from "../cli/dream.js";
+import { dreamLockPath } from "../dream/run.js";
+import { tryFileLock } from "../governance/locks.js";
 import {
   DREAM_RETRY_MS,
+  DREAM_BUSY_EXIT_CODE,
   DreamScheduler,
   dreamEligibility,
   dreamSessionsFromSnapshot,
+  runDreamChild,
   type DreamSession,
 } from "./dream-schedule.js";
+
+vi.mock("node:child_process", async importOriginal => {
+  const original = await importOriginal<typeof import("node:child_process")>();
+  return { ...original, spawn: vi.fn(original.spawn) };
+});
 
 const config = (patch: Partial<DreamingConfig> = {}): DreamingConfig => ({ ...DEFAULT_DREAMING_CONFIG, phases: [...DEFAULT_DREAMING_CONFIG.phases], enabled: true, ...patch });
 /** Local time on 2026-11-06 (a Friday), plus `days`. */
@@ -108,6 +120,49 @@ describe("DreamScheduler", () => {
     expect(await s.tick()).toEqual([]);
     now = new Date(at(3).getTime() + DREAM_RETRY_MS + 60_000);
     expect(await s.tick()).toEqual(["a"]);
+  });
+
+  it("retries on the last eligible tick after a child hits the project lock", async () => {
+    const store = makeTempDir("phren-dream-busy-");
+    fs.mkdirSync(path.join(store.path, "demo"));
+    fs.mkdirSync(path.join(store.path, ".config"));
+    fs.writeFileSync(path.join(store.path, ".config", "dreaming.json"), JSON.stringify({ enabled: true }));
+    const release = tryFileLock(dreamLockPath(store.path, "demo"));
+    if (!release) { store.cleanup(); throw new Error("Could not lock the synthetic project"); }
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const exitCode = process.exitCode;
+    let firstExitCode: typeof process.exitCode;
+    let now = at(4, 49);
+    const s = new DreamScheduler({
+      now: () => now, projects: () => ["demo"], config: () => config(), lastRun: () => undefined, liveSessions: async () => [],
+      run: project => runDreamChild(store.path, project),
+    });
+    vi.mocked(spawn).mockImplementationOnce((_command, args) => {
+      const child = new EventEmitter();
+      void handleDreamCommand((args as readonly string[]).slice(1), store.path).then(() => {
+        firstExitCode = process.exitCode;
+        process.exitCode = exitCode;
+        child.emit("exit", firstExitCode ?? 0);
+      }, err => child.emit("error", err));
+      return child as ReturnType<typeof spawn>;
+    }).mockImplementationOnce(() => {
+      const child = new EventEmitter();
+      queueMicrotask(() => child.emit("exit", 0));
+      return child as ReturnType<typeof spawn>;
+    });
+    try {
+      expect(await s.tick()).toEqual(["demo"]);
+      expect(log).toHaveBeenCalledWith("Dream for demo: busy");
+      expect(firstExitCode).toBe(DREAM_BUSY_EXIT_CODE);
+      release();
+      now = at(4, 59);
+      expect(await s.tick()).toEqual(["demo"]);
+    } finally {
+      release();
+      log.mockRestore();
+      process.exitCode = exitCode;
+      store.cleanup();
+    }
   });
 
   it("learns when a project was last active for the idle cadence", async () => {
