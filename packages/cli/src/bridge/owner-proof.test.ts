@@ -75,6 +75,11 @@ describe("owner proof", () => {
     const proofHeader = signed(owner, { method: "GET", path: "/v1/mac/windows", body: empty });
     await expect(get(proofHeader)).resolves.toBeUndefined();
     await expect(proof.check(request(undefined, "GET"), "/v1/mac/windows/snapshot", {}, empty)).rejects.toMatchObject({ status: 403 });
+    // The stream is a GET upgrade with no body: the same empty digest and the proof header on the upgrade request.
+    await expect(proof.check(request(undefined, "GET"), "/v1/mac/windows/stream", {}, empty))
+      .rejects.toMatchObject({ status: 403, details: { code: "owner-proof-required" } });
+    const streamProof = signed(owner, { method: "GET", path: "/v1/mac/windows/stream", body: empty });
+    await expect(proof.check(request(streamProof, "GET"), "/v1/mac/windows/stream", {}, empty)).resolves.toBeUndefined();
     for (const [pathname, digest] of [["/v1/mac/windows/action", bodyDigest(Buffer.from(BODY))], ["/v1/mac/windows/permissions", bodyDigest(Buffer.from(BODY))]] as const) {
       await expect(proof.check(request(undefined), pathname, {}, digest)).rejects.toMatchObject({ status: 403, details: { code: "owner-proof-required" } });
     }

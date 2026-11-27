@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { assess, collectResources, heavyKind, linuxChip, linuxModel, parseMacHardware, heavyProcesses, parseEtime, parseMeminfo, parsePmset, parsePs, parseSwap, parseProcVmstatSwapins, parseVmStatSwapins, type ProcessRow, ResourceMonitor, withStartTimes } from "./resources.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { assess, collectResources, heavyKind, linuxChip, linuxModel, parseMacHardware, heavyProcesses, parseEtime, parseMeminfo, parsePmset, parsePs, parseSwap, parseProcVmstatSwapins, parseVmStatSwapins, type ProcessRow, ResourceMonitor, RESOURCES_RETIRE_MS, withStartTimes } from "./resources.js";
 
 const GB = 1024 ** 3;
 const row = (pid: number, ppid: number, cpu: number, rssMB: number, command: string, args = command, pgid = pid): ProcessRow =>
   ({ pid, ppid, pgid, cpu, rssKB: rssMB * 1024, command, args });
+afterEach(() => { vi.useRealTimers(); });
 
 describe("resources", () => {
   it("reads process start times from ps etime", () => {
@@ -155,7 +156,8 @@ describe("resources", () => {
     let time = 0, owners = 0, processes = 0;
     const monitor = new ResourceMonitor({ now: () => time, home: () => process.cwd(), platform: "freebsd",
       processes: async () => { processes++; return [row(10, 1, 0, 1, "/bin/sh")]; },
-      owners: async () => { owners++; return new Map(); } }, 10_000);
+      owners: async () => { owners++; return new Map(); },
+      jobs: { list: async () => [], reconcile: async () => [] } as never }, 10_000);
     const [a, b] = await Promise.all([monitor.read(), monitor.read()]);
     expect(a).toBe(b); expect(processes).toBe(1); expect(owners).toBe(0);
     expect(a.disk?.freeBytes).toBeGreaterThan(0);
@@ -164,6 +166,33 @@ describe("resources", () => {
     const busy = await collectResources({ now: () => 0, home: () => process.cwd(), platform: "freebsd",
       processes: async () => [row(10, 1, 80, 1, "/usr/bin/xcodebuild")], owners: async () => { owners++; return new Map(); } });
     expect(owners).toBe(1); expect(busy.heavy[0].kind).toBe("xcodebuild");
+  });
+
+  it("rejects a joined read at expiry and never caches a retired probe's late result", async () => {
+    vi.useFakeTimers();
+    let time = 0, calls = 0;
+    let releaseFirst!: (rows: ProcessRow[]) => void;
+    const firstRows = new Promise<ProcessRow[]>(resolve => { releaseFirst = resolve; });
+    const monitor = new ResourceMonitor({ now: () => time, home: () => process.cwd(), platform: "freebsd",
+      processes: () => { calls++; return calls === 1 ? firstRows : Promise.resolve([row(10, 1, 0, 1, "/bin/sh")]); },
+      owners: async () => new Map(), hardware: async () => undefined,
+      jobs: { list: async () => [], reconcile: async () => [] } as never }, 10_000);
+    const first = monitor.read().catch(error => error), joined = monitor.read().catch(error => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(RESOURCES_RETIRE_MS);
+    await expect(first).resolves.toMatchObject({ message: expect.stringMatching(/stalled/i) });
+    await expect(joined).resolves.toMatchObject({ message: expect.stringMatching(/stalled/i) });
+    // The next read starts a fresh probe, and the retired one's late answer is not published.
+    time = RESOURCES_RETIRE_MS;
+    const fresh = await monitor.read();
+    expect(calls).toBe(2);
+    expect(fresh.heavy).toEqual([]);
+    releaseFirst([row(20, 1, 90, 1, "/usr/bin/xcodebuild")]);
+    await vi.advanceTimersByTimeAsync(0);
+    const cached = await monitor.read();
+    expect(calls).toBe(2);
+    expect(cached.heavy).toEqual([]);
   });
 });
 

@@ -1,4 +1,5 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, truncate, utimes, writeFile } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import path from "node:path";
@@ -11,6 +12,8 @@ import { publicChildAgents } from "./transcripts.js";
 import { object, objects } from "./protocol.js";
 
 const parent = "aaaaaaaa-1111-4111-8111-111111111111";
+const computerID = "bbbbbbbb-2222-4222-8222-222222222222";
+const ROUND = "2026-09-19T19:00:01.000Z";
 const execFileAsync = promisify(execFile);
 let roots: string[] = [];
 
@@ -21,14 +24,16 @@ function objectPayload(event: unknown): Record<string, unknown> {
 async function fixture(id: string, overrides: Record<string, unknown> = {}, events = '{"type":"text"}\n') {
   const root = await mkdtemp(path.join(tmpdir(), "phren-fanouts-")); roots.push(root);
   const directory = path.join(root, ".runtime/agent-fanouts", id); await mkdir(directory, { recursive: true });
+  const bridge = path.join(root, "bridge"); await mkdir(bridge, { recursive: true });
+  await writeFile(path.join(bridge, "computer-id"), computerID);
   await writeFile(path.join(directory, "events.jsonl"), events);
   await writeFile(path.join(directory, "manifest.json"), JSON.stringify({
     schemaVersion: 1, id, parent: { provider: "codex", session: parent }, provider: "opencode",
     taskLabel: "Review bridge", cwd: "/repo", worktree: "/repo-wt", model: "openrouter/deepseek/deepseek-v4.1-flash",
-    eventLog: "events.jsonl", createdAt: "2026-09-19T19:00:00.000Z", startedAt: "2026-09-19T19:00:01.000Z",
+    eventLog: "events.jsonl", createdAt: "2026-09-19T19:00:00.000Z", startedAt: ROUND,
     updatedAt: "2026-09-19T19:00:02.000Z", status: "running", ...overrides,
   }));
-  return { root, directory, env: { PHREN_PATH: root } };
+  return { root, directory, env: { PHREN_PATH: root, PHREN_BRIDGE_HOME: bridge } };
 }
 
 /** A Codex CLI fan-out manifest; `session` is the optional Codex thread UUID. */
@@ -65,6 +70,29 @@ async function archiveJob(root: string, id: string,
 
 async function present(target: string): Promise<boolean> {
   return Boolean(await stat(target).catch(() => undefined));
+}
+
+/** A pid no process holds: a real one, run and reaped, so `kill -0` says ESRCH. */
+async function deadPid(): Promise<number> {
+  const child = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+  await once(child, "exit");
+  return child.pid!;
+}
+
+/** The start identity `ps` reports for a live process, as the launchers record it. */
+async function startOf(pid: number): Promise<string> {
+  const { stdout } = await execFileAsync("ps", ["-o", "lstart=", "-p", String(pid)],
+    { env: { ...process.env, LC_ALL: "C", TZ: "UTC" } });
+  return stdout.trim().replace(/\s+/g, " ");
+}
+
+/** The launcher's sidecar; by default it names a killed worker on this computer. */
+async function sidecar(directory: string, overrides: Record<string, unknown> = {}) {
+  const [wrapperPid, childPid] = await Promise.all([deadPid(), deadPid()]);
+  await writeFile(path.join(directory, "liveness.json"), JSON.stringify({
+    v: 1, computer: computerID, wrapperPid, wrapperStart: "Thu Jan  1 00:00:00 1970",
+    childPid, childStart: "Thu Jan  1 00:00:00 1970", round: ROUND, ...overrides,
+  }));
 }
 
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -122,6 +150,59 @@ describe("fan-out manifests", () => {
     expect(await fanoutChildren("codex", parent, env)).toEqual([]);
     await rm(path.join(directory, "manifest.json"));
     expect(await fanoutChildren("codex", parent, env)).toEqual([]);
+  });
+
+  it.each(["queued", "running"])("reports a %s worker as gone on repeated reads without writing to its job", async status => {
+    const { directory, env } = await fixture("job-sidecar-gone", { status });
+    await sidecar(directory);
+    const manifest = path.join(directory, "manifest.json");
+    const original = await readFile(manifest, "utf8");
+    const files = await readdir(directory);
+    for (let read = 0; read < 2; read++) {
+      expect((await fanoutChildren("codex", parent, env))[0]).toMatchObject({ state: "gone", reason: "gone: worker process exited" });
+    }
+    expect(await readFile(manifest, "utf8")).toBe(original);
+    expect(await readdir(directory)).toEqual(files);
+  });
+
+  it("ignores a sidecar from another computer, an older round, or a torn file", async () => {
+    const elsewhere = await fixture("job-sidecar-elsewhere");
+    await sidecar(elsewhere.directory, { computer: "cccccccc-3333-4333-8333-333333333333" });
+    expect((await fanoutChildren("codex", parent, elsewhere.env))[0]).toMatchObject({ state: "running" });
+
+    const older = await fixture("job-sidecar-older-round");
+    await sidecar(older.directory, { round: "2026-09-19T18:00:00.000Z" });
+    expect((await fanoutChildren("codex", parent, older.env))[0]).toMatchObject({ state: "running" });
+
+    const torn = await fixture("job-sidecar-torn");
+    await writeFile(path.join(torn.directory, "liveness.json"), '{"wrapperPid":');
+    expect((await fanoutChildren("codex", parent, torn.env))[0]).toMatchObject({ state: "running" });
+  });
+
+  it.each([
+    ["without a version", { v: undefined }],
+    ["with an unknown version", { v: 2 }],
+    ["without a provider identity", { childPid: null, childStart: null }],
+  ] as const)("ignores a liveness sidecar %s", async (_reason, overrides) => {
+    const { directory, env } = await fixture("job-invalid-sidecar");
+    await sidecar(directory, overrides);
+    expect((await fanoutChildren("codex", parent, env))[0]).toMatchObject({ state: "running" });
+  });
+
+  it.skipIf(process.platform === "win32")("keeps a worker while either recorded process still runs", async () => {
+    const wrapper = await fixture("job-sidecar-wrapper-alive");
+    await sidecar(wrapper.directory, { wrapperPid: process.pid, wrapperStart: await startOf(process.pid) });
+    expect((await fanoutChildren("codex", parent, wrapper.env))[0]).toMatchObject({ state: "running" });
+
+    const childAlive = await fixture("job-sidecar-child-alive");
+    await sidecar(childAlive.directory, { childPid: process.pid, childStart: await startOf(process.pid) });
+    expect((await fanoutChildren("codex", parent, childAlive.env))[0]).toMatchObject({ state: "running" });
+  });
+
+  it.skipIf(process.platform === "win32")("treats a pid reused by another process as gone", async () => {
+    const { directory, env } = await fixture("job-sidecar-reused-pid");
+    await sidecar(directory, { wrapperPid: process.pid, wrapperStart: "Thu Jan  1 00:00:00 1970" });
+    expect((await fanoutChildren("codex", parent, env))[0]).toMatchObject({ state: "gone" });
   });
 
   it("accepts legacy parents and scopes a new computer-bound parent when supplied", async () => {

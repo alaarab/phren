@@ -1144,9 +1144,9 @@ phren mac-windows off
 ```
 
 The routes are listed in `packages/cli/src/bridge/AGENT_CONNECTIONS.md`; the
-`/v1/status` capability is `macWindows` on macOS. Every route is owner-only:
-MCP agents, peers and scoped gitboy keys get 403 with code
-`mac-windows-owner-only`.
+`/v1/status` capability is `macWindows` on macOS. Every route is owner-only.
+The HTTP endpoints return 403 with code `mac-windows-owner-only` to MCP agents,
+peers and scoped gitboy keys.
 
 - `GET /v1/mac/windows` answers `{ enabled, permissions, windows }`. When off
   it answers 200 with `enabled: false` and an empty list, so the phone can explain
@@ -1156,6 +1156,10 @@ MCP agents, peers and scoped gitboy keys get 403 with code
   answers one JPEG (`image/jpeg`). 409 `mac-windows-disabled` when off, 403
   `mac-windows-screen-recording` when the grant is missing (it asks macOS once
   per Hook run), 404 when the window is gone.
+- `WS /v1/mac/windows/stream?id=<id>&codec=<h264|hevc>&tier=<0..3>` streams
+  live video on macOS 14 or later. The stream route refuses non-owner requests,
+  requests without valid owner proof, and requests marked as agent or peer
+  traffic with HTTP 403 before the WebSocket upgrade.
 - `POST /v1/mac/windows/action` takes `{ id, action: "tap", x, y }` (fractions
   of the snapshot), `{ id, action: "type", text, submit? }` (1–2000 characters;
   `submit` types Return), `{ id, action: "key", key, modifiers? }` or

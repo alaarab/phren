@@ -130,12 +130,15 @@ export async function listProcesses(sources: ProcessSources): Promise<InventoryP
   const pids = picked.map(t => t.root);
   const selfChain = new Set<number>();
   for (let at = byPid.get(sources.selfPid ?? process.pid), hops = 0; at && hops < 64; at = byPid.get(at.ppid), hops++) selfChain.add(at.pid);
+  // A failed lookup leaves ownership unknown: a partial answer must never look complete.
+  let ownersKnown = true, conductorsKnown = true;
   const [uids, starts, owners, conductors] = await Promise.all([
     (sources.uids ?? ownerUids)(pids).catch(() => new Map<number, number>()),
     (sources.starts ?? exactStarts(platform))(pids).catch(() => new Map<number, string>()),
-    sources.owners?.().catch(() => new Map<number, PaneRef>()) ?? Promise.resolve(new Map<number, PaneRef>()),
-    sources.conductors?.().catch(() => new Set<string>()) ?? Promise.resolve(new Set<string>()),
+    sources.owners ? sources.owners().catch(() => { ownersKnown = false; return new Map<number, PaneRef>(); }) : Promise.resolve(new Map<number, PaneRef>()),
+    sources.conductors ? sources.conductors().catch(() => { conductorsKnown = false; return new Set<string>(); }) : Promise.resolve(new Set<string>()),
   ]);
+  const ownershipKnown = ownersKnown && conductorsKnown;
   const uid = sources.uid ?? process.getuid?.();
   const paneOf = (pid: number): PaneRef | undefined => {
     for (let at = byPid.get(pid), hops = 0; at && hops < 64; at = byPid.get(at.ppid), hops++) { const ref = owners.get(at.pid); if (ref) return ref; }
@@ -145,7 +148,8 @@ export async function listProcesses(sources: ProcessSources): Promise<InventoryP
     const row = byPid.get(root)!;
     const pane = paneOf(root);
     const conductor = pane ? conductors.has(`${pane.server}/${pane.pane}`) : false;
-    const block = endBlock(row, { uid, ownerUid: uids.get(root), selfChain, pane, conductor, paneProcess: owners.has(root) });
+    const block = ownershipKnown ? endBlock(row, { uid, ownerUid: uids.get(root), selfChain, pane, conductor, paneProcess: owners.has(root) })
+      : "couldn't verify which panes own this process; try again";
     const start = starts.get(root) ?? "";
     const name = base(row);
     const id = actionId("end-process", `${root}`, [name, start]);

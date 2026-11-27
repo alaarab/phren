@@ -5,16 +5,41 @@ import type { EventEmitter as Emitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The real helper runner is exercised by the pre-spawn and CLI probe tests.
-const runner = vi.hoisted(() => ({ spawns: [] as string[][], code: 0 }));
+const runner = vi.hoisted(() => ({
+  spawns: [] as string[][], signals: [] as string[], code: 0, hold: false, stdoutEOF: false,
+}));
+const audit = vi.hoisted(() => ({ beforeAdmission: undefined as (() => Promise<void>) | undefined }));
+const setting = vi.hoisted(() => ({ reads: 0 }));
+vi.mock("node:fs/promises", async importOriginal => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...fs,
+    readFile: async (...args: Parameters<typeof fs.readFile>) => {
+      const data = await fs.readFile(...args);
+      if (typeof args[0] === "string" && args[0].endsWith("mac-windows.json")) setting.reads++;
+      return data;
+    },
+    appendFile: async (...args: Parameters<typeof fs.appendFile>) => {
+      if (String(args[1]).includes('"action":"stream-start"') && String(args[1]).includes('"admitted":true')) await audit.beforeAdmission?.();
+      return fs.appendFile(...args);
+    },
+  };
+});
 vi.mock("./native-helpers.js", () => ({ verifiedHelper: async () => "/fake/phren-helper" }));
 vi.mock("node:child_process", async () => {
   const { EventEmitter } = await import("node:events");
   return {
     spawn: (file: string, args: string[]) => {
       runner.spawns.push([file, ...args]);
-      const child = new EventEmitter() as Emitter & { stdout: Emitter; stderr: Emitter; stdin: { on(): void; end(): void }; kill(): void };
-      Object.assign(child, { stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { on() {}, end() {} }, kill() {} });
-      queueMicrotask(() => child.emit("close", runner.code));
+      const child = new EventEmitter() as Emitter & { stdout: Emitter; stderr: Emitter; stdin: { on(): void; end(): void }; kill(signal: string): void };
+      Object.assign(child, { stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { on() {}, end() {} },
+        kill(signal: string) {
+          runner.signals.push(signal);
+          if (signal === "SIGKILL") child.emit("close", null);
+        },
+      });
+      if (runner.stdoutEOF) queueMicrotask(() => child.stdout.emit("end"));
+      if (!runner.hold) queueMicrotask(() => child.emit("close", runner.code));
       return child;
     },
   };
@@ -22,9 +47,10 @@ vi.mock("node:child_process", async () => {
 
 import type { Json } from "./protocol.js";
 import {
-  graphemeCount, MAC_WINDOWS_BUILD_MS, MAC_WINDOWS_IDLE_MS, MAC_WINDOWS_STOP_MS, macWindowAction, macWindowPermissions, macWindowsAct,
-  macWindowsEnabled, macWindowsList, macWindowsLocalPermissionReport, macWindowsOwnerOnly, macWindowsRequestPermission, macWindowsSessionEnd,
-  macWindowsSnapshot, macWindowsSupported, resetMacWindowsState, runMacWindowsHelper, setMacWindowsDeps, setMacWindowsEnabled, stopMacWindows,
+  beginMacWindowStream, graphemeCount, MAC_WINDOWS_BUILD_MS, MAC_WINDOWS_IDLE_MS, MAC_WINDOWS_STOP_MS, MAC_WINDOWS_STREAM_READY_MS,
+  macWindowAction, macWindowPermissions, macWindowsAct, macWindowsEnabled, macWindowsList, macWindowsLocalPermissionReport, macWindowsOwnerOnly,
+  macWindowsRequestPermission, macWindowsSessionEnd, macWindowsSnapshot, macWindowsSupported, resetMacWindowsState, runMacWindowsHelper,
+  setMacWindowsDeps, setMacWindowsEnabled, stopMacWindows,
   type MacWindowsBadge, type MacWindowsHelperCall, type MacWindowsHelperResult,
 } from "./mac-windows.js";
 
@@ -96,8 +122,9 @@ beforeEach(async () => {
   vi.useFakeTimers();
   calls = []; spawns = 0; badge = new FakeBadge(); releaseValue = "23.6.0";
   behaviour = () => undefined; custom = undefined; spawnDelay = undefined;
-  runner.spawns = []; runner.code = 0;
+  runner.spawns = []; runner.signals = []; runner.code = 0; runner.hold = false; runner.stdoutEOF = false;
   ranBeforeReady = false; callWaiters = []; spawnWaiters = [];
+  audit.beforeAdmission = undefined;
   resetMacWindowsState();
   restore = setMacWindowsDeps({
     platform: () => "darwin",
@@ -482,5 +509,243 @@ describe("mac windows: permissions", () => {
     await probesStarted;
     badge.exit(10);
     await expect(asking).resolves.toMatchObject({ status: 409, details: { code: "mac-windows-cancelled" } });
+  });
+});
+
+describe("mac windows: live stream admission", () => {
+  beforeEach(async () => { await setMacWindowsEnabled(true); });
+
+  it("refuses a non-owner before the setting, the badge or a helper", async () => {
+    const reasons: string[] = [];
+    await expect(beginMacWindowStream(false, 7, why => reasons.push(why)))
+      .rejects.toMatchObject({ status: 403, details: { code: "mac-windows-owner-only" } });
+    expect(reasons).toEqual([]);
+    expect(calls).toEqual([]);
+    expect(spawns).toBe(0);
+    expect((await logRows()).at(-1)).toMatchObject({ action: "stream-start", windowId: 7, ok: false, error: "mac-windows-owner-only" });
+  });
+
+  it("refuses a Mac older than macOS 14", async () => {
+    releaseValue = "22.6.0";
+    await expect(beginMacWindowStream(true, 7, () => {}))
+      .rejects.toMatchObject({ status: 404, details: { code: "unsupported-platform" } });
+    expect(spawns).toBe(0);
+    expect((await logRows()).at(-1)).toMatchObject({ action: "stream-start", ok: false, error: "unsupported-platform" });
+  });
+
+  it("refuses while the feature is off", async () => {
+    await setMacWindowsEnabled(false);
+    await expect(beginMacWindowStream(true, 7, () => {}))
+      .rejects.toMatchObject({ status: 409, details: { code: "mac-windows-disabled" } });
+    expect(spawns).toBe(0);
+    expect((await logRows()).at(-1)).toMatchObject({ action: "stream-start", windowId: 7, ok: false, error: "mac-windows-disabled" });
+  });
+
+  it("refuses inside Stop's minute", async () => {
+    await macWindowsList();
+    badge.exit(10);
+    await expect(beginMacWindowStream(true, 7, () => {}))
+      .rejects.toMatchObject({ status: 409, details: { code: "mac-windows-stopped" } });
+    expect(spawns).toBe(1);
+  });
+
+  it("grants the lease only after the badge's ready line", async () => {
+    badge = new FakeBadge(false);
+    const pending = beginMacWindowStream(true, 7, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    badge.becomeReady();
+    const lease = await pending;
+    expect(calls.map(call => [call.helper, call.args[0]])).toEqual([["wincap", "check"]]);
+    expect((await logRows()).at(-1)).toMatchObject({ action: "stream-start", windowId: 7, ok: true, admitted: true });
+    await lease.finish();
+    expect((await logRows()).at(-1)).toMatchObject({ action: "stream-end", windowId: 7, ok: true });
+  });
+
+  it("shares the original five-second badge deadline with a late stream", async () => {
+    badge = new FakeBadge(false);
+    let startedAt = 0;
+    spawnDelay = async () => { startedAt = Date.now(); return badge; };
+    const listing = macWindowsList().catch(error => error);
+    await vi.waitFor(() => expect(spawns).toBe(1));
+    await vi.advanceTimersByTimeAsync(MAC_WINDOWS_STREAM_READY_MS - 1_000);
+    const reads = setting.reads;
+    const pending = beginMacWindowStream(true, 7, () => {}).catch(error => error);
+    await vi.waitFor(() => expect(setting.reads).toBeGreaterThan(reads));
+    await vi.advanceTimersByTimeAsync(startedAt + MAC_WINDOWS_STREAM_READY_MS - Date.now());
+    badge.becomeReady();
+    await expect(listing).resolves.toMatchObject({ details: { code: "mac-windows-indicator" } });
+    await expect(pending).resolves.toMatchObject({ status: 409, details: { code: "mac-windows-badge" } });
+    expect(badge.kills).toEqual(["SIGTERM"]);
+    expect((await logRows()).at(-1)).toMatchObject({ action: "stream-start", windowId: 7, ok: false, error: "mac-windows-badge" });
+  });
+
+  it("fails immediately when badge stdout ends before ready while the process is still alive", async () => {
+    restore?.(); restore = undefined;
+    setMacWindowsDeps({ platform: () => "darwin", release: () => "23.6.0" });
+    runner.hold = true;
+    runner.stdoutEOF = true;
+    const pending = beginMacWindowStream(true, 7, () => {});
+    const refusal = expect(pending).rejects.toMatchObject({ details: { code: "mac-windows-badge" } });
+    await refusal;
+    expect(runner.signals).toEqual(["SIGTERM"]);
+  }, 1_000);
+
+  it("prompts once for Screen Recording and refuses without the grant", async () => {
+    behaviour = call => call.helper === "wincap" && call.args[0] === "check" ? { code: 3 } : undefined;
+    await expect(beginMacWindowStream(true, 7, () => {}))
+      .rejects.toMatchObject({ status: 403, details: { code: "mac-windows-screen-recording" } });
+    await expect(beginMacWindowStream(true, 7, () => {}))
+      .rejects.toMatchObject({ status: 403, details: { code: "mac-windows-screen-recording" } });
+    expect(calls.filter(call => call.helper === "wincap" && call.args[0] === "prompt")).toHaveLength(1);
+    expect((await logRows()).at(-1)).toMatchObject({ action: "stream-start", ok: false, error: "mac-windows-screen-recording" });
+  });
+
+  it("re-reads the enable file after the awaited admission", async () => {
+    badge = new FakeBadge(false);
+    const pending = beginMacWindowStream(true, 7, () => {});
+    await vi.advanceTimersByTimeAsync(0);
+    await setMacWindowsEnabled(false);
+    badge.becomeReady();
+    await expect(pending).rejects.toMatchObject({ status: 409, details: { code: "mac-windows-disabled" } });
+    expect(calls).toEqual([]);
+  });
+
+  it.each(["off", "Stop"] as const)("refuses with the specific reason when %s lands during the permission probe", async event => {
+    let release!: () => void;
+    custom = call => call.helper === "wincap" && call.args[0] === "check"
+      ? new Promise(resolve => { release = () => resolve(answer(call)); }) : undefined;
+    const pending = beginMacWindowStream(true, 7, () => {}).catch(error => error);
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    if (event === "off") await setMacWindowsEnabled(false);
+    else badge.exit(10);
+    release();
+    const code = event === "off" ? "mac-windows-disabled" : "mac-windows-stopped";
+    await expect(pending).resolves.toMatchObject({ details: { code } });
+    expect((await logRows()).filter(row => row.action === "stream-start")).toEqual([
+      expect.objectContaining({ ok: false, error: code }),
+    ]);
+  });
+
+  it.each([
+    { event: "off", code: "mac-windows-disabled", outcome: "mac-windows-disabled" },
+    { event: "Stop", code: "mac-windows-stopped", outcome: "mac-windows-stopped" },
+    { event: "disconnect then Stop", code: "mac-windows-stopped", outcome: "done" },
+  ])("pairs the admitted audit row with one end when $event lands during its write", async ({ event, code, outcome }) => {
+    let release!: () => void;
+    audit.beforeAdmission = () => new Promise(resolve => { release = resolve; });
+    const reasons: string[] = [];
+    const connection = new AbortController();
+    const pending = beginMacWindowStream(true, 7, why => reasons.push(why), connection.signal).catch(error => error);
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    if (event === "off") await setMacWindowsEnabled(false);
+    else {
+      if (event === "disconnect then Stop") connection.abort("done");
+      badge.exit(10);
+      expect(reasons).toEqual(["mac-windows-stopped"]);
+      await setMacWindowsEnabled(false);
+    }
+    release();
+    await expect(pending).resolves.toMatchObject({ details: { code } });
+    expect(reasons).toEqual([code]);
+    const rows = (await logRows()).filter(row => row.action.startsWith("stream-"));
+    expect(rows).toEqual([
+      expect.objectContaining({ action: "stream-start", ok: true, admitted: true }),
+      expect.objectContaining({
+        action: "stream-end", ok: outcome === "done", ...(outcome === "done" ? {} : { error: outcome }), session: rows[0].session,
+      }),
+    ]);
+  });
+
+  it("pins the session so a static stream outlives the idle timer, then rearms it", async () => {
+    const lease = await beginMacWindowStream(true, 7, () => {});
+    await vi.advanceTimersByTimeAsync(MAC_WINDOWS_IDLE_MS + 1);
+    expect(badge.kills).toEqual([]);
+    await lease.finish();
+    await vi.advanceTimersByTimeAsync(MAC_WINDOWS_IDLE_MS + 1);
+    expect(badge.kills).toEqual(["SIGTERM"]);
+  });
+
+  it("invalidates the lease synchronously on Stop and writes one stream-end", async () => {
+    const reasons: string[] = [];
+    const lease = await beginMacWindowStream(true, 7, why => reasons.push(why));
+    badge.exit(10);
+    expect(reasons).toEqual(["mac-windows-stopped"]);
+    await lease.finish("mac-windows-stopped");
+    await lease.finish("mac-windows-stopped");
+    const rows = (await logRows()).filter(row => row.action === "stream-end");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ windowId: 7, ok: false, error: "mac-windows-stopped" });
+  });
+
+  it("invalidates the lease when the badge dies or the feature is turned off", async () => {
+    const badgeReasons: string[] = [];
+    const badgeLease = await beginMacWindowStream(true, 7, why => badgeReasons.push(why));
+    badge.exit(0);
+    expect(badgeReasons).toEqual(["mac-windows-badge"]);
+    await badgeLease.finish("mac-windows-badge");
+
+    resetMacWindowsState();
+    await setMacWindowsEnabled(true);
+    badge = new FakeBadge();
+    setMacWindowsDeps({ pollMs: () => 10 });
+    const offReasons: string[] = [];
+    const offLease = await beginMacWindowStream(true, 7, why => offReasons.push(why));
+    await setMacWindowsEnabled(false);
+    await vi.waitFor(() => expect(offReasons).toEqual(["mac-windows-disabled"]));
+    await offLease.finish("mac-windows-disabled");
+    const ends = (await logRows()).filter(row => row.action === "stream-end");
+    expect(ends.map(row => row.error)).toEqual(["mac-windows-badge", "mac-windows-disabled"]);
+  });
+
+});
+
+describe("mac windows: scroll and drag", () => {
+  beforeEach(async () => { await setMacWindowsEnabled(true); });
+
+  it.each([["drag", 1_500], ["tap", 500]])("gives an aborted %s %i ms to release input before SIGKILL", async (action, grace) => {
+    runner.hold = true;
+    const controller = new AbortController();
+    const running = runMacWindowsHelper({ helper: "wininput", args: [action, "7"] }, controller.signal);
+    await vi.waitFor(() => expect(runner.spawns).toHaveLength(1));
+    controller.abort();
+    expect(runner.signals).toEqual(["SIGTERM"]);
+    await vi.advanceTimersByTimeAsync(grace - 1);
+    expect(runner.signals).toEqual(["SIGTERM"]);
+    await vi.advanceTimersByTimeAsync(1);
+    await running;
+    expect(runner.signals).toEqual(["SIGTERM", "SIGKILL"]);
+  });
+
+  it("forwards scroll and drag as wininput argv", async () => {
+    await macWindowsAct({ action: "scroll", id: 42, x: 0.25, y: 0.75, dx: -240, dy: 240 });
+    await macWindowsAct({ action: "drag", id: 42, x1: 0, y1: 1, x2: 1, y2: 0, durationMs: 800 });
+    const ran = calls.filter(call => call.helper === "wininput" && !["check", "prompt"].includes(call.args[0]));
+    expect(ran.map(call => call.args)).toEqual([
+      ["scroll", "42", "0.25", "0.75", "-240", "240"],
+      ["drag", "42", "0", "1", "1", "0", "800"],
+    ]);
+  });
+
+  it("logs the action and window with no gesture coordinates", async () => {
+    await macWindowsAct({ action: "scroll", id: 7, x: 0.125, y: 0.875, dx: 3, dy: -7 });
+    await macWindowsAct({ action: "drag", id: 7, x1: 0.2, y1: 0.3, x2: 0.4, y2: 0.5, durationMs: 240 });
+    const rows = await logRows();
+    expect(rows.filter(row => ["scroll", "drag"].includes(String(row.action))).map(row => row.action)).toEqual(["scroll", "scroll", "drag", "drag"]);
+    for (const row of rows) for (const key of ["x", "y", "dx", "dy", "x1", "y1", "x2", "y2", "durationMs"]) expect(row).not.toHaveProperty(key);
+  });
+
+  it("refuses out-of-range gestures before anything runs", async () => {
+    const invalid = [
+      { action: "scroll", id: 7, x: 0.5, y: 0.5, dx: 0, dy: 0 },
+      { action: "scroll", id: 7, x: 0.5, y: 0.5, dx: 241, dy: 1 },
+      { action: "scroll", id: 7, x: 0.5, y: 0.5, dx: 1.5, dy: 1 },
+      { action: "scroll", id: 7, x: -0.1, y: 0.5, dx: 1, dy: 1 },
+      { action: "drag", id: 7, x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2, durationMs: 79 },
+      { action: "drag", id: 7, x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2, durationMs: 801 },
+      { action: "drag", id: 7, x1: 0.1, y1: 1.1, x2: 0.2, y2: 0.2, durationMs: 300 },
+    ];
+    for (const body of invalid) await expect(macWindowsAct(body)).rejects.toMatchObject({ status: 400 });
+    expect(calls).toEqual([]);
+    expect(spawns).toBe(0);
   });
 });

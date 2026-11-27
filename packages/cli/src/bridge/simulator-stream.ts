@@ -1,7 +1,10 @@
 import { spawn as spawnChild } from "node:child_process";
 import type { Readable } from "node:stream";
+import { FrameReader } from "./frame-reader.js";
 import { BridgeError, type Json } from "./protocol.js";
 import { bootedSimulators, SIMULATOR_UDID, verifiedHelper } from "./simulators.js";
+
+export { FrameReader, MAX_FRAME_BYTES } from "./frame-reader.js";
 
 /**
  * `WS /v1/simulators/stream?udid=&fps=&size=&quality=`: one booted
@@ -37,8 +40,6 @@ import { bootedSimulators, SIMULATOR_UDID, verifiedHelper } from "./simulators.j
  * `/v1/simulators/action`.
  */
 
-/** A JPEG larger than this is a broken helper, not a frame. */
-export const MAX_FRAME_BYTES = 4 * 1024 * 1024;
 /** The wire budget: about 24 Mbit/s, so animations at full rate on Wi-Fi, and
  * the phone asks for a smaller `size` on a slower link. */
 export const STREAM_BYTES_PER_SECOND = 3 * 1024 * 1024;
@@ -65,28 +66,6 @@ export function streamOptions(query: URLSearchParams): StreamOptions {
   const ack = query.get("ack");
   if (ack !== null && ack !== "1" && ack !== "0") throw new BridgeError(400, "ack must be 1 or 0.");
   return { udid: udid.toUpperCase(), fps: int("fps", 24, 1, 30), size: int("size", 1280, 240, 1600), quality: int("quality", 60, 30, 90), ack: ack === "1" };
-}
-
-/** Splits the helper's stdout into frames: a 4-byte big-endian length, then
- * that many bytes. Pipes deliver arbitrary chunks, so a frame may span many. */
-export class FrameReader {
-  private buffered: Buffer[] = [];
-  private bytes = 0;
-  push(chunk: Buffer): Buffer[] {
-    this.buffered.push(chunk); this.bytes += chunk.length;
-    const frames: Buffer[] = [];
-    while (this.bytes >= 4) {
-      const head = this.buffered[0].length >= 4 ? this.buffered[0] : Buffer.concat(this.buffered);
-      const length = head.readUInt32BE(0);
-      if (length === 0 || length > MAX_FRAME_BYTES) throw new Error(`frame of ${length} bytes`);
-      if (this.bytes < 4 + length) break;
-      const all = this.buffered.length === 1 ? this.buffered[0] : Buffer.concat(this.buffered);
-      frames.push(all.subarray(4, 4 + length));
-      const rest = all.subarray(4 + length);
-      this.buffered = rest.length ? [rest] : []; this.bytes = rest.length;
-    }
-    return frames;
-  }
 }
 
 /** Sends the newest frame only. At most `window` frames are in flight (until
@@ -148,7 +127,8 @@ export interface StreamClient {
   readonly readyState: number;
   send(data: string | Buffer, options: { binary: boolean }, done?: (error?: Error) => void): void;
   close(code?: number, reason?: string): void;
-  once(event: "close" | "error", listener: () => void): unknown;
+  once(event: "close", listener: (code: number) => void): unknown;
+  once(event: "error", listener: () => void): unknown;
   on(event: "message", listener: (data: Buffer, isBinary: boolean) => void): unknown;
 }
 

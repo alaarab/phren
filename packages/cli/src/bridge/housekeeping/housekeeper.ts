@@ -7,6 +7,7 @@ import type { HealthCheck } from "../machine-health.js";
 import type { InboxSource } from "../owner-inbox.js";
 import { atomicInPrivateDir, bridgeRoot } from "../protocol.js";
 import type { ComputerResources } from "../resources.js";
+import { logger } from "../../logger.js";
 import {
   type ActionKind, type ApproveResult, type Area, type Badge, badgeOf, type InventoryView, buildReport, type Cleaned, healthOf, type HousekeepingView,
   type ItemDraft, type StoredItem, type StoredReport, type Trigger, viewOf,
@@ -34,11 +35,37 @@ export const DISK_FLOOR_BYTES = 20 * 1024 ** 3;
 export const APPROVE_BUDGET_MS = 45_000;
 /** The inventory scan (sizes are slow) runs hourly and on request. */
 export const SCAN_MS = 60 * 60_000;
+/** The overview's badge may wait this long; a slower read falls back to the last good one. */
+export const BADGE_WAIT_MS = 2_000;
 /** An inventory older than this is marked stale. */
 const STALE_MS = 2 * SCAN_MS;
 const MAX_REPORTS = 2000;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const DAY = 86_400_000;
+
+/** The overview badge, bounded: one read at a time, and a read slower than `waitMs` falls back to the last good badge. */
+export function boundedBadge(read: () => Promise<Badge | undefined>, waitMs = BADGE_WAIT_MS): () => Promise<Badge | undefined> {
+  let last: Badge | undefined;
+  let pending: Promise<Badge | undefined> | undefined;
+  let stalled = false;
+  return async () => {
+    if (!pending) {
+      stalled = false;
+      pending = read().then(badge => { last = badge ?? last; return badge; }).catch(() => undefined)
+        .finally(() => { pending = undefined; });
+    }
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<"timeout">(resolve => { timer = setTimeout(() => resolve("timeout"), waitMs); timer.unref(); });
+    try {
+      const result = await Promise.race([pending, timeout]);
+      if (result !== "timeout") return result;
+      if (!stalled) { stalled = true; logger.warn("stream", `/v1/overview housekeeping badge read stalled past ${waitMs}ms`); }
+      return last;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
 
 export interface CheckContext extends InUseSources {
   resources: ComputerResources;

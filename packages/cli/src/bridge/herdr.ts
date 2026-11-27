@@ -174,20 +174,40 @@ export async function serversStrict(): Promise<Json[]> {
  * chat and status streams and the activity timer. The overview and every
  * action take a fresh one, which the pollers then reuse. */
 export const SNAPSHOT_SHARE_MS = intervalFromEnv("PHREN_SNAPSHOT_SHARE_MS", 2_500, 0, 10_000);
+/** A request this old is not coming back; the next caller starts fresh so a reconnect can recover. */
+export const SNAPSHOT_RETIRE_MS = 30_000;
 const sharedSnapshots = new Map<string, { at: number; value: Json }>();
-const inFlightSnapshots = new Map<string, Promise<Json>>();
+type InFlightSnapshot = { at: number; generation: number; promise: Promise<Json>; reject: (error: Error) => void };
+const inFlightSnapshots = new Map<string, InFlightSnapshot>();
+const snapshotGenerations = new Map<string, number>();
 
-/** A fresh snapshot. Its answer also becomes the shared one, so pollers reuse it. */
-export async function snapshot(server: string): Promise<Json> {
-  const started = Date.now();
-  const value = await (await terminal()).terminalProvider().snapshot(server);
+function publishSnapshot(server: string, started: number, value: Json): void {
   const current = sharedSnapshots.get(server);
   // A slower request that started before the current answer never replaces it.
   if (!current || current.at <= started) {
     if (!current && sharedSnapshots.size >= 64) sharedSnapshots.delete(sharedSnapshots.keys().next().value!);
     sharedSnapshots.set(server, { at: Date.now(), value });
   }
+}
+
+async function readSnapshot(server: string): Promise<Json> {
+  return (await terminal()).terminalProvider().snapshot(server);
+}
+
+/** A fresh snapshot. Its answer also becomes the shared one, so pollers reuse it. */
+export async function snapshot(server: string): Promise<Json> {
+  const started = Date.now();
+  const value = await readSnapshot(server);
+  publishSnapshot(server, started, value);
   return value;
+}
+
+function retireSnapshot(server: string, entry: InFlightSnapshot): void {
+  if (inFlightSnapshots.get(server) !== entry) return;
+  inFlightSnapshots.delete(server);
+  // Bumped so a retired attempt can never publish its late answer.
+  if ((snapshotGenerations.get(server) ?? 0) === entry.generation) snapshotGenerations.set(server, entry.generation + 1);
+  entry.reject(new BridgeError(503, "Herdr did not answer the snapshot in time; retry.", { code: "herdr-snapshot-stalled" }));
 }
 
 /**
@@ -202,10 +222,31 @@ export async function sharedSnapshot(server: string, maxAgeMs = SNAPSHOT_SHARE_M
   const cached = sharedSnapshots.get(server);
   if (cached && Date.now() - cached.at < maxAgeMs) return cached.value;
   const pending = inFlightSnapshots.get(server);
-  if (pending) return pending;
-  const value = snapshot(server).finally(() => { if (inFlightSnapshots.get(server) === value) inFlightSnapshots.delete(server); });
-  inFlightSnapshots.set(server, value);
-  return value;
+  if (pending) {
+    if (Date.now() - pending.at < SNAPSHOT_RETIRE_MS) return pending.promise;
+    // Too old to answer: unblock its waiters and let the next caller start fresh.
+    retireSnapshot(server, pending);
+  }
+  const started = Date.now();
+  const generation = (snapshotGenerations.get(server) ?? 0) + 1;
+  snapshotGenerations.set(server, generation);
+  let entry: InFlightSnapshot | undefined;
+  let rejectStalled!: (error: Error) => void;
+  const stalled = new Promise<never>((_, reject) => { rejectStalled = reject; });
+  let timer: NodeJS.Timeout | undefined;
+  const result = readSnapshot(server).then(value => {
+    if (snapshotGenerations.get(server) === generation) publishSnapshot(server, started, value);
+    return value;
+  }).finally(() => {
+    clearTimeout(timer);
+    if (inFlightSnapshots.get(server) === entry) inFlightSnapshots.delete(server);
+  });
+  const promise = Promise.race([result, stalled]);
+  entry = { at: started, generation, promise, reject: rejectStalled };
+  inFlightSnapshots.set(server, entry);
+  timer = setTimeout(() => retireSnapshot(server, entry!), SNAPSHOT_RETIRE_MS);
+  timer.unref();
+  return promise;
 }
 
 /**
@@ -225,7 +266,7 @@ export function knownPanes(maxAgeMs: number): Json[] | undefined {
 }
 
 /** For tests: forget every shared snapshot and the server list. */
-export function resetSharedHerdrState(): void { sharedSnapshots.clear(); inFlightSnapshots.clear(); serverList = undefined; knownServers = undefined; }
+export function resetSharedHerdrState(): void { sharedSnapshots.clear(); inFlightSnapshots.clear(); snapshotGenerations.clear(); serverList = undefined; knownServers = undefined; }
 /** The agent's Herdr name. Newer Herdr keeps it in `agents[].name` rather
  * than on the pane (`agent_name`); read either. */
 export function paneAgentName(s: Json, pane: Json | undefined): string | undefined {

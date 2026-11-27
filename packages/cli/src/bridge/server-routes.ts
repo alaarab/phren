@@ -203,7 +203,7 @@ export async function effectiveStatusRows(server: string, s: Json, budgetMs = ST
 export const capabilities = { browsers: true, turnCheckpoints: true, transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, sessionSeen: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", macWindows: macWindowsSupported() ? 1 : undefined, code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, ownerConfirm: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true, housekeeping: 1, housekeepingInventory: 1 };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", macWindows: macWindowsSupported() ? 1 : undefined, macWindowStream: macWindowsSupported() ? 1 : undefined, code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, ownerConfirm: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true, housekeeping: 1, housekeepingInventory: 1 };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -266,7 +266,7 @@ export function selectedServer(url: URL): string {
  * `session.snapshot`. `GET /v1/workspaces` passes a fresh snapshot; the
  * `/v1/overview` stream passes the shared one it already holds.
  */
-export type WorkspacesReader = (server: string, s: Json, watchApprovals: boolean) => Promise<Json>;
+export type WorkspacesReader = (server: string, s: Json, watchApprovals: boolean, live?: () => boolean) => Promise<Json>;
 
 /** The pane's turn record for its session row. OpenCode's plugin stamps its
  * turns per PID instead of writing a lifecycle record. */
@@ -279,9 +279,9 @@ async function paneTurnRecord(server: string, pane: Json, session: string): Prom
 
 export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "agentHooks" | "journal" | "tabActivity" | "contextUsage" | "turnQueue">): WorkspacesReader {
   const { modules, info, agentHooks, journal, tabActivity, contextUsage } = ctx;
-  return async (server, s, watchApprovals) => {
+  return async (server, s, watchApprovals, live) => {
     const { generation, stamps: lastChanged } = await tabActivity.observe(server, s);
-    if (watchApprovals) agentHooks.overview.renew(server);
+    if (watchApprovals && (live?.() ?? true)) agentHooks.overview.renew(server);
     const context = await contextUsage.read(server, s);
     await journal.record(server, objects(s.panes));
     const chatStates = new Map(await Promise.all(objects(s.panes).filter(p => p.agent).map(async p =>
