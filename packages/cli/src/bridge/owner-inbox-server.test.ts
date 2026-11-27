@@ -1,47 +1,121 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import type { IncomingMessage, RequestListener, ServerOptions, ServerResponse } from "node:http";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Readable } from "node:stream";
+import { expect, it, vi } from "vitest";
+import { AgentHooks } from "./agent-hooks.js";
+import { BrowserRegistry } from "./browser-registry.js";
+import * as herdr from "./herdr.js";
 import { OwnerInbox } from "./owner-inbox.js";
-import { OwnerInboxPushSweep } from "./owner-inbox-push.js";
-import { observeInboxTick } from "./server.js";
+import * as peerReads from "./peer-reads.js";
+import * as peers from "./peers.js";
+import { ApprovalPushService } from "./push.js";
+import { serve } from "./server.js";
+
+// Use serve's actual request handler and intervals without a listening socket.
+const http = vi.hoisted(() => ({ handler: undefined as RequestListener | undefined }));
+vi.mock("node:http", async importOriginal => {
+  const actual = await importOriginal<typeof import("node:http")>();
+  return { ...actual, createServer: (options: ServerOptions, handler: RequestListener) => {
+    http.handler = handler;
+    const server = actual.createServer(options, handler);
+    server.listen = ((file: string, ready: () => void) => {
+      void writeFile(file, "").then(ready, error => server.emit("error", error));
+      return server;
+    }) as typeof server.listen;
+    return server;
+  } };
+});
 
 const AT = Date.parse("2026-11-27T10:00:00.000Z");
 const DEVICE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-let root: string;
+const REMOTE = {
+  id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", title: "Peer-only item", kind: "manual", state: "open",
+  createdAt: new Date(AT).toISOString(), updatedAt: new Date(AT).toISOString(),
+};
 
-beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), "phren-inbox-server-"));
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(new Date(AT));
-});
-afterEach(async () => {
-  vi.useRealTimers();
-  await rm(root, { recursive: true, force: true });
-});
-
-describe("server inbox tick", () => {
-  it("hands the reconciled CLI add to the sweep and sends it once", async () => {
-    const inbox = new OwnerInbox(async () => [], path.join(root, "owner-inbox.json"));
-    const sent: Array<{ id: string; title: string }> = [], devices: string[] = [];
-    const sweep = new OwnerInboxPushSweep({
-      ownerInboxPushDevices: () => devices,
-      notifyOwnerInbox: async value => { sent.push({ id: value.id, title: value.title }); return true; },
-    }, { file: path.join(root, "owner-inbox-push.json"), now: Date.now });
-
-    // The first tick initializes the ledger before any phone registered.
-    await observeInboxTick(inbox, sweep);
-    vi.setSystemTime(new Date(AT + 1000));
-    const added = await inbox.run({ action: "add", title: "OVH US VPS-2 is in stock" });
-    devices.push(DEVICE);
-    await observeInboxTick(inbox, sweep);
-    expect(sent).toEqual([{ id: (added.item as { id: string }).id, title: "OVH US VPS-2 is in stock" }]);
-    await observeInboxTick(inbox, sweep);
-    expect(sent).toHaveLength(1);
+function inboxRead(query: string, peer = false): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const req = Readable.from([]) as IncomingMessage;
+    req.method = "GET";
+    req.url = `/v1/owner-inbox?${query}`;
+    req.headers = peer ? { "x-phren-origin": "peer" } : {};
+    const res = {
+      statusCode: 200,
+      setHeader() {},
+      end(body: string) {
+        if (this.statusCode !== 200) return reject(new Error(`Inbox read returned ${this.statusCode}: ${body}`));
+        try { resolve(JSON.parse(body)); } catch (error) { reject(error); }
+      },
+    };
+    http.handler!(req, res as unknown as ServerResponse);
   });
+}
 
-  it("still reconciles when no sweep is wired", async () => {
-    const inbox = new OwnerInbox(async () => [], path.join(root, "owner-inbox.json"));
-    await expect(observeInboxTick(inbox)).resolves.toBeUndefined();
-  });
+it("sends a persisted CLI add from the real activity timer and keeps peer reads quiet", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "inbox-"));
+  const ledgerFile = path.join(root, "owner-inbox-push.json");
+  const previousUmask = process.umask();
+  const previousSignals = process.listeners("SIGTERM");
+  const stop = () => process.listeners("SIGTERM").find(listener => !previousSignals.includes(listener));
+  vi.stubEnv("PHREN_BRIDGE_HOME", root);
+  vi.stubEnv("PHREN_PATH", path.join(root, "store"));
+  vi.stubEnv("PHREN_OWNER_INBOX_BACKFILL_ID", undefined);
+  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+  vi.setSystemTime(AT);
+  vi.spyOn(herdr, "recentServers").mockResolvedValue([]);
+  vi.spyOn(AgentHooks.prototype, "start").mockResolvedValue(undefined);
+  vi.spyOn(BrowserRegistry.prototype, "start").mockResolvedValue(undefined);
+  vi.spyOn(peers, "hookPeers").mockResolvedValue([{
+    name: "Desk", address: "desk.invalid", username: "owner", port: 22, hostKey: "fixture", server: "default",
+  }]);
+  vi.spyOn(peerReads, "peerRead").mockResolvedValue({ ok: true, items: [REMOTE] });
+  const devices = vi.spyOn(ApprovalPushService.prototype, "ownerInboxPushDevices").mockReturnValue([]);
+  const sent = vi.spyOn(ApprovalPushService.prototype, "notifyOwnerInbox").mockResolvedValue(true);
+  const serving = serve("test");
+  let startupError: unknown;
+  void serving.catch(error => { startupError = error; });
+
+  const readLedger = async () => JSON.parse(await readFile(ledgerFile, "utf8")) as unknown;
+  try {
+    await vi.waitFor(() => {
+      if (startupError) throw startupError;
+      expect(stop()).toBeDefined();
+    });
+    // Let the actual interval initialize the ledger before adding any rows.
+    await vi.advanceTimersByTimeAsync(5000);
+    await vi.waitFor(async () => expect(await readLedger()).toMatchObject({ entries: [] }));
+
+    const cliInbox = new OwnerInbox(async () => [], path.join(root, "owner-inbox.json"));
+    const { item } = await cliInbox.run({ action: "add", title: "OVH US VPS-2 is in stock" });
+    const { id, title } = item as { id: string; title: string };
+    devices.mockReturnValue([DEVICE]);
+
+    // Both a peer fetching this Hook's list and a phone's aggregate read see
+    // open rows before the next tick. Neither read may enqueue or send.
+    expect(await inboxRead("local=1&compact=1&reconcile=1", true)).toMatchObject({ items: [{ id, title }] });
+    expect(await inboxRead("compact=1")).toMatchObject({
+      items: [{ id, inboxComputer: "local" }, { id: REMOTE.id, inboxComputer: "Desk" }],
+    });
+    expect(sent).not.toHaveBeenCalled();
+    expect(await readLedger()).toMatchObject({ entries: [] });
+
+    await vi.advanceTimersByTimeAsync(5000);
+    await vi.waitFor(async () => expect(await readLedger()).toMatchObject({
+      entries: [{ id, sentDeviceIDs: [DEVICE] }],
+    }));
+    expect(sent).toHaveBeenCalledExactlyOnceWith({ id, title, expiresAt: expect.any(String) }, DEVICE);
+  } finally {
+    const shutdown = stop();
+    if (shutdown) {
+      shutdown("SIGTERM");
+      await serving;
+    }
+    process.umask(previousUmask);
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    await rm(root, { recursive: true, force: true });
+  }
 });

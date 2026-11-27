@@ -100,17 +100,6 @@ export { capabilities, capabilitiesForModules, requireRoute } from "./server-rou
 export { streamCloseReason } from "./server-stream.js";
 export { herdrAgentName, launchSession } from "./server-launch.js";
 
-/**
- * The activity tick's Inbox step: reconcile once, then hand that exact open
- * snapshot to the push sweep. Exported so the wiring itself is testable.
- */
-export function observeInboxTick(
-  inbox: Pick<OwnerInbox, "tick">,
-  sweep?: Pick<OwnerInboxPushSweep, "observe">,
-): Promise<void> {
-  return inbox.tick().then(items => sweep?.observe(items)).then(() => undefined);
-}
-
 export async function serve(version: string, options: { modelCatalog?: ModelCatalog; accountUsage?: AccountUsageReader } = {}): Promise<void> {
   process.umask(0o077);
   markHookServerProcess();
@@ -181,7 +170,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   // Inbox alerts ride the inbox's own reconciliation: the sweep sees the same
   // open snapshot regardless of whether the phone ever reads the list.
   const inboxPush = inbox ? new OwnerInboxPushSweep(agentHooks.push,
-    { file: path.join(root, "owner-inbox-push.json") }) : undefined;
+    { file: path.join(root, "owner-inbox-push.json"), isOpenForPush: id => inbox.isOpenForPush(id) }) : undefined;
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const settingsSwitcher = new SettingsSwitcher(agentHooks);
@@ -504,7 +493,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       void mover.reconcile().catch(() => {});
       void succession?.reconcile().catch(() => {});
       void returns?.tick();
-      if (inbox) void observeInboxTick(inbox, inboxPush).catch(() => {});
+      void inbox?.tick().then(items => inboxPush?.observe(items)).catch(() => {});
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {

@@ -25,9 +25,8 @@ const MAX_SEEDS = 3;
 /** One sweep attempts at most this many distinct candidate rows (each to all
  * of its eligible phones). */
 const MAX_CANDIDATES = 3;
-/** Receipts retained per ledger entry; the reader schema matches this so a
- * candidate that outlives many registrations never disables the ledger. */
-const MAX_RECEIPTS = 16;
+const MAX_ENTRIES = 1000;
+const deviceIDSchema = z.string().uuid();
 
 /** The internal tick snapshot adds first-open eligibility to the public row. */
 type ObservedItem = InboxItem & { firstOpen?: boolean };
@@ -37,23 +36,21 @@ const entrySchema = z.object({
   /** The observed revision, frozen when the candidate was created. */
   updatedAt: z.string().datetime(),
   expiresAt: z.string().datetime(),
-  sentDeviceIDs: z.array(z.string().uuid()).max(MAX_RECEIPTS),
+  // Bound retention by candidate count and expiry. A phone may register again
+  // before the candidate expires, so its accepted receipt stays until then.
+  sentDeviceIDs: z.array(deviceIDSchema),
 }).strict();
 const ledgerSchema = z.object({
   version: z.literal(1),
   initializedAt: z.string().datetime(),
-  entries: z.array(entrySchema).max(1000),
+  entries: z.array(entrySchema).max(MAX_ENTRIES),
 }).strict();
 type LedgerEntry = z.infer<typeof entrySchema>;
 type Ledger = z.infer<typeof ledgerSchema>;
 
-/** Receipts keep the newest 16 acceptances; the reader applies the same limit
- * so a long-lived candidate with many registrations still reads as valid. */
-function recordReceipt(entry: LedgerEntry, deviceID: string): void {
-  entry.sentDeviceIDs = [...entry.sentDeviceIDs.filter(id => id !== deviceID), deviceID].slice(-MAX_RECEIPTS);
-}
-
 export interface OwnerInboxPushOptions {
+  /** Fresh local store read under the Inbox lock. */
+  isOpenForPush: (id: string) => Promise<boolean>;
   /** `<bridge>/owner-inbox-push.json` by default. */
   file?: string;
   /** Test seam; the ledger's deadlines and the retry interval read this. */
@@ -67,15 +64,15 @@ export interface OwnerInboxPushOptions {
 
 /**
  * Alerts the owner's registered phones about genuinely new open Inbox rows.
- * Fed from the Hook's successful local reconciliation; it never reads peers,
- * never holds the inbox lock, and never lets a reword, repeat observation or
- * same-id reopen enqueue a second alert.
+ * Fed from the Hook's successful local reconciliation. It checks the local
+ * store under its lock and releases it before calling the provider.
  */
 export class OwnerInboxPushSweep {
   private readonly file: string;
   private readonly now: () => number;
   private readonly log: (message: string) => void;
   private readonly backfillId: () => string | undefined;
+  private readonly isOpenForPush: OwnerInboxPushOptions["isOpenForPush"];
   private chain: Promise<void> = Promise.resolve();
   private active = false;
   private queued?: ObservedItem[];
@@ -89,8 +86,9 @@ export class OwnerInboxPushSweep {
   private readonly accepted = new Set<string>();
   private corruptReported = false;
 
-  constructor(private readonly sender: OwnerInboxPushSender, options: OwnerInboxPushOptions = {}) {
+  constructor(private readonly sender: OwnerInboxPushSender, options: OwnerInboxPushOptions) {
     this.file = options.file ?? path.join(bridgeRoot(), "owner-inbox-push.json");
+    this.isOpenForPush = options.isOpenForPush;
     this.now = options.now ?? Date.now;
     this.log = options.log ?? (message => console.error(message));
     const fixed = options.backfillId;
@@ -113,7 +111,7 @@ export class OwnerInboxPushSweep {
           const items = this.queued;
           this.queued = undefined;
           await this.sweep(items).catch(error => {
-            this.log(`Phren Inbox push: the sweep failed and no alert was sent: ${error instanceof Error ? error.message : String(error)}`);
+            this.log(`Phren Inbox push: the sweep stopped early: ${error instanceof Error ? error.message : String(error)}`);
           });
         }
       } finally { this.active = false; }
@@ -127,19 +125,20 @@ export class OwnerInboxPushSweep {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;
     }
-    if (!info.isFile() || info.isSymbolicLink() || info.size > 1024 * 1024) return "corrupt";
+    if (!info.isFile() || info.isSymbolicLink()) return "corrupt";
     try { return ledgerSchema.parse(JSON.parse(await readFile(this.file, "utf8"))); } catch { return "corrupt"; }
   }
 
   private async sweep(openItems: ObservedItem[]): Promise<void> {
     const now = this.now(), at = new Date(now).toISOString();
+    for (const [key, retryAt] of this.retryAfter) if (retryAt <= now) this.retryAfter.delete(key);
     const loaded = await this.load();
     if (loaded === "corrupt") {
       // Fail closed: never send from a ledger whose receipts may be lost, and
       // never overwrite it before the owner can look at it.
       if (!this.corruptReported) {
         this.corruptReported = true;
-        this.log(`Phren Inbox push: ${this.file} is corrupt, so no Inbox alerts will be sent. Move it aside to start a fresh ledger (existing rows are not re-alerted).`);
+        this.log(`Phren Inbox push: ${this.file} is corrupt, so no Inbox alerts will be sent. Restore a valid copy or move it aside to seed a fresh ledger.`);
       }
       return;
     }
@@ -178,7 +177,7 @@ export class OwnerInboxPushSweep {
       const id = key.slice(0, split), deviceID = key.slice(split + 1);
       const entry = ledger.entries.find(candidate => candidate.id === id);
       if (!entry || entry.sentDeviceIDs.includes(deviceID)) continue;
-      recordReceipt(entry, deviceID); changed = true;
+      entry.sentDeviceIDs.push(deviceID); changed = true;
     }
     return changed;
   }
@@ -218,7 +217,7 @@ export class OwnerInboxPushSweep {
       if (!(created > initializedAt)) continue;
       const expiresAt = created + DAY_MS;
       // A row whose window already closed must not churn back in.
-      if (expiresAt <= now || ledger.entries.length >= 1000) continue;
+      if (expiresAt <= now || ledger.entries.length >= MAX_ENTRIES) continue;
       ledger.entries.push({ id: item.id, updatedAt: item.updatedAt, expiresAt: new Date(expiresAt).toISOString(), sentDeviceIDs: [] });
       known.add(item.id); changed = true;
     }
@@ -228,11 +227,10 @@ export class OwnerInboxPushSweep {
   /** Up to three distinct candidate rows per sweep, oldest first: a new row by
    * its creation time and a backfill by its own updatedAt (they all share the
    * initialization deadline). Each selected row is offered to all of its
-   * eligible phones. Every provider call rechecks the row against the newest
-   * snapshot and the current clock, so a row that closed or expired while an
-   * earlier send was pending is never sent late. */
+   * eligible phones. Recheck persisted state, the newest snapshot and the
+   * deadline before each call. A row consumes a slot on its first attempt. */
   private async deliver(ledger: Ledger): Promise<void> {
-    const devices = [...new Set(this.sender.ownerInboxPushDevices())].filter(device => typeof device === "string" && device.length > 0).sort();
+    const devices = [...new Set(this.sender.ownerInboxPushDevices())].filter(device => deviceIDSchema.safeParse(device).success).sort();
     if (!devices.length) return;
     const initializedAt = Date.parse(ledger.initializedAt);
     const age = (entry: LedgerEntry) => {
@@ -240,36 +238,33 @@ export class OwnerInboxPushSweep {
       return created === initializedAt ? Date.parse(entry.updatedAt) : created;
     };
     const candidates = [...ledger.entries].sort((a, b) => age(a) - age(b) || a.id.localeCompare(b.id));
+    const openItem = (id: string) => this.latest.find(item => item.id === id && item.state === "open" && item.firstOpen !== false);
     let selected = 0;
     for (const entry of candidates) {
       if (selected >= MAX_CANDIDATES) break;
-      if (Date.parse(entry.expiresAt) <= this.now()) continue;
-      const pending = devices.filter(deviceID => {
-        const key = `${entry.id}:${deviceID}`;
-        return !entry.sentDeviceIDs.includes(deviceID) && !this.accepted.has(key)
-          && (this.retryAfter.get(key) ?? 0) <= this.now();
-      });
-      // A row with no eligible phone does not consume one of the three slots.
-      if (!pending.length) continue;
-      selected++;
-      for (const deviceID of pending) {
-        // Recheck immediately before provider I/O: the newest snapshot may
-        // have closed this row, and the ledger deadline may have passed.
+      const deadline = Date.parse(entry.expiresAt);
+      let attempted = false;
+      for (const deviceID of devices) {
         const key = `${entry.id}:${deviceID}`;
         const current = this.now();
-        if (Date.parse(entry.expiresAt) <= current) break;
+        if (deadline <= current) break;
         if ((this.retryAfter.get(key) ?? 0) > current) continue;
         if (entry.sentDeviceIDs.includes(deviceID) || this.accepted.has(key)) continue;
-        const live = this.latest.find(item => item.id === entry.id && item.state === "open");
-        if (!live) break;
+        if (!openItem(entry.id) || !await this.isOpenForPush(entry.id)) break;
+        const live = openItem(entry.id);
         const attemptedAt = this.now();
+        if (!live || deadline <= attemptedAt) break;
+        if (!attempted) {
+          selected++;
+          attempted = true;
+        }
         let accepted = false;
         try {
           accepted = await this.sender.notifyOwnerInbox({ id: entry.id, title: live.title, expiresAt: entry.expiresAt }, deviceID);
         } catch { accepted = false; }
         if (accepted) {
           this.accepted.add(key);
-          recordReceipt(entry, deviceID);
+          entry.sentDeviceIDs.push(deviceID);
           try { await atomicInPrivateDir(this.file, ledger); }
           catch (error) {
             this.log(`Phren Inbox push: ${key} was accepted but its receipt could not be saved; the phone will not be alerted again while this Hook runs: ${error instanceof Error ? error.message : String(error)}`);

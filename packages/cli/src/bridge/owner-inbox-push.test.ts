@@ -44,7 +44,7 @@ function fakeSender(ok: (deviceID: string) => boolean = () => true): FakeSender 
 }
 
 const sweep = (sender: FakeSender, options: { log?: (message: string) => void; backfillId?: string } = {}) =>
-  new OwnerInboxPushSweep(sender, { file, now: () => now, ...options });
+  new OwnerInboxPushSweep(sender, { file, now: () => now, isOpenForPush: async () => true, ...options });
 const ledger = async () => JSON.parse(await readFile(file, "utf8")) as {
   version: number; initializedAt: string; entries: Array<{ id: string; updatedAt: string; expiresAt: string; sentDeviceIDs: string[] }>;
 };
@@ -326,6 +326,45 @@ describe("owner inbox push sweep", () => {
     expect(sender.attempts).toEqual([`${first.id}:${DEVICE_A}`]);
   });
 
+  it("checks for a persisted close between device calls even when no newer tick ran", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(AT);
+    const inboxFile = path.join(root, "owner-inbox.json");
+    const inbox = new OwnerInbox(async () => [], inboxFile);
+    const writer = new OwnerInbox(async () => [], inboxFile);
+    const sender = fakeSender();
+    sender.devices = [DEVICE_A, DEVICE_B];
+    const options = { file, now: Date.now, isOpenForPush: (id: string) => inbox.isOpenForPush(id) };
+    const push = new OwnerInboxPushSweep(sender, options);
+    await push.observe(await inbox.tick());
+    vi.setSystemTime(AT + 1000);
+    const { item } = await writer.run({ action: "add", title: "Close while the first phone accepts" });
+    const added = item as InboxItem;
+    sender.notifyOwnerInbox = vi.fn(async (_value, deviceID) => {
+      if (deviceID === DEVICE_A) await writer.close(added.id, added.updatedAt, "dismiss");
+      return true;
+    });
+    await push.observe(await inbox.tick());
+    expect(vi.mocked(sender.notifyOwnerInbox).mock.calls.map(([, deviceID]) => deviceID)).toEqual([DEVICE_A]);
+    expect((await ledger()).entries[0].sentDeviceIDs).toEqual([DEVICE_A]);
+  });
+
+  it("leaves sweep slots for open rows behind three retained closed candidates", async () => {
+    const sender = fakeSender();
+    const push = sweep(sender);
+    const older = Array.from({ length: 3 }, () => row({ createdAt: iso(now - 1000) }));
+    await push.observe(older);
+    advance(1000);
+    const newer = row();
+    sender.devices.push(DEVICE_A);
+    await push.observe([newer]);
+    expect(sender.attempts).toEqual([`${newer.id}:${DEVICE_A}`]);
+    advance(60_000);
+    const next = row();
+    await push.observe([newer, next]);
+    expect(sender.attempts).toEqual([`${newer.id}:${DEVICE_A}`, `${next.id}:${DEVICE_A}`]);
+  });
+
   it("rechecks the candidate deadline right before a later provider call", async () => {
     const sender = fakeSender();
     sender.devices.push(DEVICE_A);
@@ -356,16 +395,18 @@ describe("owner inbox push sweep", () => {
   it("never alerts a manual row that was resolved and reopened between ticks", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(AT));
-    const box = new OwnerInbox(async () => [], path.join(root, "owner-inbox.json"));
+    const inboxFile = path.join(root, "owner-inbox.json");
+    const box = new OwnerInbox(async () => [], inboxFile);
     const sender = fakeSender();
     sender.devices.push(DEVICE_A);
-    const push = new OwnerInboxPushSweep(sender, { file, now: Date.now });
+    const push = new OwnerInboxPushSweep(sender, { file, now: Date.now, isOpenForPush: id => box.isOpenForPush(id) });
     await push.observe(await box.tick());
     vi.setSystemTime(new Date(AT + 1000));
     const added = (await box.run({ action: "add", title: "OVH US VPS-2 is in stock" })).item as InboxItem;
     await box.run({ action: "resolve", id: added.id, resolution: "done" });
     await box.run({ action: "add", id: added.id, title: "OVH US VPS-2 is back in stock" });
-    await push.observe(await box.tick());
+    const restarted = new OwnerInbox(async () => [], inboxFile);
+    await push.observe(await restarted.tick());
     expect(sender.attempts).toEqual([]);
 
     // A genuinely new row created after the cursor still alerts.
@@ -375,7 +416,7 @@ describe("owner inbox push sweep", () => {
     expect(sender.sent.map(item => item.value.title)).toEqual(["OVH has a second plan"]);
   });
 
-  it("caps receipts at the newest 16 and keeps a long-lived ledger readable after 17 registrations", async () => {
+  it("keeps every receipt after 17 registrations and never resends to the first phone after restart", async () => {
     const sender = fakeSender();
     const box = sweep(sender);
     await box.observe([]);
@@ -385,14 +426,12 @@ describe("owner inbox push sweep", () => {
       sender.devices = [deviceId(index)];
       await box.observe([rowNow]);
     }
-    const entries = (await ledger()).entries;
-    expect(entries).toHaveLength(1);
-    expect(entries[0].sentDeviceIDs).toEqual(Array.from({ length: 16 }, (_, index) => deviceId(index + 1)));
     const log = vi.fn(), reader = fakeSender();
-    reader.devices = [deviceId(16)];
+    reader.devices = [deviceId(0), deviceId(16), deviceId(17)];
     await sweep(reader, { log }).observe([rowNow]);
     expect(log).not.toHaveBeenCalled();
-    expect(reader.attempts).toEqual([]);
+    expect(reader.attempts).toEqual([`${rowNow.id}:${deviceId(17)}`]);
+    expect((await ledger()).entries[0].sentDeviceIDs).toEqual(Array.from({ length: 18 }, (_, index) => deviceId(index)));
   });
 
   it.skipIf(process.platform === "win32")("keeps an acceptance in memory when its receipt write fails", async () => {
