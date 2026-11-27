@@ -8,7 +8,7 @@ import { setChoiceReaders } from "./account-choice.js";
 import { AccountFailover } from "./account-failover.js";
 import { ownerInboxSources } from "./owner-inbox-sources.js";
 import { OwnerInbox } from "./owner-inbox.js";
-import { OwnerInboxPushSweep, type OwnerInboxPushSender } from "./owner-inbox-push.js";
+import { OwnerInboxPushSweep } from "./owner-inbox-push.js";
 import { StaleTaskSources } from "./task-stale.js";
 import { ownerInboxDone } from "./owner-inbox-done.js";
 import { boundedBadge, Housekeeper, SCAN_MS as HOUSEKEEPING_SCAN_MS, TICK_MS as HOUSEKEEPING_TICK_MS } from "./housekeeping/housekeeper.js";
@@ -100,6 +100,17 @@ export { capabilities, capabilitiesForModules, requireRoute } from "./server-rou
 export { streamCloseReason } from "./server-stream.js";
 export { herdrAgentName, launchSession } from "./server-launch.js";
 
+/**
+ * The activity tick's Inbox step: reconcile once, then hand that exact open
+ * snapshot to the push sweep. Exported so the wiring itself is testable.
+ */
+export function observeInboxTick(
+  inbox: Pick<OwnerInbox, "tick">,
+  sweep?: Pick<OwnerInboxPushSweep, "observe">,
+): Promise<void> {
+  return inbox.tick().then(items => sweep?.observe(items)).then(() => undefined);
+}
+
 export async function serve(version: string, options: { modelCatalog?: ModelCatalog; accountUsage?: AccountUsageReader } = {}): Promise<void> {
   process.umask(0o077);
   markHookServerProcess();
@@ -168,10 +179,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     return { ...observed, sources: [...observed.sources, ...housekeeper?.inboxSources() ?? [], ...staleTasks?.sources() ?? []] };
   }, path.join(root, "owner-inbox.json"), items => ownerInboxDone(items)) : undefined;
   // Inbox alerts ride the inbox's own reconciliation: the sweep sees the same
-  // open snapshot regardless of whether the phone ever reads the list. The
-  // push service is typed structurally until its Inbox methods ship; both
-  // calls re-check the phone's registration and kind at send time.
-  const inboxPush = inbox ? new OwnerInboxPushSweep(agentHooks.push as unknown as OwnerInboxPushSender,
+  // open snapshot regardless of whether the phone ever reads the list.
+  const inboxPush = inbox ? new OwnerInboxPushSweep(agentHooks.push,
     { file: path.join(root, "owner-inbox-push.json") }) : undefined;
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
@@ -495,7 +504,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       void mover.reconcile().catch(() => {});
       void succession?.reconcile().catch(() => {});
       void returns?.tick();
-      if (inbox) void inbox.tick().then(items => inboxPush?.observe(items)).catch(() => {});
+      if (inbox) void observeInboxTick(inbox, inboxPush).catch(() => {});
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
