@@ -4,6 +4,18 @@ import { hookPeers, peerRequest } from "./peers.js";
 import { ownerInboxSchema, pasteCommand, type OwnerInbox } from "./owner-inbox.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 
+/** What the phone's list and a notification need. Everything else a Hook
+ * computes for its own screen (commands, paste, dispatch links, live
+ * bookkeeping, history) stays on the Hook. */
+const COMPACT_FIELDS = ["id", "title", "kind", "state", "createdAt", "updatedAt", "inboxComputer", "project", "computer", "target"] as const;
+
+/** A compact item: the fields above, and nothing an older or newer peer added. */
+export function compactInboxItem(item: Json): Json {
+  const compact: Json = {};
+  for (const field of COMPACT_FIELDS) if (item[field] !== undefined) compact[field] = item[field];
+  return compact;
+}
+
 /** The paste must send the resolve to the Hook that owns this row. */
 function placed(item: Json, inboxComputer: string): Json {
   const { id, command, updatedAt } = item;
@@ -14,18 +26,23 @@ function placed(item: Json, inboxComputer: string): Json {
 
 /** Aggregate each Hook's own inbox once, without recursively listing peers.
  * inboxComputer identifies the Hook to send a resolution to; computer on a
- * dispatch row names the worker and can be a different computer. */
-export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnly = false): Promise<Json> {
+ * dispatch row names the worker and can be a different computer.
+ *
+ * `compact` asks for the phone's wire item. It is sent to peers too, but every
+ * read is projected again here: an older peer ignores it and answers in full,
+ * and a newer peer may add fields this build does not know. */
+export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnly = false, compact = false): Promise<Json> {
   const data = ownerInboxSchema.parse(input);
   const { computer, ...local } = data;
   const peers = await hookPeers().catch(() => []);
-  const localList = `/v1/owner-inbox?local=1${data.includeResolved ? "&includeResolved=true" : ""}`;
+  const localList = `/v1/owner-inbox?local=1${data.includeResolved ? "&includeResolved=true" : ""}${compact ? "&compact=1" : ""}`;
+  const project = (items: Json[]) => compact ? items.map(compactInboxItem) : items;
   if (computer && computer !== "local" && !isLocalComputer(computer)) {
     const peer = peers.find(peer => peer.name === computer);
     if (!peer) throw new BridgeError(404, "That inbox computer is not linked.");
     if (local.action === "list") {
       const view = await peerRead(peer, localList);
-      return { ...view, items: objects(view.items).map(item => placed(item, computer)), unreachable: [] };
+      return { ...view, items: project(objects(view.items).map(item => placed(item, computer))), unreachable: [] };
     }
     if (local.command !== undefined || local.task !== undefined || local.pr !== undefined || local.key !== undefined || local.ifUpdatedAt !== undefined) {
       const health = await peerRequest(peer, "/v1/health", undefined, 5_000);
@@ -38,7 +55,8 @@ export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnl
     return { ...result, item: local.action === "add" ? placed(item, computer) : { ...item, inboxComputer: computer } };
   }
   const result = await inbox.run(local);
-  if (data.action !== "list" || localOnly) return result;
+  if (data.action !== "list") return result;
+  if (localOnly) return compact ? { ...result, items: project(objects(result.items)) } : result;
   const items: Json[] = objects(result.items).map(item => placed(item, "local")), unreachable: Json[] = [];
   await Promise.all(peers.map(async peer => {
     try {
@@ -68,5 +86,5 @@ export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnl
     if (seen.has(key)) return false;
     seen.add(key); return true;
   });
-  return { ok: true, items: current, unreachable };
+  return { ok: true, items: project(current), unreachable };
 }
