@@ -4,9 +4,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Json } from "./protocol.js";
 import {
-  MAC_WINDOWS_IDLE_MS, MAC_WINDOWS_STOP_MS, graphemeCount, macWindowAction, macWindowsAct, macWindowsEnabled, macWindowsList,
-  macWindowsOwnerOnly, macWindowsRequestPermission, macWindowsSnapshot, macWindowsSupported, resetMacWindowsState,
-  setMacWindowsDeps, setMacWindowsEnabled, type MacWindowsBadge, type MacWindowsHelperCall, type MacWindowsHelperResult,
+  graphemeCount, MAC_WINDOWS_BUILD_MS, MAC_WINDOWS_IDLE_MS, MAC_WINDOWS_STOP_MS, macWindowAction, macWindowsAct, macWindowsEnabled,
+  macWindowsList, macWindowsOwnerOnly, macWindowsRequestPermission, macWindowsSnapshot, macWindowsSupported, resetMacWindowsState,
+  setMacWindowsDeps, setMacWindowsEnabled, stopMacWindows, type MacWindowsBadge, type MacWindowsHelperCall, type MacWindowsHelperResult,
 } from "./mac-windows.js";
 
 /** Phone control of Mac windows, with the helpers faked (no Mac, no swiftc). */
@@ -40,6 +40,7 @@ type Call = { helper: string; args: string[]; input?: string };
 let root: string, calls: Call[], spawns: number, badge: FakeBadge, releaseValue: string;
 let behaviour: (call: MacWindowsHelperCall) => Partial<MacWindowsHelperResult> | undefined;
 let custom: ((call: MacWindowsHelperCall, signal: AbortSignal) => Promise<MacWindowsHelperResult> | undefined) | undefined;
+let spawnDelay: (() => Promise<FakeBadge>) | undefined;
 let restore: (() => void) | undefined;
 
 function answer(call: MacWindowsHelperCall): MacWindowsHelperResult {
@@ -70,17 +71,19 @@ beforeEach(async () => {
   vi.stubEnv("PHREN_BRIDGE_HOME", root);
   vi.useFakeTimers();
   calls = []; spawns = 0; badge = new FakeBadge(); releaseValue = "23.6.0";
-  behaviour = () => undefined; custom = undefined;
+  behaviour = () => undefined; custom = undefined; spawnDelay = undefined;
   resetMacWindowsState();
   restore = setMacWindowsDeps({
     platform: () => "darwin",
     release: () => releaseValue,
     now: () => Date.now(),
+    // The 500 ms enable poll would otherwise fire hundreds of times when a test advances the idle clock.
+    pollMs: () => 3_600_000,
     run: async (call, signal) => {
       calls.push({ helper: call.helper, args: call.args, ...(call.input !== undefined ? { input: call.input } : {}) });
       return custom?.(call, signal) ?? answer(call);
     },
-    spawnBadge: async () => { spawns++; return badge; },
+    spawnBadge: async () => { spawns++; return spawnDelay ? spawnDelay() : badge; },
   });
 });
 
@@ -249,20 +252,97 @@ describe("mac windows: requests", () => {
     expect(spawns).toBe(2);
   });
 
-  it("kills a running input helper when Stop is pressed", async () => {
+  it("stops a running input cooperatively when Stop is pressed", async () => {
     vi.useRealTimers();
-    let killed = false;
+    let stopped = false;
     custom = (call, signal) => call.helper === "wininput" && call.args[0] === "type"
       ? new Promise(resolve => signal.addEventListener("abort", () => {
-        killed = true;
-        resolve({ stdout: Buffer.alloc(0), stderr: "killed", code: 137 });
+        stopped = true;
+        resolve({ stdout: Buffer.alloc(0), stderr: "cancelled\n", code: 8 });
       }, { once: true }))
       : undefined;
     const typing = macWindowsAct({ action: "type", id: 7, text: "secret" });
     await until(() => calls.some(call => call.helper === "wininput" && call.args[0] === "type"), "the typing child");
     badge.exit(10);
-    await expect(typing).rejects.toMatchObject({ status: 409, details: { code: "mac-windows-cancelled" } });
-    expect(killed).toBe(true);
+    await expect(typing).rejects.toMatchObject({
+      status: 409, message: "Phone control ended before that input finished; part of the text may have been typed.", details: { code: "mac-windows-cancelled" },
+    });
+    expect(stopped).toBe(true);
+  });
+
+  it("reports success when the helper finished as cancellation arrived", async () => {
+    vi.useRealTimers();
+    custom = (call, signal) => call.helper === "wininput" && call.args[0] === "type"
+      ? new Promise(resolve => signal.addEventListener("abort", () => resolve({ stdout: Buffer.alloc(0), stderr: "", code: 0 }), { once: true }))
+      : undefined;
+    const typing = macWindowsAct({ action: "type", id: 7, text: "hello" });
+    await until(() => calls.some(call => call.helper === "wininput" && call.args[0] === "type"), "the typing child");
+    badge.exit(10);
+    await expect(typing).resolves.toEqual({ ok: true });
+  });
+
+  it("refuses a queued action after the feature is turned off", async () => {
+    vi.useRealTimers();
+    let releaseFirst!: () => void;
+    custom = call => call.helper === "wininput" && call.args[0] === "tap"
+      ? new Promise(resolve => {
+        if (call.args[2] === "0.1") releaseFirst = () => resolve({ stdout: Buffer.alloc(0), stderr: "", code: 0 });
+        else resolve({ stdout: Buffer.alloc(0), stderr: "", code: 0 });
+      })
+      : undefined;
+    const first = macWindowsAct({ action: "tap", id: 7, x: 0.1, y: 0.1 });
+    const second = macWindowsAct({ action: "tap", id: 7, x: 0.2, y: 0.2 });
+    await until(() => calls.filter(call => call.args[0] === "tap").length === 1, "the first tap");
+    await setMacWindowsEnabled(false);
+    releaseFirst();
+    await expect(first).resolves.toEqual({ ok: true });
+    await expect(second).rejects.toMatchObject({ status: 409, details: { code: "mac-windows-disabled" } });
+    expect(calls.filter(call => call.args[0] === "tap")).toHaveLength(1);
+  });
+
+  it("does not idle out a request that is in flight", async () => {
+    let release!: () => void;
+    custom = call => call.helper === "wininput" && call.args[0] === "raise"
+      ? new Promise(resolve => { release = () => resolve({ stdout: Buffer.alloc(0), stderr: "", code: 0 }); })
+      : undefined;
+    const raising = macWindowsAct({ action: "raise", id: 7 });
+    for (let tick = 0; tick < 50 && !calls.some(call => call.args[0] === "raise"); tick++) await vi.advanceTimersByTimeAsync(5);
+    expect(calls.some(call => call.args[0] === "raise")).toBe(true);
+    await vi.advanceTimersByTimeAsync(MAC_WINDOWS_IDLE_MS + 1);
+    expect(badge.kills).toEqual([]);
+    release();
+    await expect(raising).resolves.toEqual({ ok: true });
+    await vi.advanceTimersByTimeAsync(MAC_WINDOWS_IDLE_MS + 1);
+    expect(badge.kills).toEqual(["SIGTERM"]);
+  });
+
+  it("refuses new sessions while shutting down and disposes a late badge", async () => {
+    vi.useRealTimers();
+    let releaseSpawn!: () => void;
+    const lateBadge = new FakeBadge(false);
+    spawnDelay = () => new Promise<FakeBadge>(resolve => { releaseSpawn = () => resolve(lateBadge); });
+    const starting = macWindowsList().catch(error => error);
+    await until(() => spawns === 1, "the badge spawn");
+    const stopping = stopMacWindows();
+    releaseSpawn();
+    await stopping;
+    await expect(starting).resolves.toMatchObject({ status: 409 });
+    expect(lateBadge.kills).toContain("SIGTERM");
+    await expect(macWindowsList()).rejects.toMatchObject({ status: 503, details: { code: "mac-windows-shutdown" } });
+  });
+
+  it("disposes a badge that arrives after the startup deadline", async () => {
+    let releaseSpawn!: () => void;
+    const lateBadge = new FakeBadge(false);
+    spawnDelay = () => new Promise<FakeBadge>(resolve => { releaseSpawn = () => resolve(lateBadge); });
+    const starting = macWindowsList().catch(error => error);
+    for (let tick = 0; tick < 50 && spawns === 0; tick++) await vi.advanceTimersByTimeAsync(5);
+    expect(spawns).toBe(1);
+    await vi.advanceTimersByTimeAsync(MAC_WINDOWS_BUILD_MS + 1);
+    releaseSpawn();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(lateBadge.kills).toContain("SIGTERM");
+    await expect(starting).resolves.toMatchObject({ status: 409, details: { code: "mac-windows-indicator" } });
   });
 
   it("reports a window that lost focus before the input landed", async () => {
@@ -320,5 +400,12 @@ describe("mac windows: permissions", () => {
     await expect(macWindowsRequestPermission("screen-recording")).rejects.toMatchObject({ status: 409, details: { code: "mac-windows-disabled" } });
     expect(calls).toEqual([]);
     expect(spawns).toBe(0);
+  });
+
+  it("fails the list when a helper cannot be built or run, instead of reporting a denied grant", async () => {
+    await setMacWindowsEnabled(true);
+    behaviour = call => call.helper === "wincap" && call.args[0] === "check" ? { code: 127, stderr: "spawn failed\n" } : undefined;
+    await expect(macWindowsList()).rejects.toMatchObject({ status: 409, details: { code: "mac-windows-helper" }, message: expect.stringContaining("spawn failed") });
+    expect(calls.some(call => call.args[0] === "list")).toBe(false);
   });
 });

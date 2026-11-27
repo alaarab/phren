@@ -5,7 +5,7 @@ import { release as osRelease } from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { type NativeHelper, verifiedHelper } from "./native-helpers.js";
-import { atomicInPrivateDir, BridgeError, bridgeRoot, type Json } from "./protocol.js";
+import { atomicInPrivateDir, BridgeError, bridgeRoot, errorCode, type Json } from "./protocol.js";
 
 /**
  * Phone control of this Mac's windows: list a Mac's windows, take one still
@@ -24,6 +24,10 @@ export const MAC_WINDOWS_STOP_MS = 60_000;
 export const MAC_WINDOWS_BUILD_MS = 240_000;
 /** The badge's "ready" line, counted from the spawn. */
 export const MAC_WINDOWS_READY_MS = 10_000;
+/** How often an open session re-reads the enable file. */
+export const MAC_WINDOWS_ENABLE_POLL_MS = 500;
+/** How long wininput gets to finish its event pair after SIGTERM. */
+export const MAC_WINDOWS_TERM_GRACE_MS = 500;
 /** macOS 14 is Darwin 23; ScreenCaptureKit's single-window capture needs it. */
 const MACOS_14_DARWIN_MAJOR = 23;
 
@@ -88,8 +92,9 @@ interface MacWindowsDeps {
   platform: () => NodeJS.Platform;
   release: () => string;
   run: (call: MacWindowsHelperCall, signal: AbortSignal) => Promise<MacWindowsHelperResult>;
-  spawnBadge: () => Promise<MacWindowsBadge>;
+  spawnBadge: (signal: AbortSignal) => Promise<MacWindowsBadge>;
   now: () => number;
+  pollMs: () => number;
 }
 
 /** An ended session (Stop, idle, disable, shutdown) refuses its helpers. */
@@ -109,19 +114,27 @@ async function runHelperProcess(call: MacWindowsHelperCall, signal: AbortSignal)
   if (signal.aborted) throw cancelled();
   const binary = await verifiedHelper(call.helper);
   if (signal.aborted) throw cancelled();
+  // Turned off while the helper was building: never spawn it.
+  if (!await macWindowsEnabled()) throw new BridgeError(409, "Phone control is off on this Mac. Run `phren mac-windows on` there.", { code: "mac-windows-disabled" });
   return new Promise(resolve => {
     const child = spawn(binary, call.args, { stdio: ["pipe", "pipe", "pipe"] });
     const out: Buffer[] = [], said: Buffer[] = [];
-    let settled = false, timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false, timer: ReturnType<typeof setTimeout> | undefined, escalate: ReturnType<typeof setTimeout> | undefined;
     const finish = (result: MacWindowsHelperResult) => {
       if (settled) return;
       settled = true;
       signal.removeEventListener("abort", kill);
       if (timer) clearTimeout(timer);
+      if (escalate) clearTimeout(escalate);
       resolve(result);
     };
-    // Stop and idle end kill the helper mid-run; a tap or key never outlives its badge.
-    const kill = () => child.kill("SIGKILL");
+    // wininput stops at the next event-pair boundary and exits 8; anything else is killed now.
+    const kill = () => {
+      if (call.helper !== "wininput") { child.kill("SIGKILL"); return; }
+      child.kill("SIGTERM");
+      escalate = setTimeout(() => child.kill("SIGKILL"), MAC_WINDOWS_TERM_GRACE_MS);
+      escalate.unref?.();
+    };
     signal.addEventListener("abort", kill, { once: true });
     timer = setTimeout(() => {
       child.kill("SIGKILL");
@@ -137,8 +150,11 @@ async function runHelperProcess(call: MacWindowsHelperCall, signal: AbortSignal)
   });
 }
 
-async function spawnBadgeProcess(): Promise<MacWindowsBadge> {
+async function spawnBadgeProcess(signal: AbortSignal): Promise<MacWindowsBadge> {
   const binary = await verifiedHelper("winbadge");
+  // The build can outlast the session or the setting; a child that nobody wants must not start.
+  if (signal.aborted) throw new Error("the session ended while the indicator was building");
+  if (!await macWindowsEnabled()) throw new Error("phone control is off");
   const child = spawn(binary, [], { stdio: ["pipe", "pipe", "ignore"] });
   child.stdin?.on("error", () => undefined);
   child.on("error", () => undefined);
@@ -170,6 +186,7 @@ const defaultDeps: MacWindowsDeps = {
   run: runHelperProcess,
   spawnBadge: spawnBadgeProcess,
   now: () => Date.now(),
+  pollMs: () => MAC_WINDOWS_ENABLE_POLL_MS,
 };
 let deps: MacWindowsDeps = defaultDeps;
 
@@ -186,6 +203,8 @@ type Session = {
   ready: Promise<void>;
   abort: AbortController;
   timer?: ReturnType<typeof setTimeout>;
+  poll?: ReturnType<typeof setInterval>;
+  inflight: number;
   readyDone: boolean;
   ended: boolean;
 };
@@ -196,10 +215,12 @@ let lastSession: string | undefined;
 let badge: MacWindowsBadge | undefined;
 let stoppedUntil = 0;
 let stoppedSession: string | undefined;
+let shuttingDown = false;
 
 /** Test seam: forget the session, badge and stop window. */
 export function resetMacWindowsState(): void {
   if (session?.timer) clearTimeout(session.timer);
+  if (session?.poll) clearInterval(session.poll);
   session?.abort.abort();
   session = undefined;
   lastSession = undefined;
@@ -207,6 +228,7 @@ export function resetMacWindowsState(): void {
   badge = undefined;
   stoppedUntil = 0;
   stoppedSession = undefined;
+  shuttingDown = false;
   inputQueue = Promise.resolve();
   promptedScreenRecording = false;
   promptedAccessibility = false;
@@ -224,6 +246,12 @@ function stoppage(): BridgeError | undefined {
 
 type SessionRow = { session: string; action: string; windowId?: number; app?: string; ok: boolean; error?: string; chars?: number; admitted?: boolean };
 
+/** The only action names the audit log ever carries. */
+export const MAC_WINDOW_AUDIT_ACTIONS = ["tap", "type", "key", "raise", "list", "snapshot", "permissions", "session-end", "invalid"] as const;
+function auditedAction(action: unknown): string {
+  return typeof action === "string" && (MAC_WINDOW_AUDIT_ACTIONS as readonly string[]).includes(action) ? action : "invalid";
+}
+
 async function appendSessionRow(row: SessionRow): Promise<void> {
   const folder = path.join(bridgeRoot(), "mac-windows");
   await mkdir(folder, { recursive: true, mode: 0o700 });
@@ -237,33 +265,54 @@ const auditedErrors = new WeakSet<BridgeError>();
 function audited(error: BridgeError): BridgeError { auditedErrors.add(error); return error; }
 
 /**
- * Logs a refused request with fixed fields: action, a parseable window id and
- * the error. Called at the route boundary, so owner-only, disabled and
- * invalid-input refusals are audited too. Errors whose row already exists
- * (a helper's failed completion) are left alone.
+ * Logs a refused request with fixed fields: one of MAC_WINDOW_AUDIT_ACTIONS, a
+ * parseable window id and a stable error code. Called at the route boundary, so
+ * owner-proof, body-parse, owner-only, disabled and invalid-input refusals are
+ * audited too. Errors whose row already exists are left alone.
  */
-export async function macWindowsRefusal(action: string, id: unknown, error: unknown): Promise<void> {
+export async function macWindowsRefusal(action: unknown, id: unknown, error: unknown): Promise<void> {
   if (error instanceof BridgeError && auditedErrors.has(error)) return;
   const parsed = typeof id === "string" ? (id.trim() ? Number(id) : NaN) : typeof id === "number" ? id : NaN;
   const windowId = Number.isInteger(parsed) && parsed >= 1 && parsed <= 4_294_967_295 ? parsed : undefined;
-  const message = error instanceof BridgeError ? error.message : "That request could not be completed.";
-  await appendSessionRow({ session: auditSessionID(), action: action.slice(0, 32), ...(windowId !== undefined ? { windowId } : {}), ok: false, error: message })
+  const code = errorCode(error) ?? "error";
+  await appendSessionRow({ session: auditSessionID(), action: auditedAction(action), ...(windowId !== undefined ? { windowId } : {}), ok: false, error: code })
     .catch(() => undefined);
 }
 
 function armIdle(target: Session): void {
   if (target.ended || session !== target || !target.readyDone) return;
   if (target.timer) clearTimeout(target.timer);
-  target.timer = setTimeout(() => target.ended ? undefined : endSession(target).catch(() => undefined), MAC_WINDOWS_IDLE_MS);
+  target.timer = setTimeout(() => target.ended || target.inflight > 0 ? undefined : endSession(target).catch(() => undefined), MAC_WINDOWS_IDLE_MS);
   target.timer.unref?.();
 }
 
+/** Counts a request in flight and refreshes the idle clock as it is admitted. */
+function beginRequest(target: Session): void {
+  target.inflight++;
+  armIdle(target);
+}
+
+function finishRequest(target: Session): void {
+  target.inflight = Math.max(0, target.inflight - 1);
+  armIdle(target);
+}
+
+/** An open session re-reads the enable file, so `phren mac-windows off` reaches it. */
+function watchEnabled(target: Session): void {
+  target.poll = setInterval(() => {
+    void macWindowsEnabled().then(enabled => {
+      if (!enabled && !target.ended) return endSession(target);
+    }, () => undefined);
+  }, deps.pollMs());
+  target.poll.unref?.();
+}
 async function endSession(target?: Session): Promise<void> {
   const ending = target ?? session;
   if (!ending || ending.ended) return;
   ending.ended = true;
   if (session === ending) session = undefined;
   if (ending.timer) clearTimeout(ending.timer);
+  if (ending.poll) clearInterval(ending.poll);
   // Cancels a running helper and refuses whatever is still queued.
   ending.abort.abort();
   const running = badge;
@@ -273,8 +322,13 @@ async function endSession(target?: Session): Promise<void> {
 }
 
 /** Ends the current session and kills the badge; the Hook calls this when it stops. */
-export function stopMacWindows(): Promise<void> {
-  return endSession();
+export async function stopMacWindows(): Promise<void> {
+  // Set before any await, so a handler resuming later cannot start a session.
+  shuttingDown = true;
+  const pending = session?.ready;
+  await endSession();
+  // A badge still being built is disposed of by its own startup check; wait for it to get there.
+  await pending?.catch(() => undefined);
 }
 
 // The badge must go when the Hook does, or it outlives the reason it showed.
@@ -317,6 +371,9 @@ function helperError(result: MacWindowsHelperResult): BridgeError {
   if (result.code === 3 && /accessibility/.test(said)) return new BridgeError(403, accessibilityHelp(), { code: "mac-windows-accessibility" });
   if (result.code === 6 || /^focus/i.test(said)) return new BridgeError(409, "That window lost focus on the Mac before the input landed. Nothing more was sent.", { code: "mac-windows-focus" });
   if (result.code === 7 || /^orphaned/i.test(said)) return new BridgeError(409, "The Mac window helper stopped.", { code: "mac-windows-helper" });
+  if (result.code === 8 || /^cancelled/i.test(said)) {
+    return new BridgeError(409, "Phone control ended before that input finished; part of the text may have been typed.", { code: "mac-windows-cancelled" });
+  }
   if (result.code === 5 || /^no window/i.test(said)) return new BridgeError(404, "That window is gone from this Mac.");
   if (result.code === 3) return new BridgeError(403, said || "macOS did not grant that permission.", { code: "mac-windows-permission" });
   if (result.code === 2) return new BridgeError(400, `The Mac window helper refused that command: ${said || "bad arguments"}`);
@@ -326,29 +383,37 @@ function helperError(result: MacWindowsHelperResult): BridgeError {
 async function runHelper(call: MacWindowsHelperCall, timeoutMs: number, signal: AbortSignal): Promise<MacWindowsHelperResult> {
   if (signal.aborted) throw cancelled();
   const result = await deps.run({ ...call, timeoutMs }, signal);
-  if (signal.aborted) throw cancelled();
+  // A helper that finished an event pair cleanly just before the abort is a success;
+  // exit 8 is the cooperative stop and carries its own message.
+  if (signal.aborted && result.code !== 0 && result.code !== 8) throw cancelled();
   return result;
 }
 
-function permissionCheck(helper: "wincap" | "wininput", signal = new AbortController().signal): Promise<MacWindowPermissionState> {
-  return deps.run({ helper, args: ["check"], timeoutMs: 15_000 }, signal).then(result => {
+async function permissionCheck(helper: "wincap" | "wininput", signal?: AbortSignal): Promise<MacWindowPermissionState> {
+  try {
+    const result = await deps.run({ helper, args: ["check"], timeoutMs: 15_000 }, signal ?? new AbortController().signal);
     if (result.code === 0) return { granted: true };
     if (result.code === 3) return { granted: false };
     const said = result.stderr.replace(/[\x00-\x1f\x7f]/g, " ").trim().slice(0, 160);
     return { granted: false, unavailable: said || `the helper exited ${result.code}` };
-  }, error => ({ granted: false, unavailable: error instanceof Error ? error.message : String(error) }));
+  } catch (error) {
+    if (signal?.aborted) throw cancelled();
+    // Cancellation and a mid-probe disable are not a missing grant.
+    if (error instanceof BridgeError && ["mac-windows-cancelled", "mac-windows-disabled"].includes(String(error.details?.code))) throw error;
+    return { granted: false, unavailable: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /** Both grants, with a helper that could not build or run told apart from a denied grant. */
-export async function macWindowsPermissionReport(): Promise<MacWindowPermissionReport> {
+export async function macWindowsPermissionReport(signal?: AbortSignal): Promise<MacWindowPermissionReport> {
   requireSupport();
-  const [screenRecording, accessibility] = await Promise.all([permissionCheck("wincap"), permissionCheck("wininput")]);
+  const [screenRecording, accessibility] = await Promise.all([permissionCheck("wincap", signal), permissionCheck("wininput", signal)]);
   return { screenRecording, accessibility };
 }
 
 /** The two macOS grants the window helpers need. */
-export async function macWindowPermissions(): Promise<MacWindowPermissions> {
-  const report = await macWindowsPermissionReport();
+export async function macWindowPermissions(signal?: AbortSignal): Promise<MacWindowPermissions> {
+  const report = await macWindowsPermissionReport(signal);
   return { screenRecording: report.screenRecording.granted, accessibility: report.accessibility.granted };
 }
 
@@ -382,7 +447,19 @@ function indicatorError(): BridgeError {
 
 async function startIndicator(target: Session): Promise<void> {
   try {
-    const spawned = await within(deps.spawnBadge(), MAC_WINDOWS_BUILD_MS);
+    let late = false;
+    const spawning = deps.spawnBadge(target.abort.signal);
+    // A build that finishes after the deadline or the session's end leaves an unwanted child.
+    spawning.then(spawned => {
+      if (late || target.ended || target.abort.signal.aborted) spawned.kill("SIGTERM");
+    }).catch(() => undefined);
+    let spawned: MacWindowsBadge;
+    try {
+      spawned = await within(spawning, MAC_WINDOWS_BUILD_MS);
+    } catch (error) {
+      late = true;
+      throw error;
+    }
     if (target.ended || target.abort.signal.aborted) { spawned.kill("SIGTERM"); throw indicatorError(); }
     badge = spawned;
     let earlyExit: (() => void) | undefined;
@@ -399,6 +476,7 @@ async function startIndicator(target: Session): Promise<void> {
     await within(Promise.race([spawned.ready, exit]), MAC_WINDOWS_READY_MS);
     if (target.ended || target.abort.signal.aborted) throw indicatorError();
     target.readyDone = true;
+    watchEnabled(target);
     armIdle(target);
   } catch {
     await endSession(target).catch(() => undefined);
@@ -408,10 +486,11 @@ async function startIndicator(target: Session): Promise<void> {
 
 /** The session, starting the indicator on the first request; concurrent requests share it. */
 function openSession(): Session {
+  if (shuttingDown) throw new BridgeError(503, "The Hook is shutting down.", { code: "mac-windows-shutdown" });
   const stopped = stoppage();
   if (stopped) throw stopped;
   if (session) return session;
-  const target: Session = { id: randomUUID(), ready: Promise.resolve(), abort: new AbortController(), readyDone: false, ended: false };
+  const target: Session = { id: randomUUID(), ready: Promise.resolve(), abort: new AbortController(), inflight: 0, readyDone: false, ended: false };
   lastSession = target.id;
   session = target;
   target.ready = startIndicator(target);
@@ -428,26 +507,32 @@ function requireLive(target: Session): void {
 export async function macWindowsList(): Promise<MacWindowsSnapshot> {
   requireSupport();
   if (!await macWindowsEnabled()) {
-    // Off: answer 200 with the explanation state, and run no helper at all.
+    // Off: answer 200 with the explanation state, run no helper, and record why nothing is listed.
     await endSession();
+    await appendSessionRow({ session: auditSessionID(), action: "list", ok: false, error: "mac-windows-disabled" }).catch(() => undefined);
     return { enabled: false, permissions: { screenRecording: false, accessibility: false }, windows: [] };
   }
   const target = openSession();
   try {
     await target.ready;
     requireLive(target);
-    const permissions = await macWindowPermissions();
+    beginRequest(target);
+    const report = await macWindowsPermissionReport(target.abort.signal);
+    // A helper that cannot build or run is not a denied grant.
+    const unavailable = report.screenRecording.unavailable ?? report.accessibility.unavailable;
+    if (unavailable) throw new BridgeError(409, `The Mac window helper could not run: ${unavailable}`, { code: "mac-windows-helper" });
+    const permissions = { screenRecording: report.screenRecording.granted, accessibility: report.accessibility.granted };
     const windows = permissions.screenRecording ? await listWindows(target.abort.signal) : [];
     await appendSessionRow({ session: target.id, action: "list", ok: true });
     return { enabled: true, permissions, windows };
   } catch (error) {
     if (error instanceof BridgeError) {
-      await appendSessionRow({ session: target.id, action: "list", ok: false, error: error.message }).catch(() => undefined);
+      await appendSessionRow({ session: target.id, action: "list", ok: false, error: errorCode(error) ?? "error" }).catch(() => undefined);
       throw audited(error);
     }
     throw error;
   } finally {
-    armIdle(target);
+    finishRequest(target);
   }
 }
 
@@ -468,6 +553,7 @@ export async function macWindowsSnapshot(id: unknown, size: unknown = 1600, qual
   try {
     await target.ready;
     requireLive(target);
+    beginRequest(target);
     const result = await runHelper({ helper: "wincap", args: ["snapshot", String(windowId.data), String(maxSide.data), String(jpegQuality.data / 100)] },
       30_000, target.abort.signal);
     if (result.code !== 0) throw helperError(result);
@@ -476,12 +562,12 @@ export async function macWindowsSnapshot(id: unknown, size: unknown = 1600, qual
   } catch (error) {
     if (error instanceof BridgeError) {
       if (error.details?.code === "mac-windows-screen-recording") await promptOnce("screen-recording", target.abort.signal);
-      await appendSessionRow({ session: target.id, action: "snapshot", windowId: windowId.data, ok: false, error: error.message }).catch(() => undefined);
+      await appendSessionRow({ session: target.id, action: "snapshot", windowId: windowId.data, ok: false, error: errorCode(error) ?? "error" }).catch(() => undefined);
       throw audited(error);
     }
     throw error;
   } finally {
-    armIdle(target);
+    finishRequest(target);
   }
 }
 
@@ -530,6 +616,12 @@ export async function macWindowsAct(input: unknown): Promise<Json> {
     try {
       await target.ready;
       requireLive(target);
+      // Re-read at the head of the queue: an `off` that landed while this waited refuses it.
+      if (!await macWindowsEnabled()) {
+        await endSession(target);
+        throw new BridgeError(409, "Phone control is off on this Mac. Run `phren mac-windows on` there.", { code: "mac-windows-disabled" });
+      }
+      beginRequest(target);
       const chars = action.action === "type" ? graphemeCount(action.text) : undefined;
       // Admitted before any input: an input that lands must have an audit row.
       try {
@@ -542,14 +634,14 @@ export async function macWindowsAct(input: unknown): Promise<Json> {
       } catch (error) {
         if (error instanceof BridgeError && error.details?.code === "mac-windows-accessibility") await promptOnce("accessibility", target.abort.signal);
         await appendSessionRow({ session: target.id, action: action.action, windowId: action.id, ok: false,
-          error: error instanceof BridgeError ? error.message : "The Mac did not take that.", ...(chars !== undefined ? { chars } : {}) }).catch(() => undefined);
+          error: error instanceof BridgeError ? errorCode(error) ?? "error" : "error", ...(chars !== undefined ? { chars } : {}) }).catch(() => undefined);
         throw error instanceof BridgeError ? audited(error) : error;
       }
       // The input already landed; a lost completion row must not look like a failure.
       await appendSessionRow({ session: target.id, action: action.action, windowId: action.id, ok: true, ...(chars !== undefined ? { chars } : {}) }).catch(() => undefined);
       return { ok: true };
     } finally {
-      armIdle(target);
+      finishRequest(target);
     }
   });
 }
@@ -567,12 +659,13 @@ export async function macWindowsRequestPermission(permission: unknown): Promise<
   try {
     await target.ready;
     requireLive(target);
+    beginRequest(target);
     await runHelper({ helper: kind.data === "screen-recording" ? "wincap" : "wininput", args: ["prompt"] }, 15_000, target.abort.signal).catch(() => undefined);
-    const permissions = await macWindowPermissions();
+    const permissions = await macWindowPermissions(target.abort.signal);
     await appendSessionRow({ session: target.id, action: "permissions", ok: true });
     return permissions;
   } finally {
-    armIdle(target);
+    finishRequest(target);
   }
 }
 
