@@ -22,6 +22,54 @@ export function socketIdentity(request: Pick<IncomingMessage, "headers">): strin
 export const socketKind = (request: Pick<IncomingMessage, "headers">): string =>
   request.headers["x-phren-client"] === "desktop" ? "desktop" : "default";
 
+/** How long an evicted socket has to flush its close frame before the TCP socket is destroyed. */
+export const CLOSE_GRACE_MS = 1000;
+/** How many evicted sockets may be waiting out their close handshake at once. */
+export const CLOSING_MAX = 32;
+
+/** The parts of a WebSocket a graceful close needs. */
+export interface ClosableSocket {
+  close(code: number, reason: string): void;
+  terminate(): void;
+  once(event: "close", listener: () => void): unknown;
+  removeAllListeners(event: "message"): unknown;
+}
+
+/** Evicted sockets still waiting for their close handshake, and each one's grace timer. */
+const closing = new Map<ClosableSocket, ReturnType<typeof setTimeout>>();
+
+/** How many evicted sockets are waiting out their close handshake. */
+export const closingCount = (): number => closing.size;
+
+/** Terminates every socket still waiting out its close handshake; the Hook's shutdown calls this. */
+export function terminateClosing(): void {
+  for (const socket of [...closing.keys()]) {
+    const timer = closing.get(socket); if (timer) clearTimeout(timer);
+    closing.delete(socket);
+    try { socket.terminate(); } catch { /* already gone */ }
+  }
+}
+
+/** Sends the close frame first, then terminates only if the socket has not closed within the grace. */
+export function closeGracefully(socket: ClosableSocket, code: number, reason: string, graceMs = CLOSE_GRACE_MS): void {
+  // An evicted socket handles no more messages; the close handshake is all that is left.
+  socket.removeAllListeners("message");
+  if (closing.size >= CLOSING_MAX) { socket.close(code, reason); socket.terminate(); return; }
+  let gone = false;
+  const drop = (terminate: boolean) => {
+    if (gone) return;
+    gone = true;
+    if (timer) clearTimeout(timer);
+    closing.delete(socket);
+    if (terminate) socket.terminate();
+  };
+  const timer = setTimeout(() => drop(true), graceMs);
+  timer.unref?.();
+  closing.set(socket, timer);
+  socket.once("close", () => drop(false));
+  socket.close(code, reason);
+}
+
 interface Entry<S> { socket: S; identity: string; kind: string }
 
 /** Admits sockets oldest-first under the per-kind, per-identity and total caps. */
