@@ -2,6 +2,8 @@
 // found by its CGWindow id, its app raised through the Accessibility API, and
 // taps, text and keys are posted with CGEvent. Built on demand by Phren Hook
 // with swiftc; see mac-windows.ts.
+// Exit codes: 2 usage, 3 Accessibility not granted, 5 no such window,
+// 6 focus could not be verified.
 import ApplicationServices
 import Carbon.HIToolbox
 import Cocoa
@@ -45,17 +47,22 @@ let id = CGWindowID(raw)
 
 // The window's frame and owner come from the window server, which needs no
 // Screen Recording grant; its bounds are the same top-left space CGEvent uses.
-guard let infos = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]],
-      let info = infos.first,
-      let rawBounds = info[kCGWindowBounds as String] as? NSDictionary,
-      let bounds = CGRect(dictionaryRepresentation: rawBounds as CFDictionary),
-      let pid = info[kCGWindowOwnerPID as String] as? Int
-else { fail(5, "no window") }
-guard let app = NSRunningApplication(processIdentifier: pid_t(pid)) else { fail(5, "no window") }
+// Read again after raising: the raise may move the window.
+func windowInfo(_ id: CGWindowID) -> (bounds: CGRect, pid: pid_t, name: String?)? {
+    guard let infos = CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]],
+          let info = infos.first,
+          let rawBounds = info[kCGWindowBounds as String] as? NSDictionary,
+          let bounds = CGRect(dictionaryRepresentation: rawBounds as CFDictionary),
+          let pid = info[kCGWindowOwnerPID as String] as? Int
+    else { return nil }
+    return (bounds, pid_t(pid), info[kCGWindowName as String] as? String)
+}
+guard let target = windowInfo(id) else { fail(5, "no window") }
+let pid = target.pid
+guard let app = NSRunningApplication(processIdentifier: pid) else { fail(5, "no window") }
 
 // The Accessibility window with this frame is the one to raise; the window
-// server drops a little precision, so 2 points of slack. The first window is
-// the fallback for apps whose AX frame differs (a shadow, a title-bar quirk).
+// server drops a little precision, so 2 points of slack.
 func frame(_ window: AXUIElement) -> CGRect {
     var posRef: CFTypeRef?, sizeRef: CFTypeRef?
     AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &posRef)
@@ -69,16 +76,44 @@ func near(_ a: CGRect, _ b: CGRect) -> Bool {
     abs(a.origin.x - b.origin.x) <= 2 && abs(a.origin.y - b.origin.y) <= 2 &&
     abs(a.width - b.width) <= 2 && abs(a.height - b.height) <= 2
 }
-let element = AXUIElementCreateApplication(pid_t(pid))
+func axTitle(_ window: AXUIElement) -> String? {
+    var ref: CFTypeRef?
+    AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &ref)
+    return ref as? String
+}
+let element = AXUIElementCreateApplication(pid)
 var windowsRef: CFTypeRef?
 AXUIElementCopyAttributeValue(element, kAXWindowsAttribute as CFString, &windowsRef)
 let windows = (windowsRef as? [AXUIElement]) ?? []
-guard let window = windows.first(where: { near(frame($0), bounds) }) ?? windows.first else { fail(5, "no window") }
+// An unambiguous frame is the window; a stack of same-frame sheets is told
+// apart by the window server's name, and anything left ambiguous is refused.
+var matches = windows.filter { near(frame($0), target.bounds) }
+if matches.count > 1, let name = target.name, !name.isEmpty { matches = matches.filter { axTitle($0) == name } }
+guard matches.count == 1 else { fail(5, "no window") }
+let window = matches[0]
 
+// Both the app and its focused window must be the target before any event
+// goes out, so focus cannot drift into another window mid-action.
+func ensureFocus() {
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { fail(6, "focus") }
+    var ref: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &ref) == .success,
+          let focused = ref, CFEqual(focused, window) else { fail(6, "focus") }
+}
 func raise() {
-    app.activate(options: [])
-    AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+    guard app.activate(options: []) else { fail(6, "focus") }
+    guard AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success else { fail(6, "focus") }
     usleep(120_000)
+    ensureFocus()
+}
+// Whether the element under a screen point belongs to the window's app,
+// rather than another window, menu or app on top of it.
+func ownsPoint(_ point: CGPoint) -> Bool {
+    var hit: AXUIElement?
+    guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &hit) == .success,
+          let hit else { return false }
+    var hitPid: pid_t = 0
+    return AXUIElementGetPid(hit, &hitPid) == .success && hitPid == pid
 }
 func post(_ event: CGEvent?, pause: useconds_t = 20_000) { event?.post(tap: .cghidEventTap); usleep(pause) }
 func fraction(_ value: String) -> Double? {
@@ -91,6 +126,7 @@ func typeText(_ text: String) {
     var chunk: [UniChar] = []
     func flush() {
         guard !chunk.isEmpty else { return }
+        ensureFocus()
         let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
         let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
         down?.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: &chunk)
@@ -101,6 +137,7 @@ func typeText(_ text: String) {
     for character in text {
         if character == "\n" {
             flush()
+            ensureFocus()
             post(CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Return), keyDown: true), pause: 0)
             post(CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Return), keyDown: false), pause: 8_000)
             continue
@@ -114,6 +151,7 @@ func typeText(_ text: String) {
 }
 
 func press(_ code: CGKeyCode, modifiers: [String]) {
+    ensureFocus()
     var flags: CGEventFlags = []
     if modifiers.contains("cmd") { flags.insert(.maskCommand) }
     if modifiers.contains("shift") { flags.insert(.maskShift) }
@@ -130,7 +168,12 @@ case "raise": raise()
 case "tap":
     guard args.count >= 5, let fx = fraction(args[3]), let fy = fraction(args[4]) else { fail(2, "tap needs fx fy in 0 to 1") }
     raise()
-    let point = CGPoint(x: bounds.origin.x + CGFloat(fx) * bounds.width, y: bounds.origin.y + CGFloat(fy) * bounds.height)
+    guard let raised = windowInfo(id), raised.pid == pid else { fail(5, "no window") }
+    let bounds = raised.bounds
+    // The -1 keeps a tap at fraction 1.0 inside the frame.
+    let point = CGPoint(x: bounds.minX + CGFloat(fx) * (bounds.width - 1), y: bounds.minY + CGFloat(fy) * (bounds.height - 1))
+    guard ownsPoint(point) else { fail(6, "focus") }
+    ensureFocus()
     post(CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left))
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left))
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left))
