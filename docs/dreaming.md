@@ -154,7 +154,9 @@ phren dream apply <runId> --project my-app --only 0,2,4
 phren dream apply <runId> --project my-app --only 1 --reject --reason "Needs more evidence"
 ```
 
-The MCP admin action `dream_apply` takes `project`, `runId`, optional `only: [0, 2, 4]`, and optional `reject: true` with a `reason`. Rejection applies to structured proposals. Apply rechecks each target finding against the stored bullet and citation version under the findings write lock. Missing or changed targets leave the proposal pending. To apply ideas from an old run without target versions, create a fresh dream. If the mutation succeeds and saving its decision fails, retry the same proposal on the same computer. The local receipt lets the retry finish recording the decision without applying the change again.
+The MCP admin action `dream_apply` takes `project`, `runId`, optional `only: [0, 2, 4]`, and optional `reject: true` with a `reason`. Rejection applies to structured proposals. Apply rechecks each target finding against the stored bullet and citation version under the findings write lock. Missing or changed targets leave the proposal pending. To apply ideas from an old run without target versions, create a fresh dream.
+
+Apply saves a local intent before changing memory. Retry an interrupted apply on the same computer. A completed receipt or a verified result lets the retry record the decision without repeating the mutation. If the affected records have changed and the result cannot be verified, apply stops and asks you to inspect the change.
 
 In **apply** mode the changes are applied straight away and logged.
 
@@ -162,13 +164,15 @@ In **apply** mode the changes are applied straight away and logged.
 
 `phren dream status --limit <n>` and the `dream_status` action summarize the latest recorded runs for each project. The default is 20 runs and the range is 1–500. The counts combine structured proposals with their decision files. Pending, conflicted and skipped proposals have separate counts and are excluded from the acceptance rate, `applied / (applied + rejected)`. With no applied or rejected proposals, CLI text shows a dash and JSON returns `acceptRate: null`. Status lists every unresolved conflict with its run and index, including conflicts outside the summary window.
 
+The overall `pendingProposals` count in status and log includes additions still waiting to be published to review. Per-operation acceptance covers structured proposals only.
+
 A 0.3.97 client writes structured decisions into the run file itself. In propose-mode runs, legacy `applied` outcomes count as approvals and `skipped` outcomes count as completed skips. Legacy approvals have no decision timestamp. Review-queue activity on any client stays outside these counts.
 
 ## Where the output goes
 
 - `<store>/<project>/dreams/<runId>.json` contains the full changeset, input counts, validation drops, and initial outcomes. Structured decisions leave this file unchanged. A retry of a deferred addition still records its publication outcome there.
 - `<store>/<project>/dreams/decisions/<runId>/<index>-<decisionId>.json` is an immutable structured decision. The random UUID in the filename is the decision ID. Each file contains `runId`, `index`, `op`, `outcome` (`applied` or `rejected`), `decidedAt` (UTC ISO 8601), and `computer`. It may contain a `reason` and a `supersedes` array of IDs. `legacy-applied` refers to a 0.3.97 approval for the same proposal. Normal store sync carries decision files between computers. Agreeing decisions count once, using the earliest known timestamp and retaining every reason. Opposing active decisions produce `conflicted` until superseded.
-- `<store>/.runtime/dream-receipts/<project>/<runId>/<index>.json` is the local recovery receipt for an applied structured proposal. It is cleared after the decision file is saved.
+- `<store>/.runtime/dream-receipts/<project>/<runId>/<index>.json` records the local apply intent and then confirms the mutation succeeded. It is cleared after the decision file is saved.
 - `<store>/<project>/dreams/journal.md` has one summary per run. Later dreams read it. Proposal decisions are recorded only in the decision files.
 - `<store>/<project>/dreams/last-run.json`: when the last dream ran, for scheduling.
 - `review.md` contains proposed additions tagged with their run and proposal index. Other proposals stay in the run record until resolved.
