@@ -470,6 +470,17 @@ async function moveDestination(move: MoveRecord, caller: PeerIdentity | undefine
 /** Destinations whose enrollment was checked for a move's conversation pages, until when. */
 const verifiedPages = new Map<string, number>();
 
+/** The audit row a request to one of the Mac window routes would carry, set before proof and body parsing. */
+function macWindowsAuditTarget(url: URL): { action: string; id?: unknown } | undefined {
+  switch (url.pathname) {
+    case "/v1/mac/windows": return { action: "list" };
+    case "/v1/mac/windows/snapshot": return { action: "snapshot", id: url.searchParams.get("id") };
+    case "/v1/mac/windows/action": return { action: "invalid" };
+    case "/v1/mac/windows/permissions": return { action: "invalid" };
+    default: return undefined;
+  }
+}
+
 async function peerContinuationIntent(caller: PeerIdentity, id: string, conversation?: number): Promise<Json> {
   const candidates = (await hookPeers()).filter(peer => peerFingerprint(peer) === caller.fingerprint && (!caller.name || caller.name === peer.name));
   if (candidates.length !== 1) throw new BridgeError(403, "The launch origin is not uniquely verified.");
@@ -486,9 +497,12 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
   return async (request, response) => {
     response.setHeader("X-Phren-Protocol", String(PROTOCOL));
     response.setHeader("Cache-Control", "no-store");
+    // Set as soon as the path is known, so proof and body-parse refusals are audited too.
+    let macWindowAudit: { action: string; id?: unknown } | undefined;
     try {
       const url = new URL(request.url || "/", "http://phren.local");
       if (url.origin !== "http://phren.local") throw new BridgeError(400, "Invalid request origin.");
+      macWindowAudit = macWindowsAuditTarget(url);
       requireRoute(modules, request.method ?? "", url.pathname);
       if (url.pathname === "/v1/browsers" || url.pathname.startsWith("/v1/browsers/")) { browserRoute(ctx.browsers, request.method ?? "", url, response); return; }
       let result: unknown;
@@ -697,19 +711,16 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             response.setHeader("Content-Type", "image/png"); response.end(bytes); return;
           }
           // Phone control of this Mac's windows (mac-windows.ts); owner-only on every one of them.
+          // The handler's catch audits refusals (proof, body parse, owner, disabled, invalid input).
           case "/v1/mac/windows": {
-            try {
-              macWindowsOwnerOnly(ownerRequest(request, {}));
-              result = await macWindowsList();
-            } catch (error) { await macWindowsRefusal("list", undefined, error); throw error; }
+            macWindowsOwnerOnly(ownerRequest(request, {}));
+            result = await macWindowsList();
             break;
           }
           case "/v1/mac/windows/snapshot": {
-            try {
-              macWindowsOwnerOnly(ownerRequest(request, {}));
-              const bytes = await macWindowsSnapshot(url.searchParams.get("id"), url.searchParams.get("size") ?? undefined, url.searchParams.get("quality") ?? undefined);
-              response.setHeader("Content-Type", "image/jpeg"); response.end(bytes); return;
-            } catch (error) { await macWindowsRefusal("snapshot", url.searchParams.get("id"), error); throw error; }
+            macWindowsOwnerOnly(ownerRequest(request, {}));
+            const bytes = await macWindowsSnapshot(url.searchParams.get("id"), url.searchParams.get("size") ?? undefined, url.searchParams.get("quality") ?? undefined);
+            response.setHeader("Content-Type", "image/jpeg"); response.end(bytes); return;
           }
           case "/v1/files": result = { files: await listUploads("files") }; break;
           case "/v1/git/status": {
@@ -1234,15 +1245,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             x1: z.number().optional(), y1: z.number().optional(), x2: z.number().optional(), y2: z.number().optional(), durationMs: z.number().optional(),
             text: z.string().optional(), submit: z.boolean().optional() }).parse(data) as unknown as SimulatorAction);
         } else if (url.pathname === "/v1/mac/windows/action") {
-          try {
-            macWindowsOwnerOnly(ownerRequest(request, data));
-            result = await macWindowsAct(data);
-          } catch (error) { await macWindowsRefusal(typeof data.action === "string" ? data.action : "action", data.id, error); throw error; }
+          macWindowAudit = { action: typeof data.action === "string" ? data.action : "invalid", id: data.id };
+          macWindowsOwnerOnly(ownerRequest(request, data));
+          result = await macWindowsAct(data);
         } else if (url.pathname === "/v1/mac/windows/permissions") {
-          try {
-            macWindowsOwnerOnly(ownerRequest(request, data));
-            result = { permissions: await macWindowsRequestPermission(data.permission) };
-          } catch (error) { await macWindowsRefusal("permissions", undefined, error); throw error; }
+          macWindowAudit = { action: "permissions" };
+          macWindowsOwnerOnly(ownerRequest(request, data));
+          result = { permissions: await macWindowsRequestPermission(data.permission) };
         } else {
         if (url.pathname === "/v1/workspaces/launch") {
           result = await launches.run(async () => {
@@ -1286,6 +1295,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       if (Buffer.byteLength(payload) > MAX_FRAME) throw new BridgeError(413, "The response is too large.");
       response.setHeader("Content-Type", "application/json"); response.end(payload);
     } catch (error) {
+      if (macWindowAudit) await macWindowsRefusal(macWindowAudit.action, macWindowAudit.id, error);
       response.statusCode = error instanceof BridgeError ? error.status : error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 503;
       response.setHeader("Content-Type", "application/json");
       const failure = { error: error instanceof BridgeError ? error.message : "Phren Hook could not complete this request. Run phren bridge doctor on the computer.",

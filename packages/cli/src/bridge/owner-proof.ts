@@ -19,7 +19,9 @@ import { ownerRequest } from "./request-origin.js";
  * paired SSH key's private half, so it signs these requests with it (the same
  * key that already signs approval rules). Once the Hook has seen one valid
  * signature, unsigned requests to these routes are refused: older apps keep
- * working until the phone starts signing, and after that an agent cannot.
+ * working until the phone starts signing, and after that an agent cannot. The
+ * Mac window routes are new, so they require a signature from their first
+ * request and never start that migration for the others.
  */
 export const OWNER_PROOF_HEADER = "x-phren-owner-proof";
 const DOMAIN = "phren-owner-request-v1";
@@ -32,6 +34,11 @@ const ROUTES = new Set([
   "POST /v1/sets/link",
   "POST /v1/housekeeping/approve", "POST /v1/housekeeping/dismiss", "POST /v1/housekeeping/restore", "POST /v1/housekeeping/scan",
   "POST /v1/owner-confirms/answer",
+  "GET /v1/mac/windows", "GET /v1/mac/windows/snapshot",
+  "POST /v1/mac/windows/action", "POST /v1/mac/windows/permissions",
+]);
+/** The Mac window routes are new, so no older phone depends on unsigned access: they require proof from the first request. */
+const STRICT_ROUTES = new Set([
   "GET /v1/mac/windows", "GET /v1/mac/windows/snapshot",
   "POST /v1/mac/windows/action", "POST /v1/mac/windows/permissions",
 ]);
@@ -91,9 +98,10 @@ export class OwnerProof {
   async check(request: Pick<IncomingMessage, "headers" | "method">, pathname: string, data: Json, digest: string | undefined,
     confirm?: () => Promise<void>): Promise<void> {
     if (!ownerProofRoute(request.method, pathname) || !ownerRequest(request, data)) return;
+    const strict = STRICT_ROUTES.has(`${request.method} ${pathname}`);
     const header = request.headers?.[OWNER_PROOF_HEADER];
     if (typeof header !== "string") {
-      if (!(await this.isRequired())) return;
+      if (!strict && !(await this.isRequired())) return;
       // A terminal command asked to wait for the phone (owner-confirm.ts). The
       // phone's answer is itself a signed owner action, so it never waits.
       if (confirm && request.headers?.[OWNER_CONFIRM_HEADER] === "wait" && pathname !== "/v1/owner-confirms/answer") return confirm();
@@ -115,7 +123,8 @@ export class OwnerProof {
     if (this.seen.has(payload.nonce)) throw refused();
     if (this.seen.size >= 4096) throw new BridgeError(429, "Too many signed owner actions. Try again in a few minutes.");
     this.seen.set(payload.nonce, now + 2 * WINDOW_MS);
-    if (!(await this.isRequired())) {
+    // A Mac window proof must not flip the migration state for other routes.
+    if (!strict && !(await this.isRequired())) {
       await atomic(this.file, JSON.stringify({ since: new Date(now).toISOString(), key: createHash("sha256").update(raw).digest("hex") }));
       this.required = true;
     }
