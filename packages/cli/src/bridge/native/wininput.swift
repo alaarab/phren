@@ -145,9 +145,10 @@ func raise() {
 }
 // The window under a screen point, found from the hit element itself or by
 // walking up to the first ancestor with a window or the AXWindow role.
+let systemWide = AXUIElementCreateSystemWide()
 func pointWindow(_ point: CGPoint) -> AXUIElement? {
     var hitRef: AXUIElement?
-    guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &hitRef) == .success,
+    guard AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &hitRef) == .success,
           var element = hitRef else { return nil }
     for _ in 0..<64 {
         var windowRef: CFTypeRef?
@@ -176,6 +177,14 @@ func fraction(_ value: String) -> Double? {
 func mappedPoint(_ bounds: CGRect, _ fx: Double, _ fy: Double) -> CGPoint {
     CGPoint(x: bounds.minX + CGFloat(fx) * (bounds.width - 1), y: bounds.minY + CGFloat(fy) * (bounds.height - 1))
 }
+// A synchronous AX call can block, and while the button is down a stall would
+// run past the Hook's kill grace and leave the button pressed. A hit test that
+// times out then reads as "not the target", which ends the gesture through its
+// normal release.
+func boundAXMessaging() {
+    _ = AXUIElementSetMessagingTimeout(systemWide, 0.1)
+    _ = AXUIElementSetMessagingTimeout(element, 0.1)
+}
 // The window under a screen point must be the one being driven before anything
 // is posted there: a panel or another window floating above the target hands
 // hover, clicks and drags to itself.
@@ -203,6 +212,7 @@ func sleepUntil(_ deadline: UInt64) {
 // the wheel must exist before anything is posted; the point is hit-tested
 // before the move and again after it, before the wheel.
 func scrollGesture(at point: CGPoint, dx: Int32, dy: Int32) {
+    boundAXMessaging()
     guard let source = CGEventSource(stateID: .hidSystemState),
           let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left),
           let wheel = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0)
@@ -228,6 +238,7 @@ func scrollGesture(at point: CGPoint, dx: Int32, dy: Int32) {
 // lands mid-drag; the bounded remaining steps are abandoned and the up goes out
 // first, at the last point the button reached.
 func dragGesture(from start: CGPoint, to end: CGPoint, durationMs: Int) {
+    boundAXMessaging()
     guard let source = CGEventSource(stateID: .hidSystemState),
           let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: start, mouseButton: .left),
           let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left),
