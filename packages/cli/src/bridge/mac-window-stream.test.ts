@@ -885,6 +885,64 @@ describe("bandwidth", () => {
     expect(worst).toBeLessThanOrEqual(168_576);
     expect(client.closed).toBeUndefined();
   });
+  it("debits the first frame at send time, so a slow start callback cannot refill it", async () => {
+    const { deps, children } = harness();
+    const client = await start(`id=${ID}&tier=3`, deps);
+    const child = children[0];
+    const FULL = MAX_MESSAGE_BYTES;
+    let pts = 0n;
+    const sample = (sync: boolean) => {
+      pts += 1_000n;
+      return wire({ sync, width: 960, height: 600, pts, unitBytes: FULL - 24 - (sync ? 10 : 0) - 4 });
+    };
+    // The start is written at once, but the socket's completion is 512 ms late.
+    client.holdSends = true;
+    child.stdout.write(record(1, sample(true)));
+    await flush();
+    expect(client.binary()).toHaveLength(0);
+    vi.advanceTimersByTime(512);
+    client.holdSends = false;
+    client.held.shift()!();
+    await flush();
+    expect(client.binary()).toHaveLength(1);
+
+    const frames: { at: number; bytes: number }[] = [];
+    let handled = 1;
+    let ack: { at: number; seq: number } | undefined;
+    const scan = () => {
+      const sent = client.log.filter((entry): entry is { at: number; data: Buffer } => Buffer.isBuffer(entry.data));
+      while (frames.length < sent.length) {
+        const entry = sent[frames.length];
+        frames.push({ at: entry.at, bytes: entry.data.length });
+        ack = { at: entry.at + 150, seq: entry.data.readUInt32BE(12) };
+      }
+    };
+    scan();
+    const endAt = Date.now() + 3_200;
+    while (Date.now() < endAt) {
+      vi.advanceTimersByTime(25);
+      if (ack && Date.now() >= ack.at) {
+        const { seq } = ack; ack = undefined;
+        client.control({ type: "ack", seq });
+      }
+      for (; handled < child.commands.length; handled += 1) {
+        const match = /^PULL (\d) ([01])\n$/.exec(child.commands[handled]);
+        if (!match) continue;
+        child.stdout.write(record(1, sample(match[2] === "1")));
+      }
+      scan();
+    }
+
+    expect(frames.length).toBeGreaterThan(4);
+    let worst = 0;
+    for (let i = 0; i < frames.length; i += 1) {
+      let sum = 0;
+      for (let j = i; j < frames.length && frames[j].at - frames[i].at <= 3_000; j += 1) sum += frames[j].bytes;
+      worst = Math.max(worst, sum);
+    }
+    expect(worst).toBeLessThanOrEqual(168_576);
+    expect(client.closed).toBeUndefined();
+  });
 });
 
 describe("teardown", () => {

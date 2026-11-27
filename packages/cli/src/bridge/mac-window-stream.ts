@@ -389,7 +389,6 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
       return;
     }
     clear(tokenTimer); tokenTimer = undefined;
-    tokens -= staged.body.length;
     const sample = staged;
     staged = undefined;
     if (rotate) {
@@ -408,6 +407,10 @@ export async function streamMacWindow(client: StreamClient, query: URLSearchPara
     /** Assign the sequence and put the sample on the wire. */
     const deliver = () => {
       if (ended) return;
+      // Debit at the binary send, not when it was staged: a slow start
+      // callback must not let the bucket refill behind a waiting frame.
+      refill();
+      tokens -= sample.body.length;
       const seq = lastSeq + 1;
       lastSeq = seq;
       const message = Buffer.from(sample.body);
