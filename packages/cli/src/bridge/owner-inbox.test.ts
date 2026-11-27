@@ -92,7 +92,20 @@ describe("owner inbox", () => {
     expect(reopened.item).toMatchObject({ id, state: "open", title: "Renew the newer token", command: "phren secret login" });
     expect((reopened.item as InboxItem).resolvedAt).toBeUndefined();
     expect((reopened.item as InboxItem).resolution).toBeUndefined();
+    // Older Hooks use a strict row schema. Keep push metadata out of it.
+    const { paste: _, ...row } = reopened.item as InboxItem & { paste: string };
+    expect(JSON.parse(await readFile(path.join(root, "owner-inbox.json"), "utf8"))).toEqual([row]);
     expect((await inbox().run({})).items).toMatchObject([{ id, state: "open" }]);
+  });
+  it("moves a previous build's inline reopen marker to durable push suppression", async () => {
+    const file = path.join(root, "owner-inbox.json");
+    const row: InboxItem = {
+      id: randomUUID(), kind: "manual", title: "Previously reopened", state: "open", createdAt: at, updatedAt: at,
+    };
+    await writeFile(file, JSON.stringify([{ ...row, reopened: true }]));
+    expect((await inbox().run({})).items).toEqual([row]);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual([row]);
+    expect(await inbox().tick()).toEqual([{ ...row, firstOpen: false }]);
   });
   it("still refuses an explicit id that names an automatic row", async () => {
     sources = [{ source: "prompt:1", kind: "blocked", title: "Approve the tool" }];

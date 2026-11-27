@@ -453,8 +453,11 @@ Conductor finish supervision also writes `<bridge>/worker-reports/*.json`
 (PR evidence bound to turns), `<bridge>/closed-workers/*.json` (intentional
 closure tombstones), `<bridge>/integrator.json` (the chosen session target), and
 `<bridge>/owner-inbox.json` (open and resolved owner items, with a transient
-`.lock` file and temporary file for locked atomic updates). These private,
-local files do not sync into the memory store.
+`.lock` file and temporary file for locked atomic updates).
+`<bridge>/owner-inbox.json.reopened` records same-ID reopens under that lock so
+they cannot trigger alerts. `<bridge>/owner-inbox-push.json` keeps candidates
+and per-device receipts until the candidate deadline. These private, local
+files do not sync into the memory store.
 
 Dispatched and scheduled workers are tracked in `<bridge>/jobs.json`: one
 record per worker (owning pane, session, harness, label, start time and, once
