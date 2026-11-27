@@ -17,7 +17,7 @@ const admission = vi.hoisted(() => ({
   finishes: [] as (string | undefined)[],
 }));
 
-vi.mock("./mac-window-lease-stub.js", async () => {
+vi.mock("./mac-windows.js", async () => {
   const { BridgeError } = await import("./protocol.js");
   return {
     beginMacWindowStream: async (_owner: boolean, _id: number, onEnd: (reason: string) => void) => {

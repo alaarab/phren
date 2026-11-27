@@ -1,6 +1,6 @@
 import { spawn as spawnChild, type ChildProcess } from "node:child_process";
 import { FrameReader } from "./frame-reader.js";
-import { beginMacWindowStream, logMacWindowStreamRefusal, type MacWindowStreamEnd, type MacWindowStreamLease } from "./mac-window-lease-stub.js";
+import { beginMacWindowStream, logMacWindowStreamRefusal, type MacWindowStreamEnd, type MacWindowStreamLease } from "./mac-windows.js";
 import { verifiedHelper } from "./native-helpers.js";
 import { BridgeError } from "./protocol.js";
 import type { StreamClient } from "./simulator-stream.js";
