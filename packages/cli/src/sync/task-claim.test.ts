@@ -68,7 +68,9 @@ expect(refused).toMatchObject({ claimed: false, error: "Mini claimed this task a
     .toMatchObject({ claimed: true, synced: true });
   expect(task(mini, "aaaa1111")?.claim).toBeUndefined();
   expect(task(laptop, "aaaa1111")).toMatchObject({ section: "Active", claim: { computer: "Laptop", at: "2026-09-25T05:01:00Z" } });
-});
+// Five synced claims (fetch, commit, push) plus the checks' own git calls took
+// 20.2 s on a loaded Windows runner, past the suite's 15 s default.
+}, 45_000);
 
 it("keeps the verified local commit when the claim cannot be pushed", async () => {
   const actual = sessionGit.runBestEffortGit;
