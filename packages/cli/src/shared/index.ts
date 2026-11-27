@@ -1,6 +1,6 @@
 import { moduleSnapshot } from "../modules/runtime.js";
 import { skillEnabled } from "../modules/provision.js";
-import { statFileOrDirectory } from "../phren-paths.js";
+import { runtimeDir, statFileOrDirectory } from "../phren-paths.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -76,6 +76,7 @@ export {
   queryCrossProjectFragments,
   logFragmentMiss,
   extractFragmentNames,
+  extractWikilinks,
 } from "./fragment-graph.js";
 export {
   buildSourceDocKey,
@@ -572,8 +573,8 @@ function getRepoManagedInstructionEntries(phrenPath: string, project: string): F
   return entries;
 }
 
-function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[]; entries: FileEntry[] } {
-  const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
+function globAllFiles(phrenPath: string, profile?: string, onlyProjectDirs?: readonly string[]): { filePaths: string[]; entries: FileEntry[] } {
+  const projectDirs = onlyProjectDirs ?? getAllStoreProjectDirs(phrenPath, profile);
   const indexPolicy = getIndexPolicy(phrenPath);
   const entries: FileEntry[] = [];
   const allAbsolutePaths: string[] = [];
@@ -607,13 +608,15 @@ function globAllFiles(phrenPath: string, profile?: string): { filePaths: string[
       entries.push({ fullPath, project: projectName, filename, type, relFile });
       allAbsolutePaths.push(fullPath);
     }
-    if (ownership === "repo-managed") {
+    if (!onlyProjectDirs && ownership === "repo-managed") {
       for (const entry of getRepoManagedInstructionEntries(phrenPath, projectName)) {
         entries.push(entry);
         allAbsolutePaths.push(entry.fullPath);
       }
     }
   }
+
+  if (onlyProjectDirs) return { filePaths: allAbsolutePaths.sort(), entries };
 
   // Index global skills so search_knowledge can find them
   const globalSkillsDir = path.join(phrenPath, "global", "skills");
@@ -837,10 +840,9 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
     // Single read feeds the insert, fragment extraction and the content hash.
     const raw = readFileOrNull(resolvedPath);
     if (raw !== null && insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true, content: raw })) {
-      // Re-extract fragments for finding files
-      if (type === "findings") {
+      if (type === "findings" || type === "reference") {
         try {
-          extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath);
+          extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath, type === "reference");
         } catch (err: unknown) {
           logger.debug("updateFileInIndex entityExtraction", errorMessage(err));
         }
@@ -1242,8 +1244,8 @@ function loadCachedEntityGraph(db: SqlJsDatabase, graphPath: string, allFiles: F
 
 /** Merge manual fragment links (written by link_findings tool) into the live DB. Always runs on
  * every build so hand-authored links survive a full index rebuild. */
-function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
-  const manualLinksPath = runtimeFile(phrenPath, 'manual-links.json');
+function mergeManualLinks(db: SqlJsDatabase, phrenPath: string, allowedSources?: ReadonlySet<string>): void {
+  const manualLinksPath = allowedSources ? path.join(runtimeDir(phrenPath), "manual-links.json") : runtimeFile(phrenPath, "manual-links.json");
   if (!fs.existsSync(manualLinksPath)) return;
   try {
     const manualLinks: Array<{ entity: string; entityType: string; sourceDoc: string; relType: string }> =
@@ -1261,8 +1263,8 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
         .filter((rest): rest is string => !!rest)
         .map((rest) => path.basename(rest))
     )];
-    const validSourceKeys = new Set<string>();
-    if (projects.length && filenames.length) {
+    const validSourceKeys = new Set(allowedSources);
+    if (!allowedSources && projects.length && filenames.length) {
       const sql = `SELECT project, filename, path FROM docs WHERE project IN (${projects.map(() => "?").join(",")}) AND filename IN (${filenames.map(() => "?").join(",")})`;
       const rows = queryRows(db, sql, [...projects, ...filenames]) ?? [];
       for (const row of rows) {
@@ -1275,10 +1277,12 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
     const validLinks: typeof manualLinks = [];
     for (const link of manualLinks) {
       try {
-        // Validate: skip manual links whose sourceDoc no longer exists in the index
+        // A scoped graph read leaves links outside its scope alone.
         if (!validSourceKeys.has(link.sourceDoc)) {
-          logger.debug("manualLinks", `pruning stale link to "${link.sourceDoc}"`);
-          pruned = true;
+          if (!allowedSources) {
+            logger.debug("manualLinks", `pruning stale link to "${link.sourceDoc}"`);
+            pruned = true;
+          }
           continue;
         }
         validLinks.push(link);
@@ -1326,6 +1330,62 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
   } catch (err: unknown) {
     logger.debug("mergeManualLinks", errorMessage(err));
   }
+}
+
+export async function readStoreFragmentGraph(
+  phrenPath: string, projectDirsByStore: ReadonlyMap<string, string[]>,
+): Promise<Array<{ projectDir: string; sourcePath: string; name: string; type: string }>> {
+  const docsByStore = new Map<string, Map<string, FileEntry>>();
+  const owners = new Map<string, number>();
+  for (const [store, dirs] of projectDirsByStore) {
+    const projectRoots = new Map(dirs.map(dir => [path.basename(dir), fs.realpathSync.native(dir)]));
+    const docs = new Map<string, FileEntry>();
+    for (const entry of globAllFiles(phrenPath, undefined, dirs).entries) {
+      try {
+        const canonical = fs.realpathSync.native(entry.fullPath);
+        const relative = path.relative(projectRoots.get(entry.project)!, canonical);
+        if (path.isAbsolute(relative) || relative.split(path.sep)[0] === ".." || !fs.statSync(canonical).isFile()) continue;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      const key = getEntrySourceDocKey(entry, store);
+      docs.set(key, entry);
+    }
+    docsByStore.set(store, docs);
+    for (const key of docs.keys()) owners.set(key, (owners.get(key) ?? 0) + 1);
+  }
+
+  const SQL = await bootstrapSqlJs() as SqlJsStatic;
+  const edges: Array<{ projectDir: string; sourcePath: string; name: string; type: string }> = [];
+  for (const [store, selected] of docsByStore) {
+    if (!selected.size) continue;
+    const db = createEmptyIndexDb(SQL);
+    try {
+      db.run("BEGIN");
+      for (const [key, doc] of selected) {
+        if (doc.type !== "findings" && doc.type !== "reference") continue;
+        const raw = readFileOrNull(doc.fullPath);
+        if (raw !== null) extractAndLinkFragments(db, raw, key, store, doc.type === "reference");
+      }
+      // Legacy unqualified links can live in the primary store regardless of their source store.
+      const unique = new Set([...selected.keys()].filter(key => owners.get(key) === 1));
+      if (unique.size) {
+        mergeManualLinks(db, store, unique);
+        if (store !== phrenPath) mergeManualLinks(db, phrenPath, unique);
+      }
+      db.run("COMMIT");
+      const rows = db.exec(`SELECT DISTINCT l.source_doc, e.name, e.type FROM entity_links l
+        JOIN entities e ON e.id = l.target_id WHERE e.type <> 'document' AND l.source_doc IS NOT NULL
+        ORDER BY l.source_doc, e.name, e.type`)[0]?.values ?? [];
+      for (const row of rows) {
+        const [doc, name, type] = decodeStringRow(row, 3, "store fragment graph");
+        const entry = selected.get(doc)!;
+        edges.push({ projectDir: path.join(store, entry.project), sourcePath: entry.fullPath, name, type });
+      }
+    } finally { db.close(); }
+  }
+  return edges;
 }
 
 async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
@@ -1530,9 +1590,9 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
               const raw = carried ?? readFileOrNull(entry.fullPath);
               if (raw !== null && insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true, content: raw })) {
                 updatedCount++;
-                if (entry.type === "findings") {
+                if (entry.type === "findings" || entry.type === "reference") {
                   try {
-                    extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath);
+                    extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath, entry.type === "reference");
                   } catch (err: unknown) { debugLog(`fragment extraction failed: ${errorMessage(err)}`); }
                 }
               }
@@ -1607,12 +1667,13 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
   const newMeta: Record<string, FileStatMeta> = {};
   let fileCount = 0;
 
-  // Try loading cached fragment graph
+  // A new file may carry a timestamp older than the cached graph.
   const graphPath = runtimeFile(phrenPath, 'entity-graph.json');
-  const entityGraphLoaded = loadCachedEntityGraph(db, graphPath, allFiles, phrenPath);
+  const entityGraphLoaded = allFiles.every(entry => Object.hasOwn(savedHashes, entry.fullPath))
+    && loadCachedEntityGraph(db, graphPath, allFiles, phrenPath);
 
-  // One read per file: the bytes feed the content hash, the FTS insert and (for
-  // findings) fragment extraction. Every insert is batched into a single
+  // One read per file: the bytes feed the content hash, the FTS insert and
+  // fragment extraction. Every insert is batched into a single
   // transaction so sql.js does not open and commit one per statement.
   db.run("BEGIN");
   let fullRebuildCommitted = false;
@@ -1629,10 +1690,9 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
       }
       if (insertFileIntoIndex(db, entry, phrenPath, { scheduleEmbeddings: true, content: raw })) {
         fileCount++;
-        // Extract fragments from finding files (if not loaded from cache)
-        if (!entityGraphLoaded && entry.type === "findings") {
+        if (!entityGraphLoaded && (entry.type === "findings" || entry.type === "reference")) {
           try {
-            extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath);
+            extractAndLinkFragments(db, raw, getEntrySourceDocKey(entry, phrenPath), phrenPath, entry.type === "reference");
           } catch (err: unknown) { debugLog(`fragment extraction failed: ${errorMessage(err)}`); }
         }
       }

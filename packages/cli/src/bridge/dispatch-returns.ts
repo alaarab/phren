@@ -9,7 +9,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { execProbe as run } from "./probe-processes.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
-import { arrivalOf, boundWorkerGone, clearWorkerEnded, dispatchStatus, updateReceipt, workerTaskSchema, type OriginPane, type Receipt, type WorkerState, type WorkerTask } from "./dispatch.js";
+import { arrivalOf, boundWorkerGone, clearWorkerEnded, dispatchPhase, dispatchStatus, updateReceipt, workerTaskSchema, type OriginPane, type Receipt, type WorkerState, type WorkerTask } from "./dispatch.js";
 import { briefArrival, briefId, type BriefArrival } from "./launch-brief.js";
 import { codexServers, LOST_TURN, type LostTurn } from "./codex-servers.js";
 import { findGrant } from "./grants.js";
@@ -26,7 +26,7 @@ import { servicePane } from "./opencode-service.js";
 import { opencodeTurn, readTurn, TURN_REPLY_LIMIT, truncateUtf8, turnPhase, type TurnRecord } from "./turn-records.js";
 import { listMoves, moveFrom, movedWorker, moveToSchema, type MovedWorker, type MoveRecord } from "./session-move.js";
 import { sessionTaskStates, unresolvedTasks, type SessionTaskState } from "../task/session-tasks.js";
-import { awaitedInReply, recentUncommitted, sharedCheckout, unfinishedTurn, type Uncommitted } from "./worker-unfinished.js";
+import { awaitedInReply, recentUncommitted, sharedCheckout, unfinishedTurn, waitingOn, type Uncommitted } from "./worker-unfinished.js";
 
 export { truncateUtf8 } from "./turn-records.js";
 
@@ -55,6 +55,7 @@ export const PR_RETRY_MS = 30_000;
 export const PR_RETRY_MAX_MS = 10 * 60_000;
 /** Receipts older than this are no longer watched. */
 export const WATCH_MS = 24 * 60 * 60 * 1000;
+export const WAIT_UNFINISHED_PREFIX = "Stopped waiting: ";
 /** How long a stopped worker whose harness still runs background tasks is
  * waited on before it counts as done anyway. Measured from the latest Stop,
  * and every task that finishes wakes the worker (a new prompt, a new Stop), so
@@ -97,11 +98,18 @@ export interface WorkerObservation {
   stalled?: boolean; stalledSince?: string; stallFor?: number;
   /** Why a turn that ended is not done (worker-unfinished.ts): it announced a
    * next step, left uncommitted work and no PR, or still owes a task its
-   * session took on (task/session-tasks.ts). Returned as needs-you. */
+   * session took on (task/session-tasks.ts). Also carries parked waits for older Hooks. */
   unfinished?: string;
   /** Tasks the worker's session took on (its ledger, task/session-tasks.ts):
    * where each stands now, without the store path. */
   tasks?: WorkerTask[];
+  /** The closing sentence that says the turn waits on work still to finish
+   * (worker-unfinished.ts `awaitedInReply`): CI, background work or a queue.
+   * Returned as waiting, never needs-you. */
+  waiting?: string;
+  /** The turn's Stop (or its completed final turn) exists, but live work
+   * (background tasks or children) keeps it `working`: it waits on that work. */
+  ended?: true;
   /** The worker's checkout could not be read in time: the turn may be done,
    * but it is not closed on that (worker-close.ts). */
   unchecked?: true;
@@ -225,15 +233,15 @@ async function fromTurn(record: TurnRecord, session: string, status: string, sou
     if (final?.interrupted) return { state: "done", ...base, completed: true, interrupted: true };
     if (!final?.completed) return { state: "working", ...base };
     const live = liveWork(record, final, children, now);
-    if (live) return { state: "working", ...base, background: live };
+    if (live) return { state: "working", ...base, background: live, ended: true };
     const end = settled(final.lastAssistant, runningTasks(record, final, now));
-    if (end.state === "working") return { ...end, ...base };
+    if (end.state === "working") return { ...end, ...base, ended: true };
     return { ...end, ...base, completed: true, ...(final.error ? { error: final.error } : {}), ...replyFields(final.lastAssistant) };
   }
   const live = liveWork(record, final, children, now);
-  if (live) return { state: "working", ...base, background: live };
+  if (live) return { state: "working", ...base, background: live, ended: true };
   const end = settled(phase.reply ?? final?.lastAssistant, runningTasks(record, final, now));
-  if (end.state === "working") return { ...end, ...base };
+  if (end.state === "working") return { ...end, ...base, ended: true };
   return { ...end, ...base, completed: true, endedAt: phase.at, stopSeq: record.stop?.seq,
     ...(final?.completed && final.error ? { error: final.error } : {}),
     ...(phase.reply ? replyFields(phase.reply, phase.truncated) : replyFields(final?.lastAssistant)) };
@@ -270,24 +278,26 @@ function unsettledTasks(open: readonly SessionTaskState[]): string | undefined {
   return `${open.length} task(s) not settled: ${open.map(task => `bid:${task.stableId}`).join(", ")}`.slice(0, 200);
 }
 
-/** A finished turn that announced a next step, left uncommitted work in
- * its checkout and no PR, or still owes a task its session took on, is not
- * done (worker-unfinished.ts, task/session-tasks.ts). The checkout is
- * where the agent was when it stopped, else the pane's folder, and it is asked
- * only when it is the worker's own: a checkout another pane works in (the
- * owner's, a sibling worker's) holds changes that are not the worker's. A
- * truncated reply has lost its closing sentence, so only the checkout is asked
- * then. */
+/** A finished turn that announced a next step, left uncommitted work in its
+ * checkout and no PR, still owes a task its session took on, or waits on work
+ * still to finish (worker-unfinished.ts, task/session-tasks.ts), is not done.
+ * The checkout is where the agent was when it stopped, else the pane's
+ * folder, and it is asked only when it is the worker's own: a checkout another
+ * pane works in (the owner's, a sibling worker's) holds changes that are not
+ * the worker's. A truncated reply has lost its closing sentence, so only the
+ * checkout is asked then. */
 async function unfinished(seen: WorkerObservation, open: readonly SessionTaskState[], directory: unknown, readers: WorkerReaders, s: Json, pane: Json,
-  prs?: readonly PullRequest[]): Promise<Pick<WorkerObservation, "unfinished" | "unchecked">> {
+  prs?: readonly PullRequest[]): Promise<Pick<WorkerObservation, "unfinished" | "waiting" | "unchecked">> {
   if ((seen.state !== "done" && seen.state !== "idle") || !seen.completed || seen.error || seen.interrupted) return {};
   let folder = typeof directory === "string" && directory ? directory : undefined;
   const others = objects(s.panes).filter(other => other.pane_id !== pane.pane_id).flatMap(other => [other.foreground_cwd, other.cwd]);
   if (folder && readers.shared && await readers.shared(folder, others).catch(() => true)) folder = undefined;
   const marked = await unfinishedTurn({ reply: seen.truncated ? undefined : seen.reply, prs, directory: folder }, readers.uncommitted);
-  // What the reply or the checkout said wins; the tasks it still owes only fill in.
+  // What the reply or the checkout said wins; the tasks it still owes only fill
+  // in, and never for a turn that waits on CI, background work or a queue.
   const owed = unsettledTasks(open);
-  return owed && !marked.unfinished ? { ...marked, unfinished: owed } : marked;
+  if (owed && !marked.unfinished && !marked.waiting) return { ...marked, unfinished: owed };
+  return marked.waiting ? { ...marked, unfinished: `${WAIT_UNFINISHED_PREFIX}${marked.waiting}` } : marked;
 }
 const paneDirectory = (pane: Json): unknown => pane.foreground_cwd || pane.cwd;
 
@@ -350,7 +360,7 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     const end = turn?.completed ? settled(turn.lastAssistant, runningTasks(undefined, turn, now)) : undefined;
     const live = turn?.completed ? liveWork(undefined, turn, children, now) ?? (end?.state === "working" ? end.background : undefined) : undefined;
     if (live) {
-      return { state: "working", session, completed: true, background: live, ...sessionLedger(session, readers).fields, ...(turn?.error ? { error: turn.error } : {}), ...replyFields(turn?.lastAssistant) };
+      return { state: "working", session, completed: true, background: live, ended: true, ...sessionLedger(session, readers).fields, ...(turn?.error ? { error: turn.error } : {}), ...replyFields(turn?.lastAssistant) };
     }
     const seen: WorkerObservation = { state, session, completed: turn?.completed === true, ...(end?.background ? { background: end.background } : {}), ...(turn?.error ? { error: turn.error } : {}),
       ...(turn?.interrupted ? { interrupted: true as const } : {}), ...replyFields(turn?.lastAssistant) };
@@ -388,7 +398,8 @@ const observationSchema = z.object({
   hook: z.boolean().optional(), endedAt: z.string().max(40).optional(), background: z.number().int().min(0).max(999).optional(),
   prs: prsSchema.optional(),
   stalled: z.boolean().optional(), stalledSince: z.string().datetime().optional(), stallFor: z.number().nonnegative().optional(),
-  interrupted: z.boolean().optional(), approval: z.unknown().optional(), unfinished: z.string().max(200).optional(), unchecked: z.boolean().optional(),
+  interrupted: z.boolean().optional(), approval: z.unknown().optional(), unfinished: z.string().max(200).optional(),
+  waiting: z.string().max(200).optional(), ended: z.literal(true).optional(), unchecked: z.boolean().optional(),
   tasks: z.array(workerTaskSchema).max(32).optional(),
   checkout: z.object({ path: z.string().max(4096), branch: z.string().max(256).optional() }).strict().optional(),
   moved: z.unknown().optional(),
@@ -516,54 +527,81 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
   // A turn the harness ended on an error (a usage limit) failed, reply or not,
   // and so did one the owner interrupted in the worker's terminal.
   const failed = stopped && seen.completed && seen.error ? seen.error : stopped && seen.interrupted ? INTERRUPTED : undefined;
+  // An older peer Hook folded an awaited sentence into its unfinished reason
+  // ("Stopped waiting: …"): that is a wait, never a reason the owner must act on.
+  const compat = seen.unfinished?.startsWith(WAIT_UNFINISHED_PREFIX) ? seen.unfinished.slice(WAIT_UNFINISHED_PREFIX.length) : undefined;
+  const unfinishedReason = compat !== undefined ? undefined : seen.unfinished;
   // A turn that stopped mid-task needs a nudge, not a close: it returns as
   // needs-you with the reason, never as done.
-  const question = failed || !seen.completed ? undefined : (seen.reply ? ownerQuestion(seen.reply) : undefined) ?? seen.unfinished;
+  const question = failed || !seen.completed ? undefined : (seen.reply ? ownerQuestion(seen.reply) : undefined) ?? unfinishedReason;
+  // What the reply says the turn waits on: CI, background work or a queue —
+  // not the owner, so it returns as waiting. An owner question beats it.
+  const waitingFor = !failed && seen.completed && !question ? seen.waiting ?? compat : undefined;
   let next: WorkerState;
   if (seen.state === "gone") next = "gone";
   else if (seen.state === "working") next = seen.stalled ? "stalled" : "working";
   else if (seen.state === "blocked") next = "blocked";
   else if (failed) next = "failed";
-  else if (seen.completed) next = question ? "needs-you" : "done";
+  else if (seen.completed) next = question ? "needs-you" : waitingFor ? "waiting" : "done";
   // The worker's own hooks say no turn has ended: it has not taken its
   // brief yet. Without them, idle after being seen working is the only sign.
   else next = !seen.hook && sawWorking ? "done" : "working";
   // A Stop's time names its turn; without one, the final reply does.
-  const turn = next === "done" || next === "needs-you" || next === "failed"
+  const turn = next === "done" || next === "needs-you" || next === "waiting" || next === "failed"
     ? workerTurnKey(seen, failed) : undefined;
   const previous = receipt.worker?.state;
   // The same finished state with a different final reply is a new turn: the
   // worker took more work (a hand_off) and finished again between two polls.
   // A finished turn is returned once: the same turn reading done on one poll
-  // and needs-you on the next (its checkout read late, or the owner committed
-  // its edits) is not a second return.
-  const finished = (state: WorkerState | undefined) => state === "done" || state === "needs-you";
-  const reread = finished(previous) && finished(next) && !!turn && receipt.returned?.turn === turn;
+  // and needs-you or waiting on the next (its checkout read late, the owner
+  // committed its edits, or its wait was noticed late) is not a second return.
+  const finished = (state: WorkerState | undefined) => state === "done" || state === "needs-you" || state === "waiting";
+  const returned = receipt.returned;
+  const sameTurn = !!turn && returned?.turn === turn;
+  const reread = finished(previous) && finished(next) && sameTurn;
+  // Correct legacy waits in place so the same turn keeps its read and notice history.
+  const legacyWait = next === "waiting" && sameTurn && returned?.state === "needs-you"
+    && returned.question?.startsWith(WAIT_UNFINISHED_PREFIX) ? returned : undefined;
   const repeated = reread || (previous === next && !(turn && receipt.returned?.turn && turn !== receipt.returned.turn));
-  if (repeated) {
+  // A turn whose Stop or completed final exists but whose background work
+  // still runs is waiting on that work: said on the worker row, no return.
+  const workingWait = next === "working" && seen.ended === true && !!seen.background ? "background" : undefined;
+  if (repeated && !legacyWait) {
     if (receipt.worker && receipt.worker.sawWorking !== sawWorking) { receipt.worker.sawWorking = sawWorking; changed = true; }
     if (receipt.worker && background > (receipt.worker.background ?? 0)) { receipt.worker.background = background; changed = true; }
     if (receipt.worker && receipt.worker.waitingSince !== waitingSince) {
       if (waitingSince) receipt.worker.waitingSince = waitingSince; else delete receipt.worker.waitingSince;
       changed = true;
     }
+    if (receipt.worker && next === "working" && receipt.worker.waitingOn !== workingWait) {
+      if (workingWait) receipt.worker.waitingOn = workingWait; else delete receipt.worker.waitingOn;
+      changed = true;
+    }
     return changed;
   }
   receipt.worker = { state: next, since: at, checkedAt: at, sawWorking, ...(background ? { background } : {}),
-    ...(next === "working" && waitingSince ? { waitingSince } : {}) };
-  if (next !== "working") {
+    ...(next === "working" && waitingSince ? { waitingSince } : {}),
+    ...(next === "waiting" && waitingFor ? { waitingOn: waitingOn(waitingFor) } : {}),
+    ...(workingWait ? { waitingOn: workingWait } : {}) };
+  if (legacyWait) {
+    legacyWait.state = "waiting";
+    legacyWait.waitingOn = waitingOn(waitingFor!);
+    legacyWait.waitingFor = waitingFor!.slice(0, 200);
+    delete legacyWait.question;
+  } else if (next !== "working") {
     receipt.returned = { state: next, at, read: false,
       // A worker stopped by its usage limit keeps its last reply: the dispatch that continues it hands it over.
-      ...(seen.reply && (next === "done" || next === "needs-you" || next === "failed" && isClaudeUsageLimit(failed)) ? { reply: seen.reply, ...(seen.truncated ? { truncated: true } : {}) } : {}),
+      ...(seen.reply && (next === "done" || next === "needs-you" || next === "waiting" || next === "failed" && isClaudeUsageLimit(failed)) ? { reply: seen.reply, ...(seen.truncated ? { truncated: true } : {}) } : {}),
       ...(next === "failed" && seen.checkout ? { checkout: seen.checkout } : {}),
       ...(next === "done" && seen.prs ? { prs: seen.prs } : {}),
       ...(next === "stalled" ? { stalledSince: seen.stalledSince, stallFor: seen.stallFor } : {}),
+      ...(next === "waiting" ? { waitingOn: waitingOn(waitingFor!), waitingFor: waitingFor!.slice(0, 200) } : {}),
       ...(failed ? { error: failed } : {}), ...(question ? { question } : {}), ...(turn ? { turn } : {}),
       // The session's task ledger travels with the return that ended it.
-      ...((next === "done" || next === "needs-you" || next === "failed") && seen.tasks ? { tasks: seen.tasks } : {}),
-      ...((next === "done" || next === "needs-you") && seen.background ? { background: seen.background } : {}),
+      ...((next === "done" || next === "needs-you" || next === "waiting" || next === "failed") && seen.tasks ? { tasks: seen.tasks } : {}),
+      ...((next === "done" || next === "needs-you" || next === "waiting") && seen.background ? { background: seen.background } : {}),
       // Nothing still running: say what it waited on.
-      ...((next === "done" || next === "needs-you") && !seen.background && background ? { waited: background } : {}) };
+      ...((next === "done" || next === "needs-you" || next === "waiting") && !seen.background && background ? { waited: background } : {}) };
   }
   return true;
 }
@@ -571,16 +609,21 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
 /** One line for the dispatching agent: who returned, how, and where to read it. */
 export function noticeLine(receipts: readonly Receipt[]): string {
   const clean = (value: string, max: number) => value.replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
-  const word = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone", "stalled": "stalled" } as const;
+  const word = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone", "stalled": "stalled",
+    // Unreachable: the `waiting` branch below words it through `waitedOn`.
+    "waiting": "waiting" } as const;
+  // The same words the task row and the phone read (task/work.ts `workStatusLine`).
+  const waitedOn = { ci: "CI", background: "background work", queue: "the queue", other: "work" } as const;
   const describe = (receipt: Receipt, room: number) => {
     const returned = receipt.returned!;
     const asking = returned.state === "blocked" ? receipt.approval : undefined;
     const detail = asking ? asking.request ?? asking.title ?? asking.tool : returned.state === "needs-you" ? returned.question : returned.state === "failed" ? returned.error
-      : returned.state === "done" ? returned.reply?.split("\n").find(line => line.trim()) : undefined;
+      : returned.state === "waiting" ? returned.waitingFor : returned.state === "done" ? returned.reply?.split("\n").find(line => line.trim()) : undefined;
     const excerpt = detail ? clean(detail.replace(/[*_`#>]+/g, ""), room) : "";
     const tasks = (count: number) => `${count} background task${count === 1 ? "" : "s"}`;
     const left = returned.background ? ` (${tasks(returned.background)} still running)` : returned.waited ? ` (after ${tasks(returned.waited)} finished)` : "";
-    return `${clean(receipt.computer, 60)} ${clean(receipt.label, 80)} ${asking ? "needs approval" : word[returned.state]}${left}${excerpt ? `, ${excerpt}` : ""}`;
+    const how = asking ? "needs approval" : returned.state === "waiting" ? `waiting on ${waitedOn[returned.waitingOn ?? "other"]}` : word[returned.state];
+    return `${clean(receipt.computer, 60)} ${clean(receipt.label, 80)} ${how}${left}${excerpt ? `, ${excerpt}` : ""}`;
   };
   if (receipts.length === 1) {
     const [only] = receipts;
@@ -597,7 +640,9 @@ export function returnRow(receipt: Receipt): Json {
     ...(returned.prs ? { prs: returned.prs } : {}),
     ...(returned.integratorDelivery ? { integratorDelivery: returned.integratorDelivery } : {}),
     ...(returned.state === "stalled" ? { stalled: true, stalledSince: returned.stalledSince, stallFor: returned.stallFor } : {}),
-    state: returned.state, at: returned.at, ...(returned.reply !== undefined ? { reply: returned.reply } : {}),
+    state: returned.state, at: returned.at, ...(returned.waitingOn ? { waitingOn: returned.waitingOn } : {}),
+    ...(returned.waitingFor ? { waitingFor: returned.waitingFor } : {}),
+    ...(returned.reply !== undefined ? { reply: returned.reply } : {}),
     ...(returned.truncated ? { truncated: true } : {}), ...(returned.error ? { error: returned.error } : {}), ...(returned.question ? { question: returned.question } : {}),
     ...(returned.tasks ? { tasks: returned.tasks } : {}),
     ...(returned.background ? { background: returned.background } : {}),
@@ -607,7 +652,9 @@ export function returnRow(receipt: Receipt): Json {
       ...(receipt.approval.terminal ? { terminal: true } : {}) } } : {}),
     ...(receipt.account ? { account: receipt.account } : {}), ...(receipt.accountChoice ? { accountChoice: receipt.accountChoice } : {}),
     ...(receipt.continued ? { continued: receipt.continued } : {}), ...(receipt.continues ? { continues: receipt.continues } : {}),
-    ...(receipt.moves ? { moves: receipt.moves } : {}), ...(receipt.target ? { target: receipt.target } : {}) };
+    ...(receipt.moves ? { moves: receipt.moves } : {}), ...(receipt.target ? { target: receipt.target } : {}),
+    // One word for clients that do not fold the receipt's states themselves (dispatch.ts `dispatchPhase`).
+    phase: dispatchPhase(receipt) };
 }
 
 /** How much of a worker's final reply a watched return line shows. */
@@ -622,7 +669,7 @@ export function formatReturnLine(row: Json, timeZone?: string): string {
   const at = typeof row.at === "string" && Number.isFinite(Date.parse(row.at))
     ? new Date(row.at).toLocaleTimeString("en-GB", { hour12: false, ...(timeZone ? { timeZone } : {}) }) : "--:--:--";
   const approval = row.approval && typeof row.approval === "object" ? row.approval as Json : undefined;
-  const said = [row.question, row.error, approval ? `waiting on ${String(approval.title ?? approval.tool ?? "an approval")}` : undefined, row.reply]
+  const said = [row.question, row.waitingFor, row.error, approval ? `waiting on ${String(approval.title ?? approval.tool ?? "an approval")}` : undefined, row.reply]
     .find((value): value is string => typeof value === "string" && value.trim() !== "");
   // A worker's words reach the owner's terminal: no escape sequences (a title, the clipboard, the cursor).
   const flat = (said ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();

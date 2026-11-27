@@ -9,6 +9,7 @@ import { AccountFailover } from "./account-failover.js";
 import { ownerInboxSources } from "./owner-inbox-sources.js";
 import { OwnerInbox } from "./owner-inbox.js";
 import { StaleTaskSources } from "./task-stale.js";
+import { ownerInboxDone } from "./owner-inbox-done.js";
 import { Housekeeper, SCAN_MS as HOUSEKEEPING_SCAN_MS, TICK_MS as HOUSEKEEPING_TICK_MS } from "./housekeeping/housekeeper.js";
 import { liveProcessCwds } from "./housekeeping/safety.js";
 import { dockerUsage, listSimulators, sessionRowsFromOverview, xcodebuildRunning } from "./housekeeping/inventory.js";
@@ -87,7 +88,7 @@ import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { CodexAuthKeeper, codexAuthRefreshEnabled } from "./codex-auth-refresh.js";
 import { localNames } from "./computer-names.js";
 import { startStoreSyncLoop } from "../sync/store-sync.js";
-import { SocketBudget, socketIdentity, socketKind } from "./socket-budget.js";
+import { closeGracefully, SocketBudget, socketIdentity, socketKind, terminateClosing } from "./socket-budget.js";
 import { stopProbes } from "./probe-processes.js";
 import { logger } from "../logger.js";
 
@@ -161,7 +162,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const inbox = dispatches ? new OwnerInbox(async () => {
     const observed = await ownerInboxSources(agentHooks);
     return { ...observed, sources: [...observed.sources, ...housekeeper?.inboxSources() ?? [], ...staleTasks?.sources() ?? []] };
-  }) : undefined;
+  }, path.join(root, "owner-inbox.json"), items => ownerInboxDone(items)) : undefined;
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const settingsSwitcher = new SettingsSwitcher(agentHooks);
@@ -345,8 +346,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       ws.handleUpgrade(request, socket, head, client => {
         client.once("close", () => socketPools.remove(client));
         for (const oldest of socketPools.add(client, identity, kind)) {
-          oldest.close(1008, "Too many connections; reconnect"); oldest.terminate();
-          ws.clients.delete(oldest);
+          // The close frame goes first so the phone learns it was evicted, not that SSH died.
+          closeGracefully(oldest, 1008, "Too many connections; reconnect"); ws.clients.delete(oldest);
         }
         if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1", typedMuxRequest(url), url.searchParams.get("sudo") === "1", url.searchParams.get("secrets") === "1", url.searchParams.get("confirms") === "1"); return; }
         if (url.pathname === "/v1/git/watch") { void gitWatch.stream(client, url); return; }
@@ -468,7 +469,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention();
       for (const timer of [scheduleTimer, dreamTimer, taskAuditTimer, taskWorkTimer, canaryTimer, healthTimer, housekeepingTimer, inventoryTimer, codexAuthTimer, activityTimer]) clearInterval(timer);
       scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close();
-      ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections();
+      ws.clients.forEach(c => c.terminate()); terminateClosing(); ws.close(); http.close(() => resolve()); http.closeAllConnections();
       stopProbes();
     };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);

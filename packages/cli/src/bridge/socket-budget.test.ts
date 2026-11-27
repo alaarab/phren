@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { SocketBudget, socketIdentity, socketKind } from "./socket-budget.js";
+import { EventEmitter } from "node:events";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CLOSE_GRACE_MS, CLOSING_MAX, closeGracefully, closingCount, type ClosableSocket, SocketBudget, socketIdentity, socketKind, terminateClosing } from "./socket-budget.js";
 
 const peerHeader = (fingerprint: string) => Buffer.from(JSON.stringify({ name: "mini", fingerprint })).toString("base64url");
 const fill = (budget: SocketBudget<string>, identity: string, kind: string, n: number, tag = identity + kind) => {
@@ -18,6 +19,69 @@ describe("socket identity", () => {
   it("keeps the client header as a sub-pool hint only", () => {
     expect(socketKind({ headers: { "x-phren-client": "desktop" } })).toBe("desktop");
     expect(socketKind({ headers: { "x-phren-client": "anything" } })).toBe("default");
+  });
+});
+
+/** A WebSocket stand-in that records what the helper did and when. */
+class FakeSocket extends EventEmitter implements ClosableSocket {
+  readonly calls: Array<[string, number?, string?]> = [];
+  terminated = 0;
+  close(code: number, reason: string): void { this.calls.push(["close", code, reason]); }
+  terminate(): void { this.terminated++; this.calls.push(["terminate"]); }
+}
+
+describe("graceful eviction", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => { terminateClosing(); vi.useRealTimers(); });
+
+  it("sends the close frame before anything is destroyed", () => {
+    const socket = new FakeSocket();
+    closeGracefully(socket, 1008, "Too many connections; reconnect");
+    expect(socket.calls).toEqual([["close", 1008, "Too many connections; reconnect"]]);
+    expect(closingCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+  it("terminates after the grace when the peer never closes", () => {
+    const socket = new FakeSocket();
+    closeGracefully(socket, 1008, "Too many connections; reconnect");
+    vi.advanceTimersByTime(CLOSE_GRACE_MS - 1);
+    expect(socket.terminated).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(socket.terminated).toBe(1);
+    expect(closingCount()).toBe(0);
+  });
+  it("leaves the socket alone when it closes inside the grace", () => {
+    const socket = new FakeSocket();
+    closeGracefully(socket, 1008, "Too many connections; reconnect");
+    socket.emit("close");
+    vi.advanceTimersByTime(CLOSE_GRACE_MS);
+    expect(socket.terminated).toBe(0);
+    expect(closingCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("handles no more messages once evicted", () => {
+    const socket = new FakeSocket(), handled: unknown[] = [];
+    socket.on("message", (data: unknown) => handled.push(data));
+    closeGracefully(socket, 1008, "Too many connections; reconnect");
+    socket.emit("message", Buffer.from("{\"type\":\"control\",\"action\":\"take\"}"), false);
+    expect(handled).toEqual([]);
+  });
+  it("terminates at once past the closing cap, as before", () => {
+    for (let i = 0; i < CLOSING_MAX; i++) closeGracefully(new FakeSocket(), 1008, "Too many connections; reconnect");
+    const extra = new FakeSocket();
+    closeGracefully(extra, 1008, "Too many connections; reconnect");
+    expect(extra.calls).toEqual([["close", 1008, "Too many connections; reconnect"], ["terminate"]]);
+    expect(closingCount()).toBe(CLOSING_MAX);
+  });
+  it("terminates and forgets every waiting socket on shutdown", () => {
+    const sockets = [new FakeSocket(), new FakeSocket()];
+    for (const socket of sockets) closeGracefully(socket, 1008, "Too many connections; reconnect");
+    terminateClosing();
+    expect(sockets.map(socket => socket.terminated)).toEqual([1, 1]);
+    expect(closingCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(CLOSE_GRACE_MS);
+    expect(sockets.map(socket => socket.terminated)).toEqual([1, 1]);
   });
 });
 

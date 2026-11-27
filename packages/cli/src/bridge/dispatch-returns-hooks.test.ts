@@ -239,7 +239,7 @@ describe("the worker's Hook answering from turn events", () => {
   it("waits on the awaited tasks the transcript shows, then counts the worker done once the wait expires", async () => {
     record = turn(["UserPromptSubmit"], ["Stop", { background: 2, reply: "Suite started." }]);
     final = { completed: true, awaited: 2 };
-    expect(await ask()).toEqual({ state: "working", session, hook: true, background: 2 });
+    expect(await ask()).toEqual({ state: "working", session, hook: true, background: 2, ended: true });
     const value = receipt();
     observe(value, await ask(), now);
     expect(value.worker!.state).toBe("working");
@@ -263,7 +263,7 @@ describe("the worker's Hook answering from turn events", () => {
     // A finish from before the Stop was not in its count; one after it was.
     final = { completed: true, awaited: 1, finishedTasks: [at(-5_000), at(60_000)] };
     now += 120_000;
-    expect(await ask()).toEqual({ state: "working", session, hook: true, background: 1 });
+    expect(await ask()).toEqual({ state: "working", session, hook: true, background: 1, ended: true });
     final = { completed: true, finishedTasks: [at(-5_000), at(60_000), at(90_000)] };
     const done = await ask();
     expect(done).toEqual({ state: "done", session, hook: true, completed: true, endedAt: expect.any(String), stopSeq: record!.stop!.seq, reply: "Suite started." });
@@ -274,7 +274,7 @@ describe("the worker's Hook answering from turn events", () => {
   it("reads awaited background work from the transcript when the Stop said nothing about it", async () => {
     record = turn(["UserPromptSubmit"], ["Stop"]);
     final = { completed: true, lastAssistant: "Started the gate.", awaited: 1 };
-    expect(await ask()).toEqual({ state: "working", session, hook: true, background: 1 });
+    expect(await ask()).toEqual({ state: "working", session, hook: true, background: 1, ended: true });
   });
 
   it("returns a worker whose Stop named only a leftover shell done, and one whose sub-agent still runs working", async () => {
@@ -288,7 +288,7 @@ describe("the worker's Hook answering from turn events", () => {
     expect(await ask()).toMatchObject({ state: "done", completed: true, background: 2 });
     // The same Stop with a sub-agent the child tree still reports running.
     const withChild = await workerStates({ targets: [target] }, { ...readers(), children: async () => 1 });
-    expect(withChild.workers[0]).toEqual({ state: "working", session, hook: true, background: 1 });
+    expect(withChild.workers[0]).toEqual({ state: "working", session, hook: true, background: 1, ended: true });
   });
 
   it("keeps a worker whose reply waits on a task it left running working, and never done", async () => {
@@ -297,7 +297,7 @@ describe("the worker's Hook answering from turn events", () => {
     const reply = "There's one conflict in TalkVoice.swift. I'll resolve it on the follow-up branch, where both sets of changes meet. Now waiting on the MacBook rerun.";
     record = turn(["UserPromptSubmit"], ["Stop", { background: 1, reply }]);
     final = { completed: true, background: 1, lastAssistant: reply };
-    expect(await ask()).toEqual({ state: "working", session, hook: true, background: 1 });
+    expect(await ask()).toEqual({ state: "working", session, hook: true, background: 1, ended: true });
     const value = receipt();
     observe(value, await ask(), now);
     expect(value.worker!.state).toBe("working");
@@ -309,10 +309,14 @@ describe("the worker's Hook answering from turn events", () => {
     expect(ended).not.toHaveProperty("background");
     observe(value, ended, now);
     expect(value.returned).toMatchObject({ state: "needs-you" });
-    // The same wait with nothing running is no done either.
+    // The same wait with nothing running is no done either: a waiting return.
     record = turn(["UserPromptSubmit"], ["Stop", { reply: "PR #12 is open. Now waiting on CI." }]);
     final = { completed: true };
-    expect(await ask()).toMatchObject({ state: "done", unfinished: "Stopped waiting: Now waiting on CI." });
+    expect(await ask()).toMatchObject({ state: "done", waiting: "Now waiting on CI." });
+    const parked = receipt();
+    observe(parked, await ask(), now);
+    expect(parked.returned).toMatchObject({ state: "waiting", waitingOn: "ci", waitingFor: "Now waiting on CI." });
+    expect(parked.worker).toMatchObject({ state: "waiting", waitingOn: "ci" });
   });
 
   it("never reports a worker stalled while its finished turn still awaits a background shell", async () => {
@@ -325,7 +329,7 @@ describe("the worker's Hook answering from turn events", () => {
     final = { completed: true, awaited: 1 };
     for (let minute = 0; minute <= 15; minute += 1) {
       const seen = await poll();
-      expect(seen).toEqual({ state: "working", session, hook: true, background: 1 });
+      expect(seen).toEqual({ state: "working", session, hook: true, background: 1, ended: true });
       now += 60_000;
     }
     // Herdr can show the pane working too; the transcript's awaited shell still holds it.

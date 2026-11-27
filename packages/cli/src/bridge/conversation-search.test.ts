@@ -723,12 +723,14 @@ describe.skipIf(!hasNodeSqlite)("conversation search over Codex's SQLite thread 
   });
 
   it("refreshes ordinary transcript growth fairly with at least 64 SQLite conversations present", async () => {
+    db.exec("begin");
     for (let index = 1; index <= 64; index++) {
       const id = session(index + 100);
       db.prepare("insert into thread_turns values (?, 'turn', 1, 'completed', 1, 1)").run(id);
       db.prepare("insert into thread_items values (?, 'turn', 'u', 1, 1000, ?, 'userMessage', 1)")
         .run(id, JSON.stringify({ type: "userMessage", id: "u", content: [{ type: "text", text: "sqlite filler" }] }));
     }
+    db.exec("commit");
     const files = [
       await writeClaude(session(1), [claudeRow("user", "initial claude", at(10)), claudeTurnEnd(at(10, 1))]),
       await writeCopilot(session(2), [copilotRow("user.message", "initial copilot", at(10)), { type: "session.idle", timestamp: at(10, 1) }]),
@@ -744,7 +746,8 @@ describe.skipIf(!hasNodeSqlite)("conversation search over Codex's SQLite thread 
     let page = await conversationSearch("fair growth marker", "20");
     for (let pass = 0; pass < 6 && page.results.length < 3; pass++) page = await conversationSearch("fair growth marker", "20");
     expect(new Set(page.results.map(hit => hit.source))).toEqual(new Set(["claude", "copilot", "opencode"]));
-  });
+  // Windows file open/atomic rename costs made this 64-conversation case take over 15 s in the RC.
+  }, 30_000);
 
   it("discovers more than 500 SQLite thread identities and completes the discovery cycle", async () => {
     db.exec("begin");

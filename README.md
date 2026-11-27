@@ -95,7 +95,7 @@ phren also has its **own coding agent**. `npm install -g @phren/agent`, then `ph
 ## Key features
 
 ### Fragment graph
-Explore connections visually, in the browser or in the terminal. Drag nodes to reorganize in the web UI; the terminal layout is deterministic so the same store always draws the same map. Click a fragment to see every finding linked to it across all projects. The terminal graph also draws edges the browser does not: fragments co-mentioned by the same documents, and `supersedes` / `contradicts` links between findings.
+Explore connections visually, in the browser or in the terminal. Drag nodes to reorganize in the web UI; the terminal layout is deterministic so the same store always draws the same map. Click a fragment to see linked findings and reference docs across all projects. The terminal graph also draws edges the browser does not: fragments co-mentioned by the same documents, and `supersedes` / `contradicts` links between findings.
 
 ### Finding lifecycle
 - **Supersede**: "Finding X is obsoleted by finding Y"
@@ -119,6 +119,10 @@ Subscribe to specific projects in a team store; others stay hidden from search a
 phren store subscribe team-store forge portal
 phren store unsubscribe team-store legacy-projects
 ```
+
+### Import an Obsidian vault
+
+Run `phren import vault <dir> --project <name> --dry-run` to preview which notes will be added. Imported notes become searchable reference docs and are committed and synced with your store. [Vault import guide](docs/obsidian.md#import-a-vault)
 
 ### Clanker mode
 `phren config clanker on` makes the prompt hook, `search_knowledge`, `get_tasks` and `get_findings` return one short row per hit (id, title, a few keywords, a score) instead of the text. The agent opens what it needs with `get_memory_detail(id)`; a `fid:` or `bid:` id returns just that finding or task. New installs start with it on; `phren config clanker off` turns it off.
@@ -160,10 +164,15 @@ phren team join <url>                   Join a team store
 phren shell --view tasks --here         Open the shell on this project's tasks
 phren shell --view graph                Walk the knowledge graph in the terminal
 phren web-ui [--port 3499]              Launch the web UI (3D graph, dashboard)
+phren export vault <dir>                Generate a linked Obsidian vault
 phren doctor                            Health check & auto-fix
 ```
 
 See full CLI docs at [alaarab.github.io/phren](https://alaarab.github.io/phren/).
+
+### Obsidian vault export
+
+Run `phren export vault <dir>` to generate linked Markdown notes for your projects, findings, and fragments. Repeat `--project <name>` to narrow the export or add `--dry-run` to preview the note counts. [Obsidian vault export guide](docs/obsidian.md)
 
 ---
 

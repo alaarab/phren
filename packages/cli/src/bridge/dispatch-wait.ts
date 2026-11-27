@@ -1,5 +1,6 @@
 import { setTimeout as sleepTimer } from "node:timers/promises";
 import { hookRequest } from "./client.js";
+import { WATCH_MS, WAIT_UNFINISHED_PREFIX } from "./dispatch-returns.js";
 import type { Json } from "./protocol.js";
 
 /**
@@ -150,16 +151,33 @@ export async function waitForDispatch(id: string, options: DispatchWaitOptions =
       return 1;
     }
     const workerState = typeof worker?.state === "string" ? worker.state : typeof object(receipt?.worker).state === "string" ? String(object(receipt?.worker).state) : undefined;
+    if (workerState === "gone" || workerState === "closed") {
+      final("gone");
+      return 1;
+    }
+    // A live read can see the worker resume after the Hook stops collecting its returns.
+    const legacyWait = state === "needs-you" && questionOf(returned)?.startsWith(WAIT_UNFINISHED_PREFIX);
+    if ((state === "waiting" || legacyWait) && typeof receipt?.createdAt === "string" && now() - Date.parse(receipt.createdAt) >= WATCH_MS) {
+      final("failed", { error: "The Hook's 24-hour dispatch watch expired after the worker parked." });
+      return 1;
+    }
     if (workerState === "working") lastWorkingAt = now();
     const returnedAt = Date.parse(String(returned?.at ?? ""));
     // A needs-you return from before the worker was last seen working is historical.
     const needsYou = (state === "needs-you" || state === "blocked")
       && (lastWorkingAt === undefined || !Number.isFinite(returnedAt) || returnedAt >= lastWorkingAt);
+    // So is a waiting one: the worker took new work after it parked.
+    const waitingNow = state === "waiting"
+      && (lastWorkingAt === undefined || !Number.isFinite(returnedAt) || returnedAt >= lastWorkingAt);
     if (workerState === "working") {
       emit("running");
-    } else if (workerState === "gone" || workerState === "closed") {
-      final("gone");
-      return 1;
+    } else if (waitingNow) {
+      // Parked on CI, background work or a queue is not finished: say what it
+      // waits on and keep following, as for needs-you, so `wait && merge`
+      // never treats a CI wait as done.
+      const waiting = object(returned);
+      emit("waiting", { ...(typeof waiting.waitingOn === "string" ? { waitingOn: waiting.waitingOn } : {}),
+        ...(typeof waiting.waitingFor === "string" && waiting.waitingFor ? { waitingFor: waiting.waitingFor } : {}) });
     } else if (needsYou) {
       const question = questionOf(returned);
       emit("needs_you", question ? { question } : {});

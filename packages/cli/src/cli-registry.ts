@@ -138,7 +138,8 @@ const SCHEDULE_SUBCOMMANDS: Subcommand[] = [
 
 const DREAM_SUBCOMMANDS: Subcommand[] = [
   { name: "run", usage: "phren dream run [--project <p>] [--dry-run] [--apply|--propose] [--force] [--json]", summary: "Run a dream now" },
-  { name: "status", usage: "phren dream status [--project <p>] [--json]", summary: "Enabled, cadence, last run, next eligible time" },
+  { name: "apply", usage: "phren dream apply <runId> [--project <p>] [--only <n,m,...>] [--reject|--resolve <applied|rejected>] [--reason <text>] [--json]", summary: "Apply, reject or resolve proposals from a stored run" },
+  { name: "status", usage: "phren dream status [--project <p>] [--limit <n>] [--json]", summary: "Dream timing and proposal acceptance by operation" },
   { name: "log", usage: "phren dream log [--project <p>] [--limit <n>] [--json]", summary: "Read the dream journal" },
   { name: "eval", usage: "phren dream eval [--real] [--model <m>] [--json]", summary: "Score the dream engine on its fixture store" },
 ];
@@ -317,7 +318,7 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./bridge/mac-windows-command.js")).runMacWindows(args),
   },
   {
-    name: "owner-inbox", topic: "core", usage: "phren owner-inbox [list [--all] | add <title> [--project <slug>] [--id <uuid>] | resolve <id> [--computer <name>] [--resolution <text>]]",
+    name: "owner-inbox", topic: "core", usage: "phren owner-inbox [list [--all] [--computer <name>] | add <title> [--computer <name>] [--project <slug>] [--id <uuid>] [--command <text>] [--task bid:xxxxxxxx] [--pr <url>] [--key <key>] | resolve <id> [--computer <name>] [--resolution <text>] [--if-updated-at <timestamp>]]",
     summary: "List, add and resolve what waits on the owner",
     run: async args => (await import("./bridge/dispatch-command.js")).runOwnerInbox(args),
   },
@@ -404,6 +405,16 @@ export const REGISTRY: Command[] = [
     },
   },
   {
+    name: "import",
+    topic: "projects",
+    usage: "phren import vault <dir> --project <name> [--dry-run] [--prune]",
+    summary: "Import Obsidian notes as project reference docs",
+    run: async (args, ctx) => {
+      const { runImportCommand } = await import("./cli-handlers.js");
+      return runImportCommand(args, ctx);
+    },
+  },
+  {
     name: "schedule",
     topic: "projects",
     usage: "phren schedule <subcommand>",
@@ -481,6 +492,15 @@ export const REGISTRY: Command[] = [
       const { handleGraphNamespace } = await import("./cli/graph.js");
       await handleGraphNamespace(args);
     },
+  },
+  {
+    name: "export",
+    topic: "core",
+    usage: "phren export vault <dir> [[--project <name>]... [--dry-run] | --force-unlock]",
+    cheatUsage: "phren export vault <dir>",
+    summary: "Export findings and fragment links to an Obsidian vault",
+    featured: true,
+    run: async (args, ctx) => (await import("./cli-handlers.js")).runExportCommand(args, ctx.phrenPath),
   },
   {
     name: "code",

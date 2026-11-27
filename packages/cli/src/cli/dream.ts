@@ -7,11 +7,12 @@
 import * as fs from "fs";
 import * as path from "path";
 import { redactSecretsForLog } from "../content/secrets.js";
-import { applyDreamProposals, pendingDreamProposals } from "../dream/apply.js";
+import { applyDreamProposals } from "../dream/apply.js";
+import { DREAM_ACCEPTANCE_DEFAULT_LIMIT, formatDreamAcceptance, pendingDreamProposals, type DreamDecision } from "../dream/records.js";
 import { detectProject } from "../shared/index.js";
 import { isValidProjectName } from "../utils.js";
 import type { DreamMode } from "../config/dreaming.js";
-import { dreamStatus, dreamStoreProjects, dreamsDir, dreamOutcomeCounts, type DreamStatus } from "../bridge/dream-schedule.js";
+import { DREAM_BUSY_EXIT_CODE, dreamStatus, dreamStoreProjects, dreamsDir, dreamOutcomeCounts, type DreamStatus } from "../bridge/dream-schedule.js";
 import { helperFor } from "../bridge/helper.js";
 import { readDreamConfig } from "../dream/run.js";
 
@@ -20,10 +21,10 @@ export const DREAM_USAGE = `phren dream - reorganize a project's memory offline 
   phren dream run [--project <p>] [--dry-run] [--apply|--propose] [--force] [--json]
         Run a dream now. --dry-run shows the changeset without writing; --apply/--propose
         override dreaming.mode; --force runs even when dreaming is off.
-  phren dream apply <runId> [--project <p>] [--only <n,m,...>] [--json]
-        Apply pending structured proposals by zero-based index; refuse changed targets.
-  phren dream status [--project <p>] [--json]
-        Enabled, cadence, last run, next eligible time and last outcome counts
+  phren dream apply <runId> [--project <p>] [--only <n,m,...>] [--reject|--resolve <applied|rejected>] [--reason <text>] [--json]
+        Apply or reject structured proposals by zero-based index. Resolve a conflict with one index and the chosen outcome.
+  phren dream status [--project <p>] [--limit <n>] [--json]
+        Timing, last outcome and acceptance by operation over the latest runs
         (every project when --project is omitted and the folder is not a project).
   phren dream log [--project <p>] [--limit <n>] [--json]
         The latest entries of the project's dream journal (dreams/journal.md).
@@ -33,7 +34,7 @@ export const DREAM_USAGE = `phren dream - reorganize a project's memory offline 
 Turn it on with: phren config dreaming set enabled=true [cadence=nightly|idle|weekly|manual]`;
 
 export const DREAM_LOG_DEFAULT_LIMIT = 20;
-export const DREAM_LOG_MAX_LIMIT = 500;
+export const DREAM_LIST_MAX_LIMIT = 500;
 
 export interface DreamRunArgs { project?: string; dryRun: boolean; mode?: DreamMode; force: boolean; scheduled: boolean; json: boolean }
 export interface DreamListArgs { project?: string; limit: number; json: boolean }
@@ -76,19 +77,19 @@ export function parseDreamRunArgs(args: string[]): Parsed<DreamRunArgs> {
   return bad ? { ok: false, error: bad } : { ok: true, value: out };
 }
 
-export function parseDreamListArgs(args: string[], verb: "status" | "log"): Parsed<DreamListArgs> {
-  const out: DreamListArgs = { limit: DREAM_LOG_DEFAULT_LIMIT, json: false };
+export function parseDreamListArgs(args: string[], verb: "status" | "log" | "apply"): Parsed<DreamListArgs> {
+  const out: DreamListArgs = { limit: verb === "log" ? DREAM_LOG_DEFAULT_LIMIT : DREAM_ACCEPTANCE_DEFAULT_LIMIT, json: false };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--project" || arg.startsWith("--project=")) {
       const taken = takeValue(args, i, "--project");
       if (taken.error) return { ok: false, error: taken.error };
       out.project = taken.value; i += taken.skip;
-    } else if (verb === "log" && (arg === "--limit" || arg.startsWith("--limit="))) {
+    } else if (verb !== "apply" && (arg === "--limit" || arg.startsWith("--limit="))) {
       const taken = takeValue(args, i, "--limit");
       const n = Number(taken.value);
-      if (taken.error || !Number.isInteger(n) || n < 1 || n > DREAM_LOG_MAX_LIMIT) {
-        return { ok: false, error: `--limit takes a whole number from 1 to ${DREAM_LOG_MAX_LIMIT}.` };
+      if (taken.error || !Number.isInteger(n) || n < 1 || n > DREAM_LIST_MAX_LIMIT) {
+        return { ok: false, error: `--limit takes a whole number from 1 to ${DREAM_LIST_MAX_LIMIT}.` };
       }
       out.limit = n; i += taken.skip;
     } else if (arg === "--json") out.json = true;
@@ -147,9 +148,9 @@ export function readDreamJournal(phrenPath: string, project: string, limit = DRE
 }
 
 /** Status for one project or, with none named or detected, for every project in the profile. */
-export function dreamStatuses(phrenPath: string, project: string | undefined, profile?: string, now = new Date()): DreamStatus[] {
+export function dreamStatuses(phrenPath: string, project: string | undefined, profile?: string, now = new Date(), limit = DREAM_ACCEPTANCE_DEFAULT_LIMIT): DreamStatus[] {
   const names = project ? [project] : dreamStoreProjects(phrenPath, profile).sort();
-  return names.map((name) => ({ ...dreamStatus(phrenPath, name, now), runsOn: helperSummary(phrenPath, name) }));
+  return names.map((name) => ({ ...dreamStatus(phrenPath, name, now, limit), runsOn: helperSummary(phrenPath, name) }));
 }
 
 /** Dreams run on the project's helper account (role helpers), never silently on another login. */
@@ -171,6 +172,16 @@ function formatStatus(status: DreamStatus): string {
   } else lines.push("  last run: never");
   lines.push(`  next: ${status.nextEligibleAt ?? "—"} · ${status.reason}`);
   lines.push(`  pending proposals: ${status.pendingProposals}`);
+  const byOp = Object.entries(status.acceptance.byOp).sort(([a], [b]) => a.localeCompare(b));
+  if (byOp.length) {
+    const n = status.acceptance.runs;
+    lines.push(`  acceptance (latest ${n} ${n === 1 ? "run" : "runs"}):`);
+    for (const [op, counts] of byOp) lines.push(`    ${op}: ${formatDreamAcceptance(counts)}`);
+  }
+  for (const conflict of status.conflicts) {
+    const decisions = conflict.decisions.map(d => `${d.outcome} on ${d.computer}`).join(", ");
+    lines.push(`  conflicted: ${conflict.runId}#${conflict.index} ${conflict.op} (${decisions})`);
+  }
   if (status.runsOn) lines.push(`  runs on: ${status.runsOn}`);
   return lines.join("\n");
 }
@@ -187,20 +198,33 @@ export async function handleDreamCommand(args: string[], phrenPath: string, prof
       const [runId, ...flags] = rest;
       if (!runId) return fail("Name the dream run ID.");
       let only: number[] | undefined;
+      let reject = false;
+      let resolve: DreamDecision["outcome"] | undefined;
+      let reason: string | undefined;
       const listFlags: string[] = [];
       for (let i = 0; i < flags.length; i++) {
         if (flags[i] === "--only" || flags[i].startsWith("--only=")) {
           const taken = takeValue(flags, i, "--only");
           if (taken.error || !/^\d+(,\d+)*$/.test(taken.value ?? "")) return fail("--only takes comma-separated nonnegative proposal indices.");
           only = taken.value!.split(",").map(Number); i += taken.skip;
+        } else if (flags[i] === "--reject") reject = true;
+        else if (flags[i] === "--resolve" || flags[i].startsWith("--resolve=")) {
+          const taken = takeValue(flags, i, "--resolve");
+          if (taken.error || (taken.value !== "applied" && taken.value !== "rejected")) return fail("--resolve takes applied or rejected.");
+          resolve = taken.value; i += taken.skip;
+        }
+        else if (flags[i] === "--reason" || flags[i].startsWith("--reason=")) {
+          const taken = takeValue(flags, i, "--reason");
+          if (taken.error) return fail(taken.error);
+          reason = taken.value; i += taken.skip;
         } else listFlags.push(flags[i]);
       }
-      const parsed = parseDreamListArgs(listFlags, "status");
+      const parsed = parseDreamListArgs(listFlags, "apply");
       if (!parsed.ok) return fail(parsed.error);
       const project = resolveDreamProject(phrenPath, parsed.value.project, profile);
       if (!project) return fail("Name the project with --project <name>.");
       try {
-        const record = await applyDreamProposals(phrenPath, project, runId, only);
+        const record = await applyDreamProposals(phrenPath, project, runId, only, { reject, resolve, reason });
         console.log(parsed.value.json ? JSON.stringify(record, null, 2) : record.outcomes.map(o => `${o.index}: ${o.op} ${o.status} — ${o.detail}`).join("\n"));
       } catch (err) { fail(err instanceof Error ? err.message : String(err)); }
       return;
@@ -219,19 +243,20 @@ export async function handleDreamCommand(args: string[], phrenPath: string, prof
         console.log(`Dream${runId} for ${project}: ${outcome.status}${parsed.value.dryRun ? " (dry run)" : ""}${counts}`);
         if (Array.isArray(outcome.result.warnings)) for (const warning of outcome.result.warnings) console.log(redactSecretsForLog(String(warning)));
         if (outcome.status === "disabled") console.log("Dreaming is off for this project. `phren config dreaming set enabled=true` turns it on; --force runs once anyway.");
-        if (outcome.status === "busy") console.log("Another dream for this project is running.");
+        if (outcome.status === "busy") console.log("A dream or proposal decision is already in progress for this project.");
         if (typeof outcome.result.error === "string") console.error(outcome.result.error);
         else if (outcome.status === "failed" && typeof outcome.result.message === "string") console.error(outcome.result.message);
         if (parsed.value.dryRun && outcome.result.changeset) console.log(JSON.stringify(outcome.result.changeset, null, 2));
       }
       if (outcome.status === "error" || outcome.status === "failed") process.exitCode = 1;
+      if (outcome.status === "busy" && parsed.value.scheduled) process.exitCode = DREAM_BUSY_EXIT_CODE;
       return;
     }
     case "status": {
       const parsed = parseDreamListArgs(rest, "status");
       if (!parsed.ok) return fail(`${parsed.error}\n\n${DREAM_USAGE}`);
       const project = resolveDreamProject(phrenPath, parsed.value.project, profile);
-      const statuses = dreamStatuses(phrenPath, project, profile);
+      const statuses = dreamStatuses(phrenPath, project, profile, undefined, parsed.value.limit);
       if (parsed.value.json) console.log(JSON.stringify(project ? statuses[0] : statuses, null, 2));
       else console.log(statuses.length ? statuses.map(formatStatus).join("\n\n") : "No projects.");
       return;

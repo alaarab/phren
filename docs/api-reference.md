@@ -129,18 +129,21 @@ relaunched. See
 full execution policy.
 
 `wait` prints NDJSON, one line per state change
-(`{"dispatch":"<id>","state":"running"|"needs_you","question"?:...,"at":"<ISO>"}`)
+(`{"dispatch":"<id>","state":"running"|"needs_you"|"waiting","question"?:...,"waitingOn"?:...,"waitingFor"?:...,"at":"<ISO>"}`)
 and a final line
 (`{"dispatch":"<id>","state":"done"|"failed"|"gone"|"timeout","final":true,"final_reply"?:...,"question"?:...,"error"?:...,"prs"?:[...]}`).
-`needs_you` is not final. It peeks with `POST /v1/dispatch/returns?peek=1`
+`wait` keeps following after `needs_you` and `waiting`. A worker parked on CI,
+background work or a queue needs a new turn to continue, such as a `hand_off`
+after CI passes. `wait` peeks with `POST /v1/dispatch/returns?peek=1`
 so a conductor's returns stay unread, reads
 `POST /v1/dispatch/workers` for live state, and acknowledges only this dispatch
 with `POST /v1/dispatch/returns/ack { "dispatch": "<uuid>" }`. Exit codes: 0
 `done`, 1 `failed` or `gone`, 124 `timeout` (no timeout by default, capped at 7
 days). Failures of any polled route count toward one 5-minute
 continuous-unavailability deadline. A targetless or pending receipt keeps
-`running`; only the Hook's terminal return (done, failed or gone), or the
-receipt's settled terminal state, ends the wait. An unknown id after a 30 s
+`running` until the Hook records a terminal outcome. If the 24-hour receipt
+watch expires with a parked return still on record, `wait` ends `failed` with
+an expiry message and leaves the worker open. An unknown id after a 30 s
 grace period ends `failed`. Live worker state is polled even when a return
 exists: a needs-you return from before the worker last ran is historical, and a
 resumed worker emits `running` again.
@@ -232,18 +235,21 @@ transcript when there are none; see [Returns](conductor.md#returns).
 | State | Meaning |
 |-------|---------|
 | `done` | The worker finished its turn. `reply` holds its final reply from the Stop hook or the transcript, at most 4000 UTF-8 bytes (`truncated` when cut). `background` counts background tasks still running when it was counted done after waiting two hours for them (every task that finishes wakes the worker, so the wait only runs out when none has finished for two hours). `waited` is the most background tasks the worker waited on before it finished, when none is still running. |
-| `needs-you` | The worker finished by asking the owner something. `question` holds the question line, `reply` the whole reply. |
+| `needs-you` | The worker finished by asking the owner something, stopped mid-task, or left uncommitted files with no PR. `question` holds the question line or the reason, `reply` the whole reply. |
+| `waiting` | The worker's turn ended waiting on CI, background work or a queue, with nothing left running. `waitingOn` is `ci`, `background`, `queue` or `other`; `waitingFor` is the worker's sentence. Not an owner action: no owner inbox item, no "needs you" notice, and the pane stays open. |
 | `failed` | The harness ended the worker's turn on an error instead of a reply, such as Codex's usage limit, or the owner interrupted it in the worker's terminal. `error` holds the message. |
 | `blocked` | The worker waits on terminal input, such as a permission prompt. |
 | `gone` | The worker's pane closed or another conversation took it over. |
 
 Each row carries `id` (the dispatch ID), `computer`, `project`, `label`,
-`harness`, `state`, `at` and the worker's `target` for `hand_off`. A `done`,
-`needs-you` or `failed` row can carry `tasks`: every task the worker's session
-claimed or moved to Active (`project`, `stableId`, `title`, `section` and
-`resolution`: `done`, `queue`, `parked`, `open` or `missing`). A finished turn
-that leaves a task `open` returns `needs-you` with `question` naming its bids;
-see [Settling tasks](task-responsibility.md#settling-tasks). A worker
+`harness`, `state`, `phase` (`working`, `waiting`, `needs-owner` or `done`),
+`at` and the worker's `target` for `hand_off`. A `done`, `waiting`,
+`needs-you` or `failed` row can carry `tasks`: every task the worker's session claimed or
+moved to Active (`project`, `stableId`, `title`, `section` and `resolution`:
+`done`, `queue`, `parked`, `open` or `missing`). A finished turn that leaves a
+task `open` returns `needs-you` with `question` naming its bids, unless the
+worker is `waiting`; see [Settling tasks](task-responsibility.md#settling-tasks).
+A worker
 that takes more work after `done` and finishes again produces a new return.
 The dispatching Hook asks each enrolled computer about its open dispatches at
 most every 15 seconds, in one request per computer. Dispatches are followed
@@ -1392,6 +1398,7 @@ Creates or copies `AGENTS.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under
 ### `export_project`
 
 Export a project's data (findings, task, summary, AGENTS.md) as portable JSON.
+Use `phren export vault <dir>` to generate linked Markdown notes across projects. [Obsidian vault export](obsidian.md)
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1420,9 +1427,11 @@ In the core profile use `phren_admin(action: "manage_project", project, operatio
 
 ## Fragment Graph
 
+Phren indexes Obsidian-style wikilinks in findings and reference docs as mentions of the target note name. For example, `[[Guides/Deployment.md#Rollout|Release guide]]` links to the `deployment` fragment. Wikilinks inside fenced code, indented code, inline code, or HTML comments are ignored. Use the CLI to add a vault's notes as reference docs. [Obsidian vault import](obsidian.md#import-a-vault)
+
 ### `search_fragments`
 
-Find fragments and related docs by name.
+Find fragments by name and count the linked documents.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1439,7 +1448,7 @@ These internal names do not introduce additional user-facing concepts. The
 `canonical` document type and `search --type canonical` continue to mean
 `truths.md`. Keeping these identifiers avoids breaking existing tools and filters.
 
-Get docs linked to a named fragment.
+Get docs linked to a named fragment, with snippets from the indexed documents in their stores.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1749,11 +1758,11 @@ Update configuration for a specific domain. Unified setter for all config domain
 
 ## Dreaming
 
-An offline pass that reorganizes a project's memory between sessions ([Dreaming](dreaming.md)). The Hook starts scheduled dreams on its own when a project's `dreaming` config enables them; these tools run, inspect and read them. In the core profile they are reached through `phren_admin`. CLI: `phren dream run|status|log`.
+An offline pass that reorganizes a project's memory between sessions ([Dreaming](dreaming.md)). The Hook starts scheduled dreams on its own when a project's `dreaming` config enables them; these tools run, inspect and read them. In the core profile they are reached through `phren_admin`. CLI: `phren dream run|apply|status|log`.
 
 ### `dream_run`
 
-Run a dream now. Returns `busy` while another dream for the project runs, and `disabled` while dreaming is off unless `force`.
+Run a dream now. Returns `busy` while another dream or proposal decision holds the project lock, and `disabled` while dreaming is off unless `force`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1766,19 +1775,25 @@ Run a dream now. Returns `busy` while another dream for the project runs, and `d
 
 Enabled, mode, cadence, window, last run (`dreams/last-run.json`), next eligible time and the last run's outcome counts. Without `project`, every project in the active profile. The next eligible time follows timing only; the Hook also waits while an agent works in the project.
 
+`acceptance.runs` is the number of stored runs in the window. Each `acceptance.byOp` entry reports `proposed`, `applied`, `rejected`, `pending`, `conflicted`, `skipped` and `acceptRate` for a structured operation in propose mode. The rate is `applied / (applied + rejected)`, or `null` while no proposal has been applied or rejected. Structured `applied` and `skipped` outcomes from 0.3.97 are counted. Additions approved through the review queue are not counted. The acceptance trial covers `correct` and `prune`. `conflicts` lists unresolved proposals by `runId`, `index`, `op` and active decisions.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | no | Project name, optionally store-qualified. |
+| `limit` | number | no | Most recent stored runs to summarize per project (1–500, default 20). |
 
 ### `dream_apply`
 
-Apply pending structured proposals from a stored dream (`dreams/<runId>.json`) through the same paths a dream in apply mode uses. Each target finding is re-checked first; a proposal whose finding is missing or changed since the run is refused. Proposed new findings are approved through the review queue instead.
+Apply or reject pending structured proposals from a stored dream (`dreams/<runId>.json`), or explicitly resolve opposing decisions. Applying rechecks its target findings and refuses missing or changed targets. A retry on the same computer uses the local intent to record a completed mutation, resume an untouched one, or report that its result could not be verified. After reconciling the memory changes for a conflicted proposal, use `resolve` to append a decision that supersedes its active decisions. A plain apply can retry publication of deferred additions through the ordinary review queue. The `pendingProposals` totals in status and log include those additions, while per-operation acceptance covers structured proposals only.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name, optionally store-qualified. |
 | `runId` | string | yes | The dream's run id (`phren dream log` lists them). |
-| `only` | number[] | no | Zero-based proposal indices to apply; all pending proposals when omitted. |
+| `only` | number[] | no | Zero-based proposal indices. Omit to select all pending proposals. |
+| `reject` | boolean | no | Reject the selected proposals. Defaults to `false`. |
+| `resolve` | enum | no | `applied` or `rejected`. Supply one conflicted index in `only`. |
+| `reason` | string | no | Reason to record with a rejection or resolution. |
 
 ### `dream_log`
 
@@ -2451,10 +2466,11 @@ Each tab in the `/v1/workspaces` and `WS /v1/overview` replies carries
 time that tab's `agentStatus` last changed; older Hooks omit it. Only a status
 change resets it, not a title, label or activity-counter change, and a tab seen
 for the first time gets the current time. The Hook persists it across restarts.
-A tab whose turn ended carries `lastReply`: the
-agent's last message from its Stop hook (Claude and Codex), as one plain line
-of at most 240 characters with markdown dropped. It is absent while a turn or
-its background work runs, and when the Stop carried no message. A finished
+A tab whose turn ended carries `lastReply` when the Hook has its final message.
+The Hook uses the Stop reply or the final transcript reply when the Stop has
+no text, as with OpenCode. The reply is one plain line of at most 240
+characters with Markdown dropped. A live foreground turn has no `lastReply`.
+An ended turn can keep its reply while background work runs. A finished
 turn also carries `completion: {id, at, entry?}`: an opaque id of the latest finished
 turn of the conversation now in the pane (the conversation id and its Stop's
 sequence), and when it stopped. It is absent while a prompt is unanswered, when
@@ -2472,9 +2488,8 @@ covered code-mode wrapper results.
 `seenCompletion` is the completion id a person last marked seen on the phone or
 the desktop, absent until one is. A row is unread while `completion.id` differs
 from `seenCompletion`. A session whose main turn ended while background
-work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`,
-where Herdr or tmux say idle or done. `n` counts the work the session is
-waiting on: its running Codex or Claude sub-agents, teammates, workflow agents
+work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`.
+`n` counts the session's running Codex or Claude sub-agents, teammates, workflow agents
 and fanout jobs (`runningChildren`), plus, for Claude, the background shells
 and monitors started since the owner's last prompt that still run. A shell
 that follows a log, watches files or serves a dev build (`tail -f`,
@@ -2485,7 +2500,13 @@ transcript shows finishing after that Stop (a task-notification with a final
 status, including one still queued in an idle session), and none count two
 hours after the Stop, so an old count never keeps a finished session working. `backgroundTasks` is absent on a tab that is working, blocked or waiting
 on its own turn, and such a tab has no `currentStep`. The Hook's `live_sessions`
-list carries the same field. `title` is the dispatch label for a dispatched
+list carries the same field. A tab whose turn ended can carry `waiting`.
+It is `ci` or `queue` when its reply's closing sentence waits on CI or a
+queue, else `background` while its background work runs, else `other` when the
+sentence names something else. It is absent while a turn runs, on a `blocked` or
+`waiting` tab, and when nothing is waited on. As with dispatch returns, an
+owner question at the end of the reply takes precedence and suppresses the
+wait. These kinds match a dispatch return's `waitingOn`. `title` is the dispatch label for a dispatched
 worker (kept in `<bridge>/briefs/<id>/label`); a dispatch sent before labels
 were kept uses its tab or workspace label. Otherwise it is the harness's own
 title, except a title made from the brief launch's first prompt ("Read and
@@ -2778,15 +2799,36 @@ independently of report persistence. Nothing is written to GitHub. See
 
 Full profile or `phren_admin(action:"owner_inbox",...)` in core. `operation` defaults
 to `list`; optional `includeResolved` shows history. `add` requires `title`, with
-optional `project` and stable UUID `id`. `resolve` requires `id`, with optional
-`resolution` and `computer` (the listed item's `inboxComputer`, omitted for
-local). A resolve does not answer or approve a prompt. Lists include local and
-linked computers' inboxes plus `unreachable` entries. Automatic items are
-deduplicated by pane, session and question and shown only while verified live.
-Answered or disappeared sources resolve automatically on reads or the five-second
-Hook tick; manual items require explicit resolution. The first reconciliation
-after upgrade resolves legacy stale automatic rows with `stale: source gone`.
-Unreachable workers are hidden as unverified without resolving their items.
+optional `project`, stable UUID `id`, `command` (a paste-able shell command,
+at most 20 lines; phren never runs it), `task` (`bid:xxxxxxxx`), `pr` (an HTTPS
+pull or merge request URL, stored normalized) and `key` (a dedupe key).
+`resolve` requires `id` and accepts `resolution`, `computer` (the item's
+`inboxComputer`, omitted for local), and `ifUpdatedAt` (the item's `updatedAt`).
+A stale `ifUpdatedAt` returns 409. Use the prompt's own route to answer or
+approve it. Lists include local and linked computers' inboxes plus `unreachable`
+entries. Add and list responses compute a `paste` for manual items with a
+`command`. The paste chains a guarded resolve after successful execution,
+runs multiline commands with `sh -e`, and routes to the owning Hook. Named
+remote adds and resolves also return `inboxComputer`. Remote `command`, `task`,
+`pr`, `key` and `ifUpdatedAt` require the destination Hook's `ownerInboxActions`
+capability. Legacy adds and resolves work during a rolling upgrade.
+
+Manual adds match open items by normalized PR or `key`. A write whose identifiers
+match different items returns 409. An explicit `id` naming a resolved manual item
+reopens it when its fields change. An identical retry returns it unchanged, and
+an explicit `id` naming an automatic item is refused. Open manual items resolve
+on the list tick when a GitHub or gitboy PR merges or closes (`done: PR merged`,
+`done: PR closed without merging`). When the PR read supplies neither outcome,
+a linked Done task also resolves the item (`done: task <bid> is Done`). GitLab
+merge requests can be linked for reference. The PR probe refreshes in the
+background. Unmerged closure and Done task evidence must come from a read after
+the latest item update to clear a reopened or edited action. Automatic items
+are deduplicated by pane, session and question and shown only while verified
+live. Answered or disappeared sources resolve automatically on reads or the
+five-second Hook tick. The first
+reconciliation after upgrade resolves legacy stale automatic rows with
+`stale: source gone`. Unreachable workers are hidden as unverified without
+resolving their items.
 
 Dispatch additions: optional `closeOnFinish` defaults to true, closing a
 verified finished pane after reading its done return; false keeps it open.

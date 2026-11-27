@@ -8,8 +8,8 @@ import { AGED_CHECK_MS, ownerInboxSources, resetAgedChecks } from "./owner-inbox
 import { dispatchStatus, updateReceipt, type Receipt } from "./dispatch.js";
 import { paneChatState, recentServers, snapshot, rpc } from "./herdr.js";
 import { hookPeers, peerRequest } from "./peers.js";
-import { workerStates } from "./dispatch-returns.js";
-import type { Json } from "./protocol.js";
+import { DispatchReturns, workerStates, workerTurnKey } from "./dispatch-returns.js";
+import { atomicInPrivateDir, type Json } from "./protocol.js";
 vi.mock("./herdr.js", async original => ({ ...await original<object>(), paneChatState: vi.fn(), recentServers: vi.fn(), snapshot: vi.fn(), rpc: vi.fn() }));
 vi.mock("./dispatch.js", async original => ({ ...await original<object>(), dispatchStatus: vi.fn(), updateReceipt: vi.fn() }));
 vi.mock("./dispatch-returns.js", async original => ({ ...await original<object>(), workerStates: vi.fn() }));
@@ -30,7 +30,7 @@ beforeEach(async () => {
   vi.mocked(dispatchStatus).mockResolvedValue([]);
   vi.mocked(hookPeers).mockResolvedValue([]);
 });
-afterEach(async () => { hooks.close(); vi.resetAllMocks(); await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { hooks.close(); vi.unstubAllEnvs(); vi.resetAllMocks(); await rm(root, { recursive: true, force: true }); });
 describe("current owner inbox sources", () => {
   it.each(["working", "idle", "done", "closed"])("retires a blocked pane when it becomes %s without a phone watching", async state => {
     const inbox = box();
@@ -77,6 +77,26 @@ describe("current owner inbox sources", () => {
     // Gone while the returns loop still watches it: its return is that loop's to record, so the receipt stays open.
     expect(updateReceipt).not.toHaveBeenCalled();
     expect(peerRequest).not.toHaveBeenCalled();
+  });
+
+  it("never lists a worker parked waiting on CI as needing the owner", async () => {
+    panes = [];
+    const at = new Date().toISOString();
+    // A waiting return is never a candidate row.
+    vi.mocked(dispatchStatus).mockResolvedValue([{ id: "bbbbbbbb-1111-4111-8111-111111111112", computer: "local", target, project: "phren", label: "pr-finisher", createdAt: at,
+      returned: { state: "waiting", at, waitingOn: "ci", waitingFor: "Waiting on CI for #940." },
+      worker: { state: "waiting", since: at, checkedAt: at, sawWorking: true } }] as never);
+    expect((await box().run({})).items).toEqual([]);
+    expect(workerStates).not.toHaveBeenCalled();
+    // An older peer Hook folded the wait into its unfinished reason: still no row.
+    vi.mocked(dispatchStatus).mockResolvedValue([{ id: "bbbbbbbb-1111-4111-8111-111111111113", computer: "local", target, project: "phren", label: "pr-finisher", createdAt: at,
+      returned: { state: "needs-you", at, question: "Continue?" } }] as never);
+    let workers: Json[] = [{ state: "idle", completed: true, reply: "PR #12 is open. Now waiting on CI.", unfinished: "Stopped waiting: Now waiting on CI." }];
+    vi.mocked(workerStates).mockImplementation(async () => ({ workers }) as never);
+    expect((await box().run({})).items).toEqual([]);
+    // A real unfinished reason still is a row.
+    workers = [{ state: "idle", completed: true, unfinished: "Stopped with 9 uncommitted files and no PR." }];
+    expect((await box().run({})).items).toMatchObject([{ kind: "needs-you", title: "Stopped with 9 uncommitted files and no PR.", live: true }]);
   });
 
   it("closes a local receipt whose worker is closed, or gone after the returns loop stopped watching it", async () => {
@@ -142,6 +162,34 @@ describe("dispatches on other computers", () => {
     receipt = { ...receipt, approval: undefined };
     expect((await inbox.run({})).items).toEqual([]);
     expect(peerRequest).not.toHaveBeenCalled();
+  });
+
+  it("reconciles an old CI wait out of the remote inbox without reopening the return", async () => {
+    panes = [];
+    vi.stubEnv("PHREN_BRIDGE_HOME", root);
+    const actual = await vi.importActual<typeof import("./dispatch.js")>("./dispatch.js");
+    vi.mocked(dispatchStatus).mockImplementation(actual.dispatchStatus);
+    vi.mocked(updateReceipt).mockImplementation(actual.updateReceipt);
+    const id = "dddddddd-1111-4111-8111-000000000007", at = new Date(Date.now() - 60_000).toISOString();
+    const notifiedAt = new Date(Date.parse(at) + 1000).toISOString();
+    const seen = { state: "done", completed: true, reply: "PR #12 is open. Now waiting on CI.", unfinished: "Stopped waiting: Now waiting on CI." };
+    const turn = workerTurnKey(seen);
+    await atomicInPrivateDir(path.join(root, "dispatches", `${id}.json`), remote(id, {
+      state: "accepted", harness: "codex", createdAt: at, updatedAt: notifiedAt,
+      worker: { state: "needs-you", since: at, checkedAt: at, sawWorking: true },
+      returned: { state: "needs-you", at, read: true, notifiedAt, turn, reply: seen.reply, question: seen.unfinished },
+    }));
+    vi.mocked(hookPeers).mockResolvedValue([{ name: "Desk" }] as never);
+    vi.mocked(peerRequest).mockResolvedValue({ workers: [seen] });
+    const inbox = box();
+    expect((await inbox.run({})).items).toMatchObject([{ dispatch: id, kind: "needs-you", live: true }]);
+    await new DispatchReturns().poll();
+    const [saved] = await dispatchStatus();
+    expect(saved.worker).toMatchObject({ state: "waiting", waitingOn: "ci" });
+    expect(saved.returned).toMatchObject({ at, read: true, notifiedAt, turn, state: "waiting", waitingOn: "ci", waitingFor: "Now waiting on CI." });
+    expect(saved.returned).not.toHaveProperty("question");
+    expect((await inbox.run({})).items).toEqual([]);
+    expect((await inbox.run({ includeResolved: true })).items).toMatchObject([{ dispatch: id, state: "resolved", live: false }]);
   });
 
   describe("past the returns loop's watch", () => {

@@ -74,15 +74,15 @@ interface Bullet {
 }
 
 /** FINDINGS.md, then every topic archive and older half in name order. */
-function findingFiles(phrenPath: string, project: string): Array<{ file: string; tier: FindingTier }> {
-  const dir = storeAwareProjectPath(phrenPath, project);
-  if (!dir) return [];
+function findingFiles(dir: string, checkedPath?: (file: string, directory?: boolean) => string | undefined): Array<{ file: string; tier: FindingTier }> {
   const files: Array<{ file: string; tier: FindingTier }> = [];
   const active = path.join(dir, FINDINGS_FILENAME);
-  if (fs.existsSync(active)) files.push({ file: active, tier: "active" });
+  if (checkedPath || fs.existsSync(active)) files.push({ file: active, tier: "active" });
   const topicsDir = path.join(dir, "reference", "topics");
+  const topicsPath = checkedPath ? checkedPath(topicsDir, true) : topicsDir;
+  if (!topicsPath) return files;
   let names: string[] = [];
-  try { names = fs.readdirSync(topicsDir); } catch { /* nothing archived yet */ }
+  try { names = fs.readdirSync(topicsPath); } catch { /* nothing archived yet */ }
   for (const name of names.filter((n) => n.endsWith(".md")).sort()) {
     files.push({ file: path.join(topicsDir, name), tier: name.endsWith(".older.md") ? "older" : "topic" });
   }
@@ -135,10 +135,34 @@ function toFinding(file: string, tier: FindingTier, bullet: Bullet): ProjectFind
 }
 
 /** Every finding bullet of a project: FINDINGS.md, each topic archive and each .older.md half. */
-export function* iterateProjectFindings(phrenPath: string, project: string): Generator<ProjectFinding> {
-  for (const { file, tier } of findingFiles(phrenPath, project)) {
+export function* iterateProjectFindings(phrenPath: string, project: string, scope?: {
+  projectDir: string;
+  onSkipped: (file: string, reason: string) => void;
+}): Generator<ProjectFinding> {
+  const dir = scope?.projectDir ?? storeAwareProjectPath(phrenPath, project);
+  if (!dir) return;
+  const root = scope && fs.realpathSync.native(dir);
+  const checkedPath = scope && root ? (file: string, directory = false): string | undefined => {
+    let reason: string;
+    try {
+      if (!fs.lstatSync(file, { throwIfNoEntry: false })) return undefined;
+      const resolved = fs.realpathSync.native(file);
+      const relative = path.relative(root, resolved);
+      if (path.isAbsolute(relative) || relative.split(path.sep)[0] === "..") reason = "outside the selected project";
+      else {
+        const stat = fs.statSync(resolved);
+        if (directory ? stat.isDirectory() : stat.isFile()) return resolved;
+        reason = directory ? "expected a directory" : "expected a regular file";
+      }
+    } catch (error) { reason = error instanceof Error ? error.message : String(error); }
+    scope.onSkipped(file, reason);
+    return undefined;
+  } : undefined;
+  for (const { file, tier } of findingFiles(dir, checkedPath)) {
+    const source = checkedPath ? checkedPath(file) : file;
+    if (!source) continue;
     let content: string;
-    try { content = fs.readFileSync(file, "utf8"); } catch { continue; }
+    try { content = fs.readFileSync(source, "utf8"); } catch { continue; }
     for (const bullet of scanBullets(content.split("\n"))) yield toFinding(file, tier, bullet);
   }
 }

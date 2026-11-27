@@ -37,18 +37,18 @@ jobs:
       # runs on Linux alone. macOS and Windows run in the RC and the nightly,
       # where the tests run. A macOS development build sat 15 minutes in
       # GitHub's queue and failed the push run on 2026-11-24.
+      #
+      # Node 22 (the oldest supported) runs on Linux only. A platform bug
+      # fails both Nodes alike (RC 45760142933 failed cli-govern on Windows
+      # 22 and 26 the same way), and Windows 22 was the slowest RC job and
+      # waited 14 minutes for a runner on 2026-11-26.
+      #
+      # macOS splits the suite in two (vitest --shard). After #937 its 3-vCPU
+      # job was the RC's gate at 9.1-14.9m while the rest took 6-10m. Only the
+      # macOS entries have a shard, so the Linux job names (required checks)
+      # stay "build-and-test (ubuntu-latest, 22)".
       matrix:
-        os: ${{ fromJSON((github.event_name == 'schedule' || inputs.release_candidate) && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest"]') }}
-        node-version: [22, 26]
-        # Node 22 (the oldest supported) runs on Linux only. A platform bug
-        # fails both Nodes alike (RC 45760142933 failed cli-govern on Windows
-        # 22 and 26 the same way), and Windows 22 was the slowest RC job and
-        # waited 14 minutes for a runner on 2026-11-26.
-        exclude:
-          - os: macos-latest
-            node-version: 22
-          - os: windows-latest
-            node-version: 22
+        include: ${{ fromJSON((github.event_name == 'schedule' || inputs.release_candidate) && '[{"os":"ubuntu-latest","node-version":22},{"os":"ubuntu-latest","node-version":26},{"os":"windows-latest","node-version":26},{"os":"macos-latest","node-version":26,"shard":"1/2"},{"os":"macos-latest","node-version":26,"shard":"2/2"}]' || '[{"os":"ubuntu-latest","node-version":22},{"os":"ubuntu-latest","node-version":26}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -71,10 +71,10 @@ jobs:
       # Four workers on the 4-vCPU Linux and Windows runners: most test time
       # waits on git and child processes, so the test step took 5.0-5.5m
       # instead of 9.1-12.1m (probe 45905523085). macOS runners have 3 vCPUs
-      # and gained nothing reliable, so they keep 2.
+      # and gained nothing reliable, so they keep 2 and split the files in two.
       - name: Release candidate tests
         if: env.PHREN_RC == 'true'
-        run: pnpm test --coverage --maxWorkers=${{ runner.os == 'macOS' && 2 || 4 }}
+        run: pnpm test --coverage --maxWorkers=${{ runner.os == 'macOS' && 2 || 4 }} ${{ matrix.shard && format('--shard={0}', matrix.shard) || '' }}
       - name: Development build summary
         if: env.PHREN_RC != 'true'
         run: echo 'Build passed. Tests deferred to the consolidated release candidate; tests were not run.' >> "$GITHUB_STEP_SUMMARY"

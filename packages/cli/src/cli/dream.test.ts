@@ -4,11 +4,12 @@ import * as path from "path";
 import { makeTempDir } from "../test-helpers.js";
 
 const engine = vi.hoisted(() => ({ calls: [] as Array<{ project: string; opts: Record<string, unknown> }>, result: { status: "ok", runId: "r1", counts: { applied: 3 } } as Record<string, unknown> }));
-vi.mock("../dream/run.js", () => ({
+vi.mock("../dream/run.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../dream/run.js")>(),
   dream: async (project: string, opts: Record<string, unknown>) => { engine.calls.push({ project, opts }); return engine.result; },
 }));
 
-import { parseDreamEvalArgs, parseDreamListArgs, parseDreamRunArgs, readDreamJournal, runDream } from "./dream.js";
+import { handleDreamCommand, parseDreamEvalArgs, parseDreamListArgs, parseDreamRunArgs, readDreamJournal, runDream } from "./dream.js";
 import { readLastRun } from "../bridge/dream-schedule.js";
 
 describe("phren dream arguments", () => {
@@ -27,10 +28,10 @@ describe("phren dream arguments", () => {
     expect(parseDreamRunArgs(["--project", "../etc"])).toMatchObject({ ok: false, error: expect.stringMatching(/Invalid project/) });
   });
 
-  it("parses status and log flags, with --limit only on log", () => {
+  it("parses status and log flags and bounds --limit", () => {
     expect(parseDreamListArgs(["--project", "demo", "--limit", "5"], "log")).toEqual({ ok: true, value: { project: "demo", limit: 5, json: false } });
     expect(parseDreamListArgs(["--limit=0"], "log")).toMatchObject({ ok: false });
-    expect(parseDreamListArgs(["--limit", "5"], "status")).toMatchObject({ ok: false });
+    expect(parseDreamListArgs(["--limit=501"], "status")).toMatchObject({ ok: false });
     expect(parseDreamListArgs(["--json"], "status")).toEqual({ ok: true, value: { limit: 20, json: true } });
   });
 
@@ -71,5 +72,21 @@ describe("phren dream run and log", () => {
     fs.writeFileSync(path.join(store.path, "demo", "dreams", "journal.md"), "# Dream journal\n\n- r1 first\n- r2 second\n- r3 third\n");
     expect(readDreamJournal(store.path, "demo", 2)).toEqual(["- r3 third", "- r2 second"]);
     expect(readDreamJournal(store.path, "other")).toEqual([]);
+  });
+
+  it("passes the rejection reason through the CLI and shows acceptance in text status", async () => {
+    const dir = path.join(store.path, "demo", "dreams");
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, "r1.json"), JSON.stringify({
+      changeset: { project: "demo", runId: "r1", changes: [{ op: "retract" }] }, finishedAt: "2026-11-07T00:00:00Z",
+      mode: "propose", outcomes: [{ index: 0, op: "retract", status: "proposed" }], dropped: [],
+    }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await handleDreamCommand(["apply", "r1", "--project", "demo", "--reject", "--reason", "Keep the finding", "--json"], store.path);
+      expect(JSON.parse(String(log.mock.lastCall?.[0])).outcomes[0]).toMatchObject({ status: "rejected", reason: "Keep the finding" });
+      await handleDreamCommand(["status", "--project", "demo", "--limit", "1"], store.path);
+      expect(log.mock.lastCall?.[0]).toContain("retract: 1 proposed, 0 applied, 1 rejected, 0 pending, 0 conflicted, 0 skipped, 0% accepted");
+    } finally { log.mockRestore(); }
   });
 });

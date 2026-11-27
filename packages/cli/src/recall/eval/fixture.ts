@@ -44,6 +44,11 @@ export interface RecallFixture {
   retiredTexts: string[];
 }
 
+export interface RankingFixture extends RecallFixture {
+  /** Each answer's project and the three newer distractor projects its prompt touches. */
+  distractors: Record<string, string[]>;
+}
+
 function dayAgo(now: Date, days: number): string {
   const date = new Date(now);
   date.setDate(date.getDate() - days);
@@ -108,4 +113,52 @@ export function buildRecallFixture(root: string): RecallFixture {
     write(`${name}/AGENTS.md`, `# ${name}\n\nKeep ${domain} changes small and document recovery invariants.`);
   }
   return { phrenPath, projects, retiredTexts };
+}
+
+/**
+ * The two score-before-date ranking cases run against this small store, so their dated headings and
+ * distractor bullets stay clear of every other case. Each answer's latest findings heading is six days
+ * old; its three distractors' are two, one and zero days old, and share only three invented words.
+ * The distractors also mention the answer's terms in one-word lines, so those terms are not uniquely
+ * rare and the distractors still clear the relevance floor.
+ */
+export function buildRankingFixture(root: string): RankingFixture {
+  const phrenPath = path.join(root, "store");
+  const projects = ["ferncradle", "velvetquay", "mossrelay", "cinderloom", "frostbobbin", "silverhollow", "coralspindle", "plumharbor"];
+  const ANSWER_WORDS = ["frond", "lock", "digest", "version"];
+  const ANSWER_SAMPLES = ["rime", "mixer", "sample", "reclaimed"];
+  const now = new Date();
+  fs.mkdirSync(phrenPath, { recursive: true });
+  writeRootManifest(phrenPath, { version: 1, installMode: "shared", syncMode: "managed-git" });
+  const write = (file: string, text: string) => {
+    const target = path.join(phrenPath, file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, text + "\n");
+  };
+  write("profiles/recall.yaml", `name: recall\nprojects:\n${projects.map(name => `  - ${name}`).join("\n")}`);
+  const project = (name: string, daysAgo: number, fid: string, text: string, mentions: string[] = []) => {
+    const checkout = path.join(root, "checkouts", name);
+    fs.mkdirSync(path.join(checkout, ".git"), { recursive: true });
+    write(`${name}/phren.project.yaml`, `sourcePath: ${JSON.stringify(checkout)}`);
+    const date = dayAgo(now, daysAgo);
+    const legacy = mentions.map((word, i) => `- Legacy ${word} notes. <!-- fid:${fid.slice(0, 4)}0f0${i} --> <!-- created: ${date} -->`).join("\n");
+    write(`${name}/FINDINGS.md`, `# ${name} Findings\n\n## ${date}\n\n- ${text} <!-- fid:${fid} --> <!-- created: ${date} -->\n${legacy}\n`);
+  };
+  project("ferncradle", 6, "00070000", "Frond resolution breaks equal version ties using the lock digest.");
+  project("velvetquay", 0, "00010000", "Harbour logs record dreamwire quartzite helix readings before a compaction.", ANSWER_WORDS);
+  project("mossrelay", 1, "00020000", "Harbour spool records dreamwire quartzite helix readings before a compaction.", ANSWER_WORDS);
+  project("cinderloom", 2, "00030000", "Harbour schema records dreamwire quartzite helix readings before a compaction.", ANSWER_WORDS);
+  project("frostbobbin", 6, "000e0000", "Rime mixer voices fade across 96 samples before being reclaimed.");
+  project("silverhollow", 0, "00080000", "Harbour tile records marlstone gyre tessera readings before a compaction.", ANSWER_SAMPLES);
+  project("coralspindle", 1, "00090000", "Harbour list records marlstone gyre tessera readings before a compaction.", ANSWER_SAMPLES);
+  project("plumharbor", 2, "000a0000", "Harbour ledger records marlstone gyre tessera readings before a compaction.", ANSWER_SAMPLES);
+  return {
+    phrenPath,
+    projects,
+    retiredTexts: [],
+    distractors: {
+      ferncradle: ["velvetquay", "mossrelay", "cinderloom"],
+      frostbobbin: ["silverhollow", "coralspindle", "plumharbor"],
+    },
+  };
 }

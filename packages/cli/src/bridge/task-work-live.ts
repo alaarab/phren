@@ -10,14 +10,13 @@ import { permissionDeniedError } from "../governance/rbac.js";
 import { autoCloseReason, bidReferences, branchTaskIds, parseForgeUrl, workerPhase, workStatusLine,
   type Forge, type ForgeItem, type ForgeRef, type LiveForge, type LiveWork, type TaskWork } from "../task/work.js";
 import { dispatchProjectDirectory, dispatchReceipt } from "./dispatch.js";
-import { detectHost, hostInfo, providerFor, type RecentPull } from "./git-hosts.js";
+import { detectHost, hostInfo, kindFromDomain, providerFor, type RecentPull } from "./git-hosts.js";
 import { dispatchWorkerState, openTasks, taskWorkEnabled, type DispatchReceiptView, type OpenTask } from "./task-work.js";
 import { phrenStoreRoot } from "./transcripts.js";
 
 const FORGE_TTL_MS = 60_000;
-/** `at` is the last attempt, `readAt` the last success, so a failed refresh
- * shows its error beside the reading it could not replace. */
-interface Cached { at: number; readAt?: number; value?: ForgeItem; error?: string; pending?: Promise<void> }
+/** `at` is the last completed attempt, `startedAt` the latest start, `readAt` the last success. */
+interface Cached { at: number; startedAt: number; readAt?: number; value?: ForgeItem; error?: string; pending?: Promise<void> }
 const forgeCache = new Map<string, Cached>();
 
 /** At most this many forge reads (`gh` processes, gitboy calls) at once,
@@ -40,14 +39,12 @@ async function fetchForge(ref: ForgeRef, kind: "pull" | "issue"): Promise<ForgeI
   return limited(() => provider.item!(homedir(), kind, parsed.number, host));
 }
 
-/** The cached reading of one pull request or issue, refreshed when older than
- * a minute. Waits at most `waitMs` for a refresh; a slower one lands in the
- * cache for the next read. */
-async function forgeState(ref: ForgeRef, kind: "pull" | "issue", waitMs: number): Promise<Cached | undefined> {
-  const key = `${kind}:${ref.forge}:${ref.url}`;
+/** Refresh after a minute or when the inbox needs a newer reversible reading. Wait at most `waitMs`. */
+async function forgeState(ref: ForgeRef, kind: "pull" | "issue", waitMs: number, after = -Infinity): Promise<Cached | undefined> {
+  const key = `${kind}:${ref.forge}:${ref.url}`, now = Date.now();
   let entry = forgeCache.get(key);
-  if (!entry || (Date.now() - entry.at >= FORGE_TTL_MS && !entry.pending)) {
-    const next: Cached = entry ? { ...entry } : { at: 0 };
+  if (!entry || (!entry.pending && (now - entry.at >= FORGE_TTL_MS || (entry.startedAt <= after && entry.value?.state !== "merged")))) {
+    const next: Cached = { ...entry, at: entry?.at ?? 0, startedAt: now };
     next.pending = fetchForge(ref, kind).then(value => { next.value = value; next.error = undefined; next.readAt = Date.now(); },
       error => { next.error = (error instanceof Error ? error.message : String(error)).slice(0, 300); })
       .finally(() => { next.at = Date.now(); next.pending = undefined; });
@@ -57,6 +54,15 @@ async function forgeState(ref: ForgeRef, kind: "pull" | "issue", waitMs: number)
   }
   if (entry.pending && waitMs > 0) await Promise.race([entry.pending, new Promise(resolve => setTimeout(resolve, waitMs).unref())]);
   return entry.at ? entry : undefined;
+}
+
+/** Nonblocking inbox probe. A reversible closure needs a successful read started after the item changed. */
+export async function cachedPull(url: string, after: number): Promise<ForgeItem | undefined> {
+  const parsed = parseForgeUrl(url);
+  if (!parsed || parsed.kind !== "pull") return undefined;
+  const entry = await forgeState({ forge: kindFromDomain(parsed.domain) ?? "github", number: parsed.number, url: parsed.url }, "pull", 0, after);
+  if (entry?.value?.state === "closed" && (entry.startedAt <= after || entry.pending || entry.error !== undefined)) return undefined;
+  return entry?.value;
 }
 
 function shown(entry: Cached | undefined): LiveForge {

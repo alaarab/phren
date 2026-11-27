@@ -2083,7 +2083,12 @@ schedules:
         }
         const closed = once(clients[0], "close");
         const next = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
-        clients.push(next); await once(next, "open"); await closed;
+        clients.push(next); await once(next, "open");
+        const [code, reason] = await closed;
+        // The phone learns it was evicted, rather than seeing SSH drop. A loopback socket flushes the
+        // frame even on the old close+terminate path, so the closeGracefully unit test is the real guard.
+        expect(code).toBe(1008);
+        expect(reason.toString()).toBe("Too many connections; reconnect");
         expect(clients[0].readyState).toBe(WebSocket.CLOSED);
         expect(clients.slice(1).every(client => client.readyState === WebSocket.OPEN)).toBe(true);
         expect((await api("/v1/health")).status).toBe(200);

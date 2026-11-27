@@ -5,6 +5,60 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Hook WebSocket eviction gives the 1008 close frame up to one second to reach the client before cutting the socket.
+- `@phren/code`: code lookups now find citing findings in the oldest archive halves (`.older.md`) too.
+
+## [0.3.99] - 2026-11-27
+
+### Added
+
+- `phren export vault <dir>` writes the store's findings, fragments and projects as a linked Obsidian vault (MQ 4.2). Every tier of findings is included, with lifecycle status in frontmatter; supersedes, contradicts and fragment links become wikilinks, and citations are text. The vault must be outside every Phren store and the source checkout. Running it again refreshes the generated notes in place and never touches your own files. `--project` narrows it, `--dry-run` prints counts, and `--force-unlock` clears a lock left by an interrupted export. See [Obsidian](docs/obsidian.md).
+- `phren import vault <dir> --project <name>` copies an Obsidian vault's Markdown notes into the project's reference docs, where they are searchable and synced with the store (MQ 4.3). Re-importing updates changed notes and leaves the rest alone; `--prune` removes copies whose source notes are gone; notes the exporter generated are skipped. Wikilinks in reference docs and findings now link to fragments, ignoring code and comments.
+- Dream proposals record accept and reject decisions: `phren dream apply --reject` and `--resolve`, alongside `--only`, write append-only decision files, and `phren dream status` shows proposed, applied, rejected, pending and conflicted counts per operation (MQ 3.13). Additions approved through the review queue are not counted. Run records and decision files sync with team stores.
+
+### Fixed
+
+- A process that changes `PHREN_PATH` now resolves the new store; changing directory alone still keeps the store it started with.
+
+## [0.3.98] - 2026-11-27
+
+### Changed
+
+- Prompt recall in a session with no detected project (a conductor, or a session outside any project folder) holds every finding to the stricter cross-project relevance floor, so it injects less on loose word overlap (MQ 2.3).
+- Findings are ranked by score first; a newer finding wins only when two scores are within 0.01 of each other (MQ 2.6). Other documents rank as before.
+
+### Fixed
+
+- Two flaky release-candidate tests: the agent's shell-checker tests use a fresh repository per test, and the 64-conversation search test batches its inserts.
+
+### Tests
+
+- Resolving a contradiction on an archived finding has conformance fixtures for topic archives and `.older.md` files, starting from a contradicted pair (MQ 3.5).
+- The public recall eval has 7 new cases for project-less sessions and score-before-date ranking.
+
+## [0.3.97] - 2026-11-27
+
+### Added
+
+- The owner inbox is the one place for owner actions (#932). An item can carry the command to paste, the task (`bid:`) and the pull request it is about, and a `key` that updates the same item instead of adding another. Its paste line ends with the `phren owner-inbox resolve` command for it. An item resolves itself once its pull request is merged or closed or its task is Done. The conductor and fanout skills tell workers to post merge commands, logins, tokens and decisions there.
+- A dispatched worker that ends its turn waiting on CI, its own background work or a queue now returns `waiting`, with `waitingOn` (`ci`, `background`, `queue` or `other`) and the sentence it waits on, instead of needs-you (#933). A waiting worker is never an owner-inbox item and is never closed, and `dispatch wait` keeps following it. Return rows and `GET /v1/dispatch` carry `phase`: working, waiting, needs-owner or done.
+- The Hook's session overview gives each tab whose turn ended but is not done a `waiting` field (`ci`, `queue`, `background` or `other`), so the phone can tell a session waiting on CI from one that needs the owner. A tab still running background work keeps its last reply.
+
+### Fixed
+
+- A pane that finished its turn is no longer closed 500 ms after replying while it still has background work. Close-self waits for the turn to end with nothing running, for up to 10 minutes, and a new prompt cancels it. A refused close of a dispatched worker is retried.
+- A worker waiting on CI with an open task stays `waiting` instead of returning needs-you for the task. Stale-task rows in the owner inbox link their task.
+- A 0.3.96 conductor no longer reads a 0.3.97 worker's CI wait as done: waiting workers also send the older "Stopped waiting" reason, and a stored needs-you return for a wait is corrected in place after the upgrade.
+- Close-self never closes a pane that took a new prompt or has a queued hand-off while it waited, and leaves the pane open when it cannot verify the conversation and its prompt. OpenCode's second turn no longer cancels its own close.
+- An owner-inbox paste resolves the item only after its command succeeds and only if the item has not changed since it was copied. A Done task resolves an item even while its linked pull request is still open; adding the same pull request with or without a key no longer makes a second item; items added on another computer paste with `--computer`, and a 0.3.96 peer gets a clear error for the new fields. GitLab links are kept for reference but do not resolve items.
+- `dispatch wait` exits with an error when the Hook's 24-hour watch ends while the worker is still parked, instead of waiting forever.
+
+### Changed
+
+- The release candidate runs the macOS tests in two shards (#940), and pull requests run the tests that import a changed source file, on Linux (#941).
+
 ## [0.3.96] - 2026-11-27
 
 ### Added

@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import type { SqlJsDatabase } from "@phren/cli/code-host/index-query";
 import { parseFindingsContent, readFindings, type FindingItem } from "@phren/cli/code-host/data/access";
 import { listTopicFiles } from "@phren/cli/code-host/content/summarize";
@@ -140,9 +141,29 @@ function collectCiting(items: FindingItem[], symbol: string, out: CitingFinding[
 }
 
 /**
- * Every finding that cites `symbol`, from FINDINGS.md (including its archive
- * blocks) and from the project's `reference/topics/*.md` archives, read through
- * the same finding parser the rest of phren uses.
+ * The sibling `.older.md` half of a topic file, when it is a regular file that
+ * really lives under the topics directory. A symlinked half, or one resolved
+ * outside the directory, is not read.
+ */
+function olderHalfOf(topicFile: string): string | undefined {
+  const file = topicFile.replace(/\.md$/, ".older.md");
+  const dir = path.dirname(topicFile);
+  try {
+    if (!fs.lstatSync(file).isFile()) return undefined;
+    const root = fs.realpathSync(dir);
+    const resolved = fs.realpathSync(file);
+    const relative = path.relative(root, resolved);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return undefined;
+    return file;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Every finding that cites `symbol`, from FINDINGS.md, every topic archive,
+ * then each topic's `.older.md` half, read through the same finding parser the
+ * rest of phren uses.
  */
 export function findingsCitingSymbol(store: string, project: string, symbol: string): CitingFinding[] {
   const out: CitingFinding[] = [];
@@ -151,11 +172,22 @@ export function findingsCitingSymbol(store: string, project: string, symbol: str
   const live = readFindings(store, project, { includeArchived: true });
   if (live.ok) collectCiting(live.data, symbol, out, seen);
 
-  for (const topic of listTopicFiles(store, project)) {
+  const topics = listTopicFiles(store, project);
+  for (const topic of topics) {
     try {
       collectCiting(parseFindingsContent(fs.readFileSync(topic.file, "utf8"), { includeArchived: true }), symbol, out, seen);
     } catch {
       // A topic file that cannot be read is skipped; the live findings still answer.
+    }
+  }
+
+  for (const topic of topics) {
+    const file = olderHalfOf(topic.file);
+    if (!file) continue;
+    try {
+      collectCiting(parseFindingsContent(fs.readFileSync(file, "utf8"), { includeArchived: true }), symbol, out, seen);
+    } catch {
+      // An older half that cannot be read is skipped; the rest still answer.
     }
   }
 

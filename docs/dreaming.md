@@ -68,13 +68,13 @@ phren dream run --project my-app              # uses the configured mode
 phren dream run --project my-app --dry-run    # show the changeset, change nothing
 phren dream run --project my-app --propose    # or --apply, overriding the config
 phren dream run --project my-app --force      # run even though dreaming is disabled
-phren dream status --project my-app           # enabled, cadence, last run, next eligible time, last outcome
+phren dream status --project my-app --limit 20 # timing, last outcome and proposal acceptance
 phren dream log --project my-app --limit 20   # the journal
 ```
 
 The same are available to agents as the `phren_admin` actions `dream_run`, `dream_apply`, `dream_status` and `dream_log`.
 
-Only one dream runs per project at a time. A second one started while the first is running returns `busy`.
+Only one dream runs per project at a time. When a scheduled run returns `busy` because the project lock is held, the Hook retries on its next eligible tick.
 
 All prompt inputs (including memory, page summaries, journal and commit subjects) are redacted with the shared secret scanner before interpolation, and the completed prompt is scanned before invoking the helper. Notes, diagnostics and rejection reasons are sanitized before persistence or return.
 
@@ -142,35 +142,52 @@ Pages are capped at 16 KB; a bigger subject should be split. Links to pages that
 
 ## Propose or apply
 
-In **propose** mode (the default) nothing in memory changes. Only `add_finding` changes become review items in `review.md`; approving them saves the finding. While the project's review queue is over its review budget ([Budgets](governance.md#budgets)) an addition is not queued: its outcome is `deferred`, it stays in the run record, and `phren dream apply` (or `dream_apply`) on that run queues it once the queue has room. A later dream does not pick it up on its own. Review additions like any other queue item:
+In **propose** mode (the default), `add_finding` changes go to the ordinary review queue in `review.md`. A full review queue ([Budgets](governance.md#budgets)) can defer an addition. Use `phren dream apply` on its run to retry publication when the queue has room.
 
-```bash
-phren review                           # show the queue
-phren review approve <project> <text>  # accept it
-phren review reject  <project> <text>  # drop it
-```
+Additions approved through the review queue are not counted. The acceptance trial covers the `correct` and `prune` phases.
 
 Every other operation stays in `dreams/<runId>.json`, with its zero-based index and `proposed` outcome. Inspect the changes and evidence in that file, then apply all pending structured proposals or select indices:
 
 ```bash
 phren dream apply <runId> --project my-app
 phren dream apply <runId> --project my-app --only 0,2,4
+phren dream apply <runId> --project my-app --only 1 --reject --reason "Needs more evidence"
 ```
 
-The MCP admin action `dream_apply` takes `project`, `runId`, and optional `only: [0, 2, 4]`. Adds stay in the review queue. Apply rechecks each target finding against the stored bullet and citation version under the findings write lock, refusing missing or changed targets. Completed operations are never replayed. Each outcome is saved back to the run record and appended to the journal; `status` and `log` report the remaining pending structured proposal count, deferred additions included. Old run records without target versions cannot safely apply finding operations; create a fresh dream instead.
+The MCP admin action `dream_apply` takes `project`, `runId`, optional `only: [0, 2, 4]`, and optional `reject: true` with a `reason`. Rejection applies to structured proposals. Apply rechecks each target finding against the stored bullet and citation version under the findings write lock. Missing or changed targets leave the proposal pending. To apply ideas from an old run without target versions, create a fresh dream.
+
+Apply saves a local intent before changing memory. Retry an interrupted apply on the same computer. A completed receipt or a verified result lets the retry record the decision without repeating the mutation. If the affected records have changed and the result cannot be verified, apply stops and asks you to inspect the change.
 
 In **apply** mode the changes are applied straight away and logged.
 
+## Proposal acceptance
+
+`phren dream status --limit <n>` and the `dream_status` action summarize the latest recorded runs for each project. The default is 20 runs and the range is 1–500. The counts combine structured proposals with their decision files. Pending, conflicted and skipped proposals have separate counts and are excluded from the acceptance rate, `applied / (applied + rejected)`. With no applied or rejected proposals, CLI text shows a dash and JSON returns `acceptRate: null`. Status lists every unresolved conflict with its run and index, including conflicts outside the summary window.
+
+The overall `pendingProposals` count in status and log includes additions still waiting to be published to review. Per-operation acceptance covers structured proposals only.
+
+A 0.3.97 client writes structured decisions into the run file itself. In propose-mode runs, legacy `applied` outcomes count as approvals and `skipped` outcomes count as completed skips. Legacy approvals have no decision timestamp. Review-queue activity on any client stays outside these counts.
+
 ## Where the output goes
 
-- `<store>/<project>/dreams/<runId>.json`: the full changeset, its inputs (how many transcripts, findings, truths and pages it read) and each change's outcome, including the ones validation dropped and why.
-- `<store>/<project>/dreams/journal.md`: one line per dream. Later dreams read it, so they see what earlier ones did.
+- `<store>/<project>/dreams/<runId>.json` contains the full changeset, input counts, validation drops, and initial outcomes. Structured decisions leave this file unchanged. A retry of a deferred addition still records its publication outcome there.
+- `<store>/<project>/dreams/decisions/<runId>/<index>-<decisionId>.json` is an immutable structured decision. The random UUID in the filename is the decision ID. Each file contains `runId`, `index`, `op`, `outcome` (`applied` or `rejected`), `decidedAt` (UTC ISO 8601), and `computer`. It may contain a `reason` and a `supersedes` array of IDs. `legacy-applied` refers to a 0.3.97 approval for the same proposal. Normal store sync carries decision files between computers. Agreeing decisions count once, using the earliest known timestamp and retaining every reason. Opposing active decisions produce `conflicted` until superseded.
+- `<store>/.runtime/dream-receipts/<project>/<runId>/<index>.json` records the local apply intent and then confirms the mutation succeeded. It is cleared after the decision file is saved.
+- `<store>/<project>/dreams/journal.md` has one summary per run. Later dreams read it. Proposal decisions are recorded only in the decision files.
 - `<store>/<project>/dreams/last-run.json`: when the last dream ran, for scheduling.
-- `review.md` for proposed additions; other proposed operations stay in the run record until explicitly applied.
+- `review.md` contains proposed additions tagged with their run and proposal index. Other proposals stay in the run record until resolved.
 
 ## Reviewing and undoing
 
 Start with `phren dream log` and open the run's `dreams/<runId>.json` to see each change and its evidence.
+
+If status reports a conflict, inspect the proposal and reconcile its memory changes. For `applied`, keep the corresponding change. For `rejected`, undo only the changes caused by that proposal and preserve independently saved findings. Then record the chosen outcome as a new decision. This command changes the decision history only.
+
+```bash
+phren dream apply <runId> --project my-app --only 1 --resolve rejected --reason "Insufficient evidence"
+```
+
+The MCP equivalent is `dream_apply` with `only: [1]` and `resolve: "rejected"`. Resolution supersedes the active decision IDs seen on that computer. A later sync can introduce another opposing decision and reopen the conflict.
 
 To undo an applied dream:
 

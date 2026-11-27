@@ -54,6 +54,9 @@ describe("dispatch entry points", () => {
     const context = { phrenPath: () => "unused", profile: () => "unused" };
     await lookupCommand("owner-inbox")!.run(["resolve", session, "--computer", "Desk", "--resolution", "Approved"], context);
     expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox", { action: "resolve", id: session, computer: "Desk", resolution: "Approved" });
+    const updatedAt = "2026-11-26T10:00:00.000Z";
+    await lookupCommand("owner-inbox")!.run(["resolve", session, "--computer", "Desk", "--resolution", "done", "--if-updated-at", updatedAt], context);
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox", { action: "resolve", id: session, computer: "Desk", resolution: "done", ifUpdatedAt: updatedAt });
     await lookupCommand("dispatch")!.run(["Desk", "phren", "--label", "Checks", "--prompt", "Run checks", "--keep-open"], context);
     expect(hookRequest).toHaveBeenLastCalledWith("/v1/dispatch", { ...brief, closeOnFinish: false }, undefined, 180_000);
   });

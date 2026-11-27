@@ -42,7 +42,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     "export_project",
     {
       title: "◆ phren · export",
-      description: "Export a project's data (findings, task, summary) as portable JSON for sharing or backup.",
+      description: "Export a project's data (findings, task, summary) as portable JSON for sharing or backup. For linked Markdown notes, use the CLI command phren export vault <dir>.",
       inputSchema: z.object({
         project: z.string().describe("Project name to export."),
       }),

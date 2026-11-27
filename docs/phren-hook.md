@@ -1843,7 +1843,25 @@ check the relevant capability before offering the new surface.
   it sits in the ledger. A phone that wants the latest dispatch or return for
   a card should send `limit=1`. Hooks up to 0.3.87 ignore both parameters and
   send every receipt, a megabyte once the ledger holds a few hundred.
-- `POST /v1/dispatch/close-self`: `{origin:{server,workspace,tab,pane},dispatch?}`. An agent closing the pane it runs in (CLI: `phren dispatch close-self`, the form of `herdr pane close` that an agent's auto mode allows). A dispatched pane answers `{ok:true,closed:false,pending:true,dispatch}` so the agent can finish its turn: the existing finished-worker path closes it after the conductor reads the recorded done return. A fallback rechecks every 15 seconds for up to ten minutes and closes only after the local dispatch receipt records a done return for that turn, with the same terminal, conversation and prompt generation. Without a matching recorded return it leaves the pane open; the conductor's normal close-after-done path still applies. The CLI supplies `PHREN_DISPATCH_ID` when present; otherwise the Hook uses the turn record or a matching local receipt. A pane without a dispatch answers `{ok:true,closed:true,pending:false}` and closes 500 ms after the reply. Closure is recorded as intentional (no gone return) only when closing; a pane already gone answers `{ok:true,closed:false}`.
+- `POST /v1/dispatch/close-self` accepts `{origin:{server,workspace,tab,pane},dispatch?}`
+  from an agent closing its own pane. The CLI command is `phren dispatch close-self`.
+  It supplies `PHREN_DISPATCH_ID` when present, and the Hook can also identify a
+  dispatch from the turn record or a matching local receipt. The Hook anchors a
+  deferred close to the terminal, conversation and prompt recorded when the
+  request arrives. OpenCode uses the busy timestamp for its prompt. A new prompt
+  or conversation cancels the close. The Hook rechecks the binding and idle
+  status after gathering turn evidence and holds the hand-off queue guard through
+  closure. Background tasks, child agents and queued hand-offs keep the pane open
+  while the Hook rechecks, for up to ten minutes.
+
+  A dispatched pane answers `{ok:true,closed:false,pending:true,dispatch}`. The
+  conductor can close it after reading the done return. With a verified prompt,
+  the local fallback also rechecks every 15 seconds and can close once the local
+  receipt records a done return for that turn. A pane without a dispatch answers
+  `{ok:true,closed:false,pending:true}` when the Hook can verify its conversation
+  and prompt. Otherwise it stays open and answers `{ok:true,closed:false}`. The
+  same response applies to a pane already gone. The Hook records a successful
+  close as intentional so it does not produce a gone return.
 - `POST /v1/dispatch/report`: `{origin:{server,workspace,tab,pane},prs:[{url,repo,branch,tests,notes?}],dispatch?}`.
   The Hook resolves the live conversation, requires its submitted turn record,
   and returns `{ok:true,target,prs}`. Without that record, `dispatch` (the
@@ -1870,20 +1888,31 @@ check the relevant capability before offering the new surface.
 `{ok:true,items:[Item],unreachable:[{computer,error}]}` across linked computers.
 `GET ?local=1` reads only this Hook (used by peer aggregation, no recursion).
 `includeResolved=true` in GET, or `includeResolved:true` in POST, includes history.
+A linked computer name in a POST list reads only that Hook's inbox.
 
 `Item` is `{id,kind:"manual"|"needs-you"|"blocked",title,state:"open"|"resolved",
 createdAt,updatedAt,inboxComputer,project?,computer?,target?,dispatch?,actionId?,
-source?,live?,resolvedAt?,resolution?}`. All times are ISO timestamps. `target`
+source?,live?,resolvedAt?,resolution?,command?,task?,pr?,key?,paste?}`. All times are ISO timestamps. `target`
 is a full session target or a starting target for a startup dialog. `id` is a
 UUID; `source` is opaque. `inboxComputer:"local"` means the connected Hook owns
 it; another name means send the action to that Hook. `computer` describes the
 worker, which can differ from the inbox owner.
 
-`POST /v1/owner-inbox` accepts `{action:"add",title,project?,id?,computer?}` or
-`{action:"resolve",id,resolution?,computer?}` and returns `{ok:true,item}`.
-`computer` routes to the named linked Hook; omit it for local. A reused manual
-id with different content is a 409; missing resolve ids are 404. Repeating an
-identical add or resolve is idempotent. Resolve changes only inbox state.
+Add accepts `{action:"add",title,project?,id?,computer?,command?,task?,pr?,key?}`.
+Resolve accepts `{action:"resolve",id,resolution?,computer?,ifUpdatedAt?}`.
+Both return `{ok:true,item}`. `computer` routes to the named linked Hook. Omit
+it for local. Remote responses include the row's `inboxComputer`. The generated
+`paste` uses the owning Hook and sends the row's `updatedAt` as `ifUpdatedAt`
+after the command succeeds. An `ifUpdatedAt` mismatch returns 409 and a missing
+resolve id returns 404. Resolve changes only inbox state.
+
+Adds match open manual items by normalized PR or `key`. An add may name a
+resolved manual id with changed fields to reopen it. Writes that match
+different items return 409. Identical adds and resolves without a precondition
+are idempotent. To send `command`, `task`, `pr`, `key` or `ifUpdatedAt` to
+another Hook, its `/v1/health` must advertise `capabilities.ownerInboxActions`.
+An older Hook still accepts legacy adds and resolves. Requests with new fields
+return 409 with `code: "owner-inbox-actions-unsupported"`.
 
 The follow-up phone screen should show one open list with source, project,
 computer, question and a link to `target`; show unreachable computers as
@@ -1891,8 +1920,10 @@ unknown. A Done action sends resolve to `inboxComputer`, with optional notes.
 Keep permission and question answers on their existing routes. Automatic items appear only while verified live; answered questions and ended
 or closed sources resolve on reads or within the five-second activity tick.
 Repeated observations update the same item per pane, session and question.
-Manual items remain until explicitly resolved. Show history on demand, retain
-ids across retries, and refresh after actions. On upgrade, stale automatic
+Manual items also resolve on a merged or closed GitHub or gitboy PR or a Done
+task. GitLab merge-request links are for reference. Unmerged closure and Done
+task evidence must be fresh for the item's latest edit. Show history on demand,
+retain ids across retries, and refresh after actions. On upgrade, stale automatic
 items resolve with `stale: source gone`; an unreachable worker is hidden as
 unverified rather than resolved. No phone UI changes are included here.
 

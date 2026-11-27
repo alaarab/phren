@@ -1379,6 +1379,16 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
           <div class="ref-card-desc">Launch the memory web UI.</div>
         </div>
 
+        <div class="ref-card">
+          <div class="ref-card-name">phren export vault &lt;dir&gt; [[--project &lt;name&gt;]... [--dry-run] | --force-unlock]</div>
+          <div class="ref-card-desc">Generate or refresh an Obsidian vault. Repeat <code>--project</code> to select projects, use <code>--dry-run</code> to print counts, or use <code>--force-unlock</code> by itself after confirming a stopped export left its lock. <a href="obsidian.md">Obsidian vault export</a></div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren import vault &lt;dir&gt; --project &lt;name&gt; [--dry-run] [--prune]</div>
+          <div class="ref-card-desc">Import Obsidian notes as project references. Use <code>--dry-run</code> to preview changes and <code>--prune</code> to remove unedited copies of notes deleted from the source vault. <a href="obsidian.md#import-a-vault">Obsidian vault import</a></div>
+        </div>
+
         <h2 id="cli-search">Search <a href="#cli-search" class="anchor-link">#</a></h2>
 
         <div class="ref-card">
@@ -1727,6 +1737,16 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <div class="ref-card">
           <div class="ref-card-name">phren maintain extract [project]</div>
           <div class="ref-card-desc">Mine git and GitHub signals to extract memories automatically.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren dream apply &lt;runId&gt; [--project &lt;p&gt;] [--only &lt;n,m,...&gt;] [--reject|--resolve &lt;applied|rejected&gt;] [--reason &lt;text&gt;] [--json]</div>
+          <div class="ref-card-desc">Apply or reject proposals from a recorded dream run, or resolve conflicting decisions. <a href="dreaming.md#proposal-acceptance">Proposal acceptance guide</a></div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren dream status [--project &lt;p&gt;] [--limit &lt;n&gt;] [--json]</div>
+          <div class="ref-card-desc">Show dream timing, proposal acceptance by operation, and unresolved decision conflicts. <a href="dreaming.md#proposal-acceptance">Proposal acceptance guide</a></div>
         </div>
       </section>
 

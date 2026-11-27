@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { announcedNextStep, awaitedInReply, checkoutRoot, recentUncommitted, sharedCheckout, uncommittedFiles, unfinishedTurn, UNKNOWN } from "./worker-unfinished.js";
+import { announcedNextStep, awaitedInReply, checkoutRoot, recentUncommitted, sharedCheckout, uncommittedFiles, unfinishedTurn, waitingOn, UNKNOWN } from "./worker-unfinished.js";
 
 describe("a turn that ended mid-task", () => {
   it("reads a closing sentence that announces a next step", () => {
@@ -75,8 +75,39 @@ describe("a turn that ended mid-task", () => {
     expect(announcedNextStep(reply)).toBe(step);
   });
 
-  it("names a waiting reply as stopped waiting", async () => {
-    expect(await unfinishedTurn({ reply: "PR #9 is up. Waiting on CI." })).toEqual({ unfinished: "Stopped waiting: Waiting on CI." });
+  it("names a waiting reply as a wait, never an unfinished turn", async () => {
+    expect(await unfinishedTurn({ reply: "PR #9 is up. Waiting on CI." })).toEqual({ waiting: "Waiting on CI." });
+    expect(await unfinishedTurn({ reply: "Waiting on CI for #940." })).toEqual({ waiting: "Waiting on CI for #940." });
+    expect(await unfinishedTurn({ reply: "There's one conflict. I'll push once it passes." })).toEqual({ waiting: "I'll push once it passes." });
+    // A turn that stopped mid-task is still unfinished, wait or no wait.
+    expect(await unfinishedTurn({ reply: "The worktree lacks node_modules. Let me install dependencies." })).toEqual({ unfinished: "Stopped mid-task: Let me install dependencies." });
+    expect(await unfinishedTurn({ reply: "Done.", directory: "/w" }, async () => 4)).toEqual({ unfinished: "Stopped with 4 uncommitted files and no PR." });
+  });
+
+  it.each([
+    ["Now waiting on CI.", "ci"],
+    ["Waiting on CI for #940.", "ci"],
+    ["Let's merge once CI is green.", "ci"],
+    ["Waiting for the pipeline to finish.", "ci"],
+    ["I'll push once PR #12's checks finish.", "ci"],
+    ["Now waiting on the MacBook rerun.", "other"],
+    ["I'll push once it passes.", "other"],
+    ["Waiting on the queue.", "queue"],
+    ["Waiting for my turn on the slot.", "queue"],
+    ["Waiting on another agent to free up.", "queue"],
+    ["Waiting for the lock.", "queue"],
+    ["Waiting on a background task.", "background"],
+    ["Waiting on the dev server to come up.", "background"],
+    ["Downloading the SDK; waiting on that.", "background"],
+    ["Waiting on the subagent.", "background"],
+    ["I'll wait for the results to arrive.", "other"],
+  ])("reads %s as waiting on %s", (sentence, kind) => {
+    expect(waitingOn(sentence)).toBe(kind);
+  });
+  it("reads the category once, CI before queue before background", () => {
+    // One word: both a CI run and a queue named, CI wins.
+    expect(waitingOn("Waiting on CI so the queue frees up.")).toBe("ci");
+    expect(waitingOn("Waiting for the slot while the background task holds it.")).toBe("queue");
   });
 
   it("counts uncommitted work only when no PR was reported or named", async () => {

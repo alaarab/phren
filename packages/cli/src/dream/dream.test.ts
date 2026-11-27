@@ -5,13 +5,17 @@ import { readFindings } from "../data/access.js";
 import { tryFileLock } from "../governance/locks.js";
 import { readProjectTopics } from "../project-topics.js";
 import { grantAdmin, makeTempDir } from "../test-helpers.js";
-import { applyChangeset, applyDreamProposals, pendingDreamProposals } from "./apply.js";
+import { applyChangeset, applyDreamProposals } from "./apply.js";
 import { budgetTranscripts, collect, type DreamInputs, type DreamTranscript, type DreamTranscriptRoot } from "./collect.js";
 import { buildDreamPrompt } from "./prompt.js";
+import { dreamProposalStats, pendingDreamProposals } from "./records.js";
 import { dream, dreamLockPath, validateChanges, type DreamRunner } from "./run.js";
 import type { DreamChange, DreamChangeset } from "./types.js";
 
 vi.mock("fs", { spy: true });
+vi.mock("../machine-identity.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../machine-identity.js")>(), getMachineName: () => "test-computer",
+}));
 
 const PROJECT = "proj";
 const NOW = new Date("2026-11-06T12:00:00Z");
@@ -369,8 +373,9 @@ describe("review regressions", () => {
     { op: "retract", findingId: "aaaa1111", reason: "obsolete", evidence: EVIDENCE },
     { op: "edit", findingId: "dddd4444", newText: "Cache in ~/.cache", evidence: EVIDENCE },
   ] }) });
+  const decisionsDir = (runId: string, root = store) => path.join(root, PROJECT, "dreams", "decisions", runId);
 
-  it("keeps an addition deferred by the review budget pending, and queues it on apply once the queue has room", async () => {
+  it("retries a deferred addition through the release review path and excludes it from acceptance", async () => {
     fs.mkdirSync(path.join(store, ".config"), { recursive: true });
     fs.writeFileSync(path.join(store, ".config", "retention-policy.json"), JSON.stringify({ schemaVersion: 1, budgets: { reviewEntries: 1 } }));
     const full = "# Review\n\n## Review\n\n- One\n- Two\n\n## Stale\n\n## Conflicts\n";
@@ -387,10 +392,15 @@ describe("review regressions", () => {
     expect((await applyDreamProposals(store, PROJECT, result.runId!)).outcomes.map(o => o.status)).toEqual(["proposed"]);
     expect(fs.readFileSync(path.join(store, PROJECT, "review.md"), "utf8")).toContain("Deploys need the VPN");
     expect(pendingDreamProposals(store, PROJECT)).toBe(0);
+    expect(fs.existsSync(decisionsDir(result.runId!))).toBe(false);
+    expect(dreamProposalStats(store, PROJECT, 20).acceptance.byOp).toEqual({});
   });
 
-  it("applies selected stored proposals once, journals outcomes and refuses an edited target", async () => {
+  it("applies selected stored proposals once and refuses an edited target", async () => {
     const result = await run({ runner: answer });
+    const journal = path.join(store, PROJECT, "dreams", "journal.md");
+    const beforeRun = fs.readFileSync(result.record!, "utf8");
+    const beforeJournal = fs.readFileSync(journal, "utf8");
     expect(pendingDreamProposals(store, PROJECT)).toBe(2);
     expect(fs.existsSync(path.join(store, PROJECT, "review.md"))).toBe(false);
     const applied = await applyDreamProposals(store, PROJECT, result.runId!, [0]);
@@ -404,7 +414,116 @@ describe("review regressions", () => {
     const before = fs.readFileSync(findingsFile(), "utf8");
     await applyDreamProposals(store, PROJECT, result.runId!, [0]);
     expect(fs.readFileSync(findingsFile(), "utf8")).toBe(before);
-    expect(fs.readFileSync(path.join(store, PROJECT, "dreams", "journal.md"), "utf8")).toContain(`${result.runId}#0 applied`);
+    expect(fs.readFileSync(result.record!, "utf8")).toBe(beforeRun);
+    expect(fs.readFileSync(journal, "utf8")).toBe(beforeJournal);
+  });
+
+  it.each([
+    ["retract", "decision"], ["write_page", "decision"], ["retract", "receipt"], ["write_page", "receipt"],
+    ["write_page", "intent"], ["write_page", "receipt after later edits"],
+  ] as const)("retries %s after a %s checkpoint failure", async (op, fault) => {
+    const page = "reference/pages/deploys.md";
+    const change: DreamChange = op === "retract" ? { op, findingId: "aaaa1111", reason: "obsolete", evidence: EVIDENCE }
+      : { op, page, markdown: "---\ntitle: Deploys\nsummary: Deploy policy\n---\nUse a staging environment.", links: [] };
+    const { runId, record } = await run({ runner: async () => ({ ok: true, output: JSON.stringify({ changes: [change] }) }) });
+    const original = fs.readFileSync(record!, "utf8");
+    const directory = decisionsDir(runId!);
+    const receipt = path.join(store, ".runtime", "dream-receipts", PROJECT, runId!, "0.json");
+    const rename = (await vi.importActual<typeof fs>("fs")).renameSync;
+    let receiptWrites = 0;
+    vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+      if (fault === "decision" && path.dirname(String(to)) === directory) throw new Error("checkpoint interrupted");
+      if (String(to) === receipt && ++receiptWrites === (fault === "intent" ? 1 : 2) && fault !== "decision") {
+        throw new Error("checkpoint interrupted");
+      }
+      return rename(from, to);
+    });
+    try { await expect(applyDreamProposals(store, PROJECT, runId!, [0])).rejects.toThrow("checkpoint interrupted"); }
+    finally { vi.mocked(fs.renameSync).mockImplementation(rename); }
+    expect(fs.existsSync(directory) ? fs.readdirSync(directory) : []).toEqual([]);
+    const target = op === "retract" ? findingsFile() : path.join(store, PROJECT, page);
+    if (fault === "intent") {
+      expect(fs.existsSync(target)).toBe(false);
+      expect((await applyDreamProposals(store, PROJECT, runId!, [0])).outcomes[0].status).toBe("applied");
+      expect(fs.readFileSync(target, "utf8")).toContain("Use a staging environment.");
+      return;
+    }
+    if (op === "retract") expect(finding("aaaa1111")?.status).toBe("retracted");
+    else expect(fs.readFileSync(target, "utf8")).toContain("Use a staging environment.");
+    if (fault !== "receipt" || op === "retract") fs.appendFileSync(target, "\n<!-- edited after applying -->\n");
+    const saved = fs.readFileSync(target, "utf8");
+    fs.utimesSync(target, NOW, NOW);
+    if (fault === "receipt after later edits") {
+      await expect(applyDreamProposals(store, PROJECT, runId!, [0])).rejects.toThrow("Cannot verify interrupted apply");
+      expect(fs.readFileSync(target, "utf8")).toBe(saved);
+      expect(fs.existsSync(directory)).toBe(false);
+      return;
+    }
+    expect((await applyDreamProposals(store, PROJECT, runId!, [0])).outcomes[0].status).toBe("applied");
+    expect(fs.readFileSync(target, "utf8")).toBe(saved);
+    expect(fs.statSync(target).mtimeMs).toBe(NOW.getTime());
+    expect(fs.readFileSync(record!, "utf8")).toBe(original);
+    await applyDreamProposals(store, PROJECT, runId!, [0]);
+    expect(fs.readdirSync(directory)).toHaveLength(1);
+  });
+
+  it.each(["agree", "disagree"])("folds two clones' structured decisions when they %s", async (relationship) => {
+    const { runId } = await run({ runner: answer });
+    const other = path.join(tmp.path, "peer-store");
+    fs.cpSync(store, other, { recursive: true });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-11-07T09:00:00Z"));
+      await applyDreamProposals(store, PROJECT, runId!, [0], { reject: true, reason: "Too broad" });
+      vi.setSystemTime(new Date("2026-11-07T08:00:00Z"));
+      await applyDreamProposals(other, PROJECT, runId!, [0], relationship === "agree" ? { reject: true, reason: "Needs evidence" } : {});
+    } finally { vi.useRealTimers(); }
+    const directory = decisionsDir(runId!);
+    fs.cpSync(decisionsDir(runId!, other), directory, { recursive: true });
+    const combined = await applyDreamProposals(store, PROJECT, runId!, [0]);
+    if (relationship === "agree") {
+      expect(combined.outcomes[0]).toMatchObject({ status: "rejected", decidedAt: "2026-11-07T08:00:00.000Z", reasons: ["Needs evidence", "Too broad"] });
+      expect(fs.readdirSync(directory)).toHaveLength(2);
+    } else {
+      expect(combined.outcomes[0].status).toBe("conflicted");
+      const { conflicts } = dreamProposalStats(store, PROJECT, 20);
+      expect(conflicts).toMatchObject([{ runId, index: 0, op: "retract" }]);
+      const resolved = await applyDreamProposals(store, PROJECT, runId!, [0], { resolve: "rejected" });
+      expect(resolved.outcomes[0].status).toBe("rejected");
+      expect(fs.readdirSync(directory)).toHaveLength(3);
+      const decisions = fs.readdirSync(directory).map(name => JSON.parse(fs.readFileSync(path.join(directory, name), "utf8")));
+      expect(decisions).toContainEqual(expect.objectContaining({ supersedes: conflicts[0].decisions.map(d => d.id) }));
+      expect(dreamProposalStats(store, PROJECT, 20).conflicts).toEqual([]);
+    }
+    expect(finding("aaaa1111")?.status).toBe("active");
+  });
+
+  it.each(["mismatched op", "duplicate index", "out-of-range index"])("refuses a stored proposal with a %s before mutation", async (bad) => {
+    const { runId, record } = await run({ runner: answer });
+    const data = JSON.parse(fs.readFileSync(record!, "utf8"));
+    if (bad === "mismatched op") data.outcomes[0].op = "edit";
+    else if (bad === "duplicate index") data.outcomes[1] = { ...data.outcomes[0] };
+    else data.outcomes[1].index = 2;
+    fs.writeFileSync(record!, JSON.stringify(data));
+    const original = fs.readFileSync(findingsFile(), "utf8");
+    await expect(applyDreamProposals(store, PROJECT, runId!, [0])).rejects.toThrow(/index, operation or status/);
+    expect(fs.readFileSync(findingsFile(), "utf8")).toBe(original);
+    expect(fs.existsSync(decisionsDir(runId!))).toBe(false);
+  });
+
+  it("counts a release client's structured checkpoint without replaying it", async () => {
+    const { runId, record } = await run({ runner: answer });
+    const legacy = JSON.parse(fs.readFileSync(record!, "utf8"));
+    const [applied] = await applyChangeset(store, changeset([legacy.changeset.changes[0]]), { mode: "apply", injectBudgetKB: 8 });
+    legacy.outcomes = [applied, { ...legacy.outcomes[1], status: "skipped", detail: "already in place" }];
+    fs.writeFileSync(record!, JSON.stringify(legacy));
+    const original = fs.readFileSync(findingsFile(), "utf8");
+    expect((await applyDreamProposals(store, PROJECT, runId!)).outcomes.map(o => o.status)).toEqual(["applied", "skipped"]);
+    expect(dreamProposalStats(store, PROJECT, 20)).toMatchObject({ pendingProposals: 0, acceptance: { byOp: {
+      retract: { proposed: 1, applied: 1, acceptRate: 1 }, edit: { proposed: 1, skipped: 1, acceptRate: null },
+    } } });
+    expect(fs.readFileSync(findingsFile(), "utf8")).toBe(original);
+    expect(fs.existsSync(decisionsDir(runId!))).toBe(false);
   });
 
   it("checks target versions after acquiring the findings lock", async () => {

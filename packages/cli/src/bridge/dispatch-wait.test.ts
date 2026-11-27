@@ -125,4 +125,41 @@ describe("dispatch wait", () => {
     expect(code).toBe(0);
     expect(lines.map(line => line.state)).toEqual(["needs_you", "running", "done"]);
   });
+
+  it("reports a waiting return and keeps following until the worker is done", async () => {
+    let reads = 0;
+    const { code, lines } = await run(async route => {
+      if (route === `/v1/dispatch?id=${id}`) return { dispatches: [{ id, target }] };
+      if (route.startsWith("/v1/dispatch/returns?")) {
+        reads++;
+        if (reads < 3) return { returns: [{ id, state: "waiting", waitingOn: "ci", waitingFor: "Waiting on CI for #940.", at }] };
+        return { returns: [{ id, state: "done", reply: "CI passed; pushed.", at: new Date(Date.parse(at) + 1000).toISOString() }] };
+      }
+      if (route === "/v1/dispatch/returns/ack") return { ok: true };
+      return { workers: [{ state: "idle" }] };
+    });
+    expect(code).toBe(0);
+    expect(lines[0]).toMatchObject({ dispatch: id, state: "waiting", waitingOn: "ci", waitingFor: "Waiting on CI for #940." });
+    expect(lines[0].final).toBeUndefined();
+    expect(lines.map(line => line.state)).toEqual(["waiting", "done"]);
+  });
+
+  it("keeps following a waiting return from before the worker resumed", async () => {
+    let clock = 1;
+    let reads = 0;
+    const lines: Json[] = [];
+    const code = await waitForDispatch(id, { intervalMs: 1, jitter: false, now: () => clock,
+      sleep: async ms => { clock += ms; }, out: line => lines.push(line),
+      request: async route => {
+        if (route === `/v1/dispatch?id=${id}`) return { dispatches: [{ id, target }] };
+        if (route.startsWith("/v1/dispatch/returns?")) {
+          reads++;
+          if (reads < 3) return { returns: [{ id, state: "waiting", waitingOn: "ci", waitingFor: "Waiting on CI.", at: new Date(0).toISOString() }] };
+          return { returns: [{ id, state: "done", reply: "CI passed; pushed.", at: new Date(clock).toISOString() }] };
+        }
+        return { workers: [{ state: "working" }] };
+      } });
+    expect(code).toBe(0);
+    expect(lines.map(line => line.state)).toEqual(["running", "done"]);
+  });
 });

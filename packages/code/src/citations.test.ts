@@ -199,4 +199,69 @@ describe("findings that cite a symbol", () => {
     expect(findingsCitingSymbol(store, PROJECT, "Point.length")).toHaveLength(1);
     expect(findingsCitingSymbol(store, PROJECT, "double")).toHaveLength(0);
   });
+
+  it("finds citing findings in every archive tier, the oldest half included", () => {
+    const projectDir = path.join(store, PROJECT);
+    const topics = path.join(projectDir, "reference", "topics");
+    fs.mkdirSync(topics, { recursive: true });
+    const bullet = (fid: string, text: string, created: string): string =>
+      `- ${text} <!-- fid:${fid} -->\n<!-- phren:cite ${JSON.stringify({ created_at: created, symbol: "measure" })} -->\n`;
+    fs.writeFileSync(
+      path.join(projectDir, "FINDINGS.md"),
+      `# ${PROJECT}\n\n## 2026-01-01\n\n${bullet("aaaaaaaa", "measure is cited in the live findings", "2026-01-01")}`,
+    );
+    fs.writeFileSync(
+      path.join(topics, "x.md"),
+      `# x (archive)\n\n## 2025-12-01\n\n${bullet("bbbbbbbb", "measure is cited in the topic archive", "2025-12-01")}`,
+    );
+    fs.writeFileSync(
+      path.join(topics, "x.older.md"),
+      `# x (older archive)\n\n## 2025-06-01\n\n${bullet("cccccccc", "measure is cited in the oldest archive half", "2025-06-01")}`,
+    );
+
+    const citing = findingsCitingSymbol(store, PROJECT, "measure");
+    expect(citing.map(finding => finding.stableId)).toEqual(["aaaaaaaa", "bbbbbbbb", "cccccccc"]);
+    expect(citing.map(finding => finding.text)).toEqual([
+      "measure is cited in the live findings",
+      "measure is cited in the topic archive",
+      "measure is cited in the oldest archive half",
+    ]);
+  });
+
+  it("keeps the regular topic's copy when an older half repeats its fid", () => {
+    const projectDir = path.join(store, PROJECT);
+    const topics = path.join(projectDir, "reference", "topics");
+    fs.mkdirSync(topics, { recursive: true });
+    const bullet = (text: string): string =>
+      `- ${text} <!-- fid:aaaaaaaa -->\n<!-- phren:cite ${JSON.stringify({ created_at: "2026-01-01", symbol: "measure" })} -->\n`;
+    fs.writeFileSync(path.join(topics, "a.md"), "# a (archive)\n");
+    fs.writeFileSync(
+      path.join(topics, "a.older.md"),
+      `# a (older archive)\n\n## 2025-01-01\n\n${bullet("measure is cited in the older half")}`,
+    );
+    fs.writeFileSync(
+      path.join(topics, "z.md"),
+      `# z (archive)\n\n## 2026-01-01\n\n${bullet("measure is cited in the regular topic")}`,
+    );
+
+    const citing = findingsCitingSymbol(store, PROJECT, "measure");
+    expect(citing).toHaveLength(1);
+    expect(citing[0].text).toBe("measure is cited in the regular topic");
+  });
+
+  it.skipIf(process.platform === "win32")("does not follow a symlinked older half outside the store", () => {
+    const projectDir = path.join(store, PROJECT);
+    const topics = path.join(projectDir, "reference", "topics");
+    fs.mkdirSync(topics, { recursive: true });
+    fs.writeFileSync(path.join(topics, "b.md"), "# b (archive)\n");
+    const outside = path.join(tmp.path, "outside.older.md");
+    fs.writeFileSync(
+      outside,
+      `# outside\n\n## 2026-01-01\n\n- measure is cited outside the store <!-- fid:dddddddd -->\n<!-- phren:cite ${JSON.stringify({ created_at: "2026-01-01", symbol: "measure" })} -->\n`,
+    );
+    fs.symlinkSync(outside, path.join(topics, "b.older.md"));
+
+    expect(findingsCitingSymbol(store, PROJECT, "measure")).toHaveLength(0);
+    expect(fs.readFileSync(outside, "utf8")).toContain("measure is cited outside the store");
+  });
 });

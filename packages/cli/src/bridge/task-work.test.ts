@@ -81,6 +81,11 @@ describe("dispatch binding", () => {
     expect(item("aaaaaaaa").work?.worker).toMatchObject({ session: "sess-1", state: "working" });
     recordDispatchWorker({ ...first, state: "accepted", returned: { state: "needs-you", at: "2026-11-25T10:05:00.000Z" } });
     expect(item("aaaaaaaa").work?.worker?.state).toBe("needs-you");
+    // A worker parked on CI records what it waits on, from its return or its worker row.
+    recordDispatchWorker({ ...first, state: "accepted", returned: { state: "waiting", at: "2026-11-25T10:06:00.000Z", waitingOn: "ci" } });
+    expect(item("aaaaaaaa").work?.worker).toMatchObject({ state: "waiting", waitingOn: "ci" });
+    recordDispatchWorker({ ...first, state: "accepted", worker: { state: "waiting", since: "2026-11-25T10:07:00.000Z", waitingOn: "background" } });
+    expect(item("aaaaaaaa").work?.worker).toMatchObject({ state: "waiting", waitingOn: "background" });
 
     const second = { ...first, id: "22222222-2222-4222-8222-222222222222", createdAt: new Date(Date.now() + 60_000).toISOString(), computer: "Mini", state: "accepted" };
     recordDispatchWorker(second);

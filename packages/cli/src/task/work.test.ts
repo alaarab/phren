@@ -5,7 +5,7 @@ import { grantAdmin, makeTempDir } from "../test-helpers.js";
 import { linkTaskIssue, readTasks, updateTask, updateTaskWork } from "../data/tasks.js";
 import { initializeTaskFormat } from "../data/task-format.js";
 import { registerStoreIdentity } from "../store-registry.js";
-import { bidReferences, branchTaskIds, parseForgeUrl, textNamesTask, workStatusLine, type TaskWork } from "./work.js";
+import { bidReferences, branchTaskIds, parseForgeUrl, textNamesTask, workStatusLine, workerPhase, type TaskWork } from "./work.js";
 
 const temps: { cleanup: () => void }[] = [];
 afterEach(() => { for (const temp of temps.splice(0)) temp.cleanup(); });
@@ -121,6 +121,15 @@ describe("work status line", () => {
     ["PR unreadable", { version: 1, pr }, { pr: { error: "gh is not signed in", checkedAt: at } }, "PR #9 · state unknown"],
     ["stale reading still shown", { version: 1, pr }, { pr: { state: "open", checks: "pending", error: "timeout", checkedAt: at } }, "PR #9 · checks running"],
     ["worker only", { version: 1, worker }, { worker: { phase: "live", state: "working", at, source: "task" } }, "Worker working on PJ"],
+    ["worker waiting on CI", { version: 1, worker: { ...worker, state: "waiting", waitingOn: "ci" } }, { worker: { phase: "live", state: "waiting", at, source: "dispatch" } }, "Worker waiting on CI on PJ"],
+    ["worker waiting on background work", { version: 1, worker: { ...worker, state: "waiting", waitingOn: "background" } }, { worker: { phase: "live", state: "waiting", at, source: "dispatch" } }, "Worker waiting on background work on PJ"],
+    ["worker waiting with no word named", { version: 1, worker: { ...worker, state: "waiting" } }, { worker: { phase: "live", state: "waiting", at, source: "dispatch" } }, "Worker waiting on work on PJ"],
     ["issue", { version: 1, issue: { forge: "gitboy", number: 4, url: "https://gitboy.example.com/me/app/issues/4" } }, { issue: { state: "closed", checkedAt: at } }, "Issue #4 closed"],
   ] as const)("%s", (_name, work, live, want) => expect(workStatusLine(work as TaskWork, live as never)).toBe(want));
+
+  it("keeps a worker parked on CI live, unlike the states that need attention", () => {
+    expect(workerPhase("waiting")).toBe("live");
+    expect(workerPhase("needs-you")).toBe("waiting");
+    expect(workerPhase("working")).toBe("live");
+  });
 });

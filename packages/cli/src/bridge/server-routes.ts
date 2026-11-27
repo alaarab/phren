@@ -40,7 +40,7 @@ import type { AgentHooks } from "./agent-hooks.js";
 import { homeDir } from "../home-paths.js";
 import { resolveCodeStore, CodeRoutes } from "./code-routes.js";
 import type { WorkspaceContextUsage } from "./context.js";
-import { type DispatchService, dispatchProjectDirectory, dispatchStatus, originPaneSchema, recentDispatches, reconcileInterruptedDispatches } from "./dispatch.js";
+import { type DispatchService, dispatchPhase, dispatchProjectDirectory, dispatchStatus, originPaneSchema, recentDispatches, reconcileInterruptedDispatches } from "./dispatch.js";
 import { type DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
 import { briefArrival, briefId, briefRoot, launchesWithBrief, readLaunchBrief } from "./launch-brief.js";
@@ -61,7 +61,7 @@ import { PROJECT_GIT_ROUTE, projectGit, projectHostToken } from "./project-git.j
 import { availablePaneEvidence, childActivity, effectivePaneEvidence } from "./session-evidence.js";
 import { liveWork, markBackground, ownRecord, paneRecord, provisionalWork, recordTitle, replyExcerpt, resolveEffectiveStatus, turnCompletion } from "./session-activity.js";
 import { markSessionSeen, readSessionSeen } from "./session-seen.js";
-import { opencodeTurn, turnPhase, type TurnRecord } from "./turn-records.js";
+import { opencodeTurn, truncateUtf8, turnPhase, type TurnPhase, type TurnRecord } from "./turn-records.js";
 import { paneAccountField, paneChatState, panes, rpc, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
@@ -105,6 +105,7 @@ import { DEFAULT_SPEECH_VOICE, listSpeechVoices, resolveSpeechVoice } from "./sp
 import { terminalKind, terminalMux } from "./terminal.js";
 import { resolveTerminalReference } from "./terminal-resolve.js";
 import { muxListForClient, muxReplyForClient, typedMuxRequest } from "./mux-wire.js";
+import { tabWaiting } from "./tab-waiting.js";
 
 /** The Hook's HTTP API over its Unix socket: module gating, the GET routes,
  * the POST routes that are not bound to one pane, and grant deletion. */
@@ -207,6 +208,7 @@ export const capabilities = { browsers: true, turnCheckpoints: true, transcript:
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
+  if (result.ownerInbox === true) result.ownerInboxActions = true;
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
   if (snapshot.has("hook")) result.approvalRules = { version: 2, effects: ["always-ask", "deny"], harnesses: ["claude"], events: ["PermissionRequest"], tools: ["Bash"], inputField: "command", conductorTools: false, mcpTools: false, preExecution: false };
   if (snapshot.has("schedules")) { result.scheduleProjects = true; result.scheduleUpdate = true; result.scheduleEvents = true; }
@@ -320,15 +322,18 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     // alongside the slower reads so a stuck transcript cannot hide children, but
     // inside the budget, so a stuck disk cannot hold the overview either.
     const recordEnrichment: Array<() => Promise<void>> = [];
+    const turnPhases = new Map<Json, TurnPhase>();
     const records = Promise.all(tabs.map(async ({ group, tab }) => {
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
       const pane = agents.length === 1 ? agents[0] : undefined;
       const session = pane ? object(tab.target).session : undefined;
       const record = typeof session === "string" && pane ? await paneTurnRecord(server, pane, session).catch(() => undefined) : undefined;
       if (expired) return;
+      const phase = record ? turnPhase(record) : undefined;
+      if (phase) turnPhases.set(tab, phase);
       if (pane && typeof session === "string") {
         const available = availablePaneEvidence(server, pane, session, record, agentHooks);
-        if (available.held || ["blocked", "waiting"].includes(String(available.paneStatus)) || (record && turnPhase(record).phase === "working")) {
+        if (available.held || ["blocked", "waiting"].includes(String(available.paneStatus)) || phase?.phase === "working") {
           const status = resolveEffectiveStatus(available);
           if (status) tab.agentStatus = status;
         }
@@ -341,8 +346,6 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       const title = await recordTitle(record, { paneLabel: tab.paneLabel, harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label });
       if (expired) return;
       tab.title = title;
-      const reply = tab.agentStatus === "working" ? undefined : replyExcerpt(record);
-      if (reply) tab.lastReply = reply;
       // Apply every row's small-file metadata before starting transcript reads.
       // A stalled lookup must not hide another row's completion or pane label.
       if (completion && record && pane) recordEnrichment.push(async () => {
@@ -358,11 +361,14 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         if (evidence) {
           Object.assign(tab, evidence.children);
           const resolved = resolveEffectiveStatus(evidence);
-          if (background && ["idle", "done"].includes(String(tab.agentStatus))) tab.backgroundTasks = background;
+          if (background && resolved === "working" && (phase?.phase === "ended" || ["idle", "done"].includes(String(tab.agentStatus)))) tab.backgroundTasks = background;
           if (resolved) tab.agentStatus = resolved;
+          if (phase?.phase === "ended" && !phase.reply && evidence.final?.lastAssistant) {
+            const { text, truncated } = truncateUtf8(evidence.final.lastAssistant);
+            turnPhases.set(tab, { ...phase, reply: text, truncated });
+          }
         }
         markBackground(tab, background);
-        if (tab.agentStatus === "working") delete tab.lastReply;
         const target = targetSchema.safeParse(tab.target);
         const stall = target.success && agents.length === 1
           ? await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }, async () => background) : {};
@@ -409,7 +415,6 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         if (expired || !children) return;
         Object.assign(tab, children);
         markBackground(tab, children.runningChildren);
-        if (tab.agentStatus === "working") delete tab.lastReply;
       }),
       eachTab(async ({ group, tab }) => {
         const identity = identified(group, tab);
@@ -426,6 +431,15 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     ]);
     await Promise.race([enrich, budget]);
     expired = true; clearTimeout(timer);
+    // Derive reply and wait from the evidence that arrived inside the budget.
+    for (const { tab } of tabs) {
+      const phase = turnPhases.get(tab);
+      if (phase?.phase !== "ended") continue;
+      const reply = tab.agentStatus !== "working" || tab.backgroundTasks ? replyExcerpt(phase.reply) : undefined;
+      if (reply) tab.lastReply = reply;
+      const waiting = tabWaiting(phase, tab);
+      if (waiting) tab.waiting = waiting;
+    }
     // The row's status may have changed above (background work turns idle into
     // working): stamp what this reply sends, not the raw snapshot.
     const activity = await tabActivity.recordStatus(server, tabs.map(({ group, tab }) => ({ workspace: group.id, tab: tab.id, status: tab.agentStatus })), generation);
@@ -567,7 +581,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             const limit = z.coerce.number().int().min(1).max(1024).optional().parse(url.searchParams.get("limit") ?? undefined);
             const id = z.string().min(1).max(64).optional().parse(url.searchParams.get("id") ?? undefined);
             const receipts = await dispatchStatus();
-            result = id ? { dispatches: receipts.filter(receipt => receipt.id === id), total: receipts.length, truncated: false } : recentDispatches(receipts, limit);
+            const list = id
+              ? { dispatches: receipts.filter(receipt => receipt.id === id), total: receipts.length, truncated: false }
+              : recentDispatches(receipts, limit);
+            // `phase` folds each receipt's worker and return states into one word.
+            result = { ...list, dispatches: list.dispatches.map(receipt => ({ ...receipt, phase: dispatchPhase(receipt) })) };
             break;
           }
           // A session move (session-move.ts) by its id, or this computer's recent moves.
@@ -1132,7 +1150,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           if (request.headers?.["x-phren-origin"] === "peer") throw new BridgeError(403, "A peer cannot cancel a dispatch on this computer.");
           result = await cancelDispatch(data);
         } else if (url.pathname === "/v1/dispatch/close-self") {
-          result = await closeOwnPane(data);
+          result = await closeOwnPane(data, undefined, ctx.handOffs);
         } else if (url.pathname === "/v1/hand-off") {
           const forwarded = request.headers?.["x-phren-origin"] === "peer" && typeof data.deliveryId === "string" && /^handoff-notice-[a-f0-9]{40}$/.test(data.deliveryId)
             ? await ctx.succession?.forward(data.target, z.string().max(32768).parse(data.text), data.deliveryId) : undefined;

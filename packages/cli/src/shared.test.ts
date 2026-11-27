@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   findPhrenPath,
+  getPhrenPath,
   appendAuditLog,
   withDefaults,
   getProjectDirs,
@@ -194,6 +195,28 @@ describe("ensurePhrenPath", () => {
     } finally {
       process.chdir(origCwd);
       process.env.HOME = origHome;
+      tmp.cleanup();
+    }
+  });
+});
+
+describe("getPhrenPath", () => {
+  it("pins the discovered store across working directory changes", () => {
+    const tmp = makeTempDir("phren-cwd-");
+    const first = path.join(tmp.path, "first", ".phren");
+    const second = path.join(tmp.path, "second", ".phren");
+    const origCwd = process.cwd();
+    try {
+      initTestPhrenRoot(first);
+      initTestPhrenRoot(second);
+      delete process.env.PHREN_PATH;
+      process.chdir(path.dirname(first));
+      expect(getPhrenPath()).toBe(fs.realpathSync(first));
+      process.chdir(path.dirname(second));
+      expect(getPhrenPath()).toBe(fs.realpathSync(first));
+    } finally {
+      process.chdir(origCwd);
+      resetTestPhrenPath();
       tmp.cleanup();
     }
   });

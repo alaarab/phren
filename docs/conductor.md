@@ -397,18 +397,20 @@ unread for a conductor on the same Hook:
 {"dispatch":"<id>","state":"done","final":true,"final_reply":"All checks passed","prs":[{"url":"https://gitboy.example.com/o/r/pulls/1","repo":"o/r","branch":"agent/42","tests":"passing"}]}
 ```
 
-`needs_you` is not final: the agent waits for an answer in Phren, and `wait`
-keeps following. A needs-you return from before the worker was last seen
-working is historical: live worker state is polled on every tick, and a worker
-that resumed emits `running` again. `--json` and `--follow` are accepted, and
+`wait` keeps following after `needs_you` or `waiting`. The worker needs a new
+turn to continue, such as an answer in Phren or a `hand_off` after CI passes.
+A return from before the worker was last seen working is historical. Live
+worker state is polled on every tick, and a worker that resumed emits
+`running` again. `--json` and `--follow` are accepted, and
 the output is always JSON. `prs` comes from the worker's `phren dispatch
 report`. It polls about every 2 s at first, backing off to 10 s with jitter,
 peeks at `/v1/dispatch/returns?peek=1`, and reads `/v1/dispatch/workers` to tell
 a gone pane from one still working. It survives transient Hook errors, but
 failures of any polled route count toward one 5-minute continuous-unavailability
 deadline, then it ends `failed`. A targetless or pending receipt keeps
-`running`: only the Hook's terminal return (done, failed or gone), or the
-receipt's settled terminal state, ends the wait. An id the Hook does not know
+`running` until the Hook records a terminal outcome. If the 24-hour receipt
+watch expires with a parked return still on record, `wait` ends `failed` with
+an expiry message and leaves the worker open. An id the Hook does not know
 after a 30 s grace period ends `failed` with `error: "unknown dispatch"`. The
 timeout defaults to none and is capped at 7 days. Exit codes: 0 `done`, 1
 `failed` or `gone`, 124 `timeout`. When the result is final it acknowledges only
@@ -715,19 +717,30 @@ code 130). A return is one of:
 - `needs-you`: the worker finished by asking the owner something, or stopped
   mid-task. `question` is the question line, or why the turn is not done: its
   closing paragraph announced a step it never ran ("Let me install
-  dependencies.", "I'll resolve it on the follow-up branch."), it waits on
-  something with nothing left running ("Now waiting on CI.", "I'll push once
-  it passes."), or it left tracked uncommitted files and reported or named no
-  PR. A reply that hands over to the owner ("I'll wait for your review",
-  "I'll leave the merge to you") is done. Uncommitted files are counted only in a
-  checkout no other pane works in. A turn whose checkout git could not read
-  in time is returned `done` but its pane is not closed, and one turn is
-  returned once even when a later poll reads it differently.
+  dependencies.", "I'll resolve it on the follow-up branch."), or it left
+  tracked uncommitted files and reported or named no PR. A reply that hands
+  over to the owner ("I'll wait for your review", "I'll leave the merge to
+  you") is done. Uncommitted files are counted only in a checkout no other
+  pane works in. A turn whose checkout git could not read in time is returned
+  `done` but its pane is not closed, and one turn is returned once even when a
+  later poll reads it differently.
+- `waiting`: the worker's turn ended waiting on something with nothing left
+  running ("Now waiting on CI.", "I'll push once it passes."). `waitingOn` is
+  `ci`, `background`, `queue` or `other`, and `waitingFor` is the sentence. It
+  is not an owner action: it never becomes an owner inbox item or a "needs
+  you" notice, and its pane is not closed. A question for the owner in the
+  same reply makes the return `needs-you` instead. When CI passes, a parked
+  worker still needs a new prompt, such as a `hand_off`, to continue.
 - `failed`: the harness ended the turn on an error instead of a reply, such
   as Codex's usage limit, or the owner interrupted the turn in the worker's
   terminal. `error` is the message.
 - `blocked`: the worker waits on terminal input, such as a permission prompt.
 - `gone`: its pane closed or another conversation took the pane over.
+
+Each row, and each receipt `GET /v1/dispatch` lists, also carries a `phase`
+for a badge. `working` covers active or stalled work. `waiting` covers parked
+returns and ended turns with live background tasks (`worker.waitingOn: "background"`).
+`needs-owner` covers needs-you, blocked, failed and gone. `done` marks completion.
 
 Each row names the dispatch ID, computer, project, label and the worker's
 `target`, so an answer or follow-up goes back with `hand_off`. A worker that
@@ -801,8 +814,11 @@ never seen working with no finished turn stays `working` until the receipt's
 The dispatching Hook asks each enrolled computer about all of its open
 dispatches in one request, at most every 15 seconds, and follows a dispatch
 for 24 hours or until the worker is gone. A computer that does not answer
-records nothing; silence is never a transition. The receiving computer needs
-the conductor module, as it already does for placement.
+records nothing; silence is never a transition. When a turn parks, the worker
+Hook sends both `waiting` and the legacy `unfinished` reason. A 0.3.96
+conductor records `needs-you`, and a 0.3.97 conductor interprets either field
+as `waiting`. The receiving computer needs the conductor module, as it already
+does for placement.
 
 When `dispatch` is called by an agent running in a Herdr pane, the receipt
 keeps that pane as `origin`. While that agent is idle, the Hook types one line
@@ -1310,16 +1326,32 @@ its new target configured. Workers need no direct messaging or GitHub comment.
 
 ## Owner inbox
 
-`owner_inbox(operation:"list")` and `phren owner-inbox list` show needs-you returns,
-blocked prompts and manual items across the linked computers. The owning Hook
-persists each item. An item's `inboxComputer` tells clients where to resolve it;
-its `computer` can instead name the remote worker. Unreachable inboxes are
-reported. `add` takes `title`, optional `project` and an optional stable UUID
-`id` to keep on retries. `resolve` takes `id`, optional `computer` (the
-`inboxComputer`, omitted for local) and optional `resolution`. CLI examples:
+The owner inbox is the one list of actions only the owner can take: merges,
+releases, logins, tokens, root-only steps and decisions, plus needs-you
+returns and blocked prompts. `owner_inbox(operation:"list")` and `phren
+owner-inbox list` show it across the linked computers. The owning Hook persists
+each item. An item's `inboxComputer` tells clients where to resolve it; its
+`computer` can instead name the remote worker. Unreachable inboxes are
+reported. `add` takes `title`, optional `project`, an optional stable UUID `id`
+to keep on retries, and for an owner action a paste-able `command`, the `task`
+(`bid:xxxxxxxx`), the `pr` URL and an optional dedupe `key`. The generated
+`paste` clears the item on its owning Hook after the command succeeds and
+only if its `updatedAt` still matches. Multiline commands run with `sh -e`.
+The same normalized PR or `key` matches an open item. Conflicting identifiers
+are rejected. Posting a resolved item again under its id with changed fields
+reopens it. A manual item resolves itself when its GitHub or gitboy PR merges
+or closes, or when its linked task is Done. GitLab merge requests can be saved
+as links. A closed unmerged PR or Done task needs a fresh read after the item
+is edited or reopened. `resolve` takes `id`, optional `computer` (the
+`inboxComputer`, omitted for local), `resolution` and `--if-updated-at`.
+For remote adds with the new fields and guarded remote resolves, the
+destination Hook must support `ownerInboxActions`.
+
+For example, run these commands from a shell.
 
 ```sh
 phren owner-inbox add "Restart the router" --project phren
+phren owner-inbox add "Merge phren#940: owner inbox" --command "gh pr merge 940 -R alaarab/phren --squash" --task bid:ac70edca --pr https://github.com/alaarab/phren/pull/940
 phren owner-inbox list --all
 phren owner-inbox resolve <id> --computer <name> --resolution "Restarted"
 ```
@@ -1335,7 +1367,10 @@ computer is not asked about on each tick:
   loop last observed and stored on the receipt, refreshed every 15 seconds. It
   shows while the worker waits on an approval, is blocked, or stopped with a
   question, and goes once the loop sees the worker back at work or gone. If
-  that computer can't be reached, the item keeps the last stored state.
+  that computer can't be reached, the item keeps the last stored state. On
+  upgrade, re-observing a turn recorded as `needs-you` with `Stopped waiting: …`
+  updates it to `waiting` and resolves its automatic inbox item. The return
+  keeps its read status and notice timestamp.
 - After that, the inbox asks the computer about all such receipts in one
   request at most once an hour, and waits out a failed request for an hour. An
   item shows only while that answer confirms the wait. An unanswered one is

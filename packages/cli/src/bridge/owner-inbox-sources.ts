@@ -95,8 +95,11 @@ export async function ownerInboxSources(hooks: AgentHooks): Promise<InboxSnapsho
 function liveSource(receipt: Receipt, seen: Json, computer?: string): InboxSource | undefined {
   const approval = object(seen.approval);
   const actionId = typeof approval.actionId === "string" ? approval.actionId : undefined;
+  // An older peer Hook folded an awaited sentence into its unfinished reason;
+  // a worker parked on CI or a queue is not waiting on the owner.
+  const unfinished = typeof seen.unfinished === "string" && !seen.unfinished.startsWith("Stopped waiting: ") ? seen.unfinished : undefined;
   const question = ["idle", "done"].includes(String(seen.state)) && seen.completed && !seen.error && !seen.interrupted
-    ? (typeof seen.reply === "string" ? ownerQuestion(seen.reply) : undefined) ?? seen.unfinished : undefined;
+    ? (typeof seen.reply === "string" ? ownerQuestion(seen.reply) : undefined) ?? unfinished : undefined;
   if (!actionId && seen.state !== "blocked" && !question) return undefined;
   return { source: `dispatch:${receipt.id}:${actionId ?? "waiting"}`, kind: actionId || seen.state === "blocked" ? "blocked" : "needs-you",
     title: clean(approval.request ?? question ?? `${receipt.label} needs input`),

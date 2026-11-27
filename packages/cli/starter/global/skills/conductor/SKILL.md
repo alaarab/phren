@@ -39,15 +39,20 @@ Your tools, use these instead of exploring the CLI or the Hook's files:
 - `dispatch`: start a new worker on a computer (or `anywhere`).
 - `dispatch_returns` (CLI `phren dispatch returns`): what your workers sent
   back since you last asked: done with the final reply, needs-you with the
-  question, stalled with an unchanged screen and transcript, failed with the error (a usage limit), blocked, or gone. Reading them marks them read. In core use
+  question, waiting (parked on CI, background work or a queue: `waitingOn`,
+  `waitingFor`; check back on it, it is not an owner action), stalled with an
+  unchanged screen and transcript, failed with the error (a usage limit),
+  blocked, or gone. Reading them marks them read. Each row has a `phase`:
+  working, waiting, needs-owner or done. In core use
   `phren_admin(action: "dispatch_returns")`.
 - `dispatch_report`: workers record `prs`, an array of `{url, repo, branch,
   tests, notes?}`, on their own Hook before ending the turn. The done return
   carries that evidence, and the Hook queues it to the configured integrator.
   In core use `phren_admin(action: "dispatch_report", prs)`.
-- `owner_inbox` (CLI `phren owner-inbox`): list what waits on the owner across
-  linked computers, add a title with optional project, or resolve an id with
-  optional resolution. In core use `phren_admin(action: "owner_inbox", ...)`.
+- `owner_inbox` (CLI `phren owner-inbox`): the one list of what waits on the
+  owner across linked computers. Add an item as one line (`title`) plus a
+  paste-able `command`, with `task` (bid) and `pr` links; list it; or resolve an
+  id with an optional resolution. In core use `phren_admin(action: "owner_inbox", ...)`.
   Use an item's `inboxComputer` as `computer` when resolving a remote item;
   omit it for `local`. Say which computers were unreachable.
 - `machine_health`: named health findings for this computer and every linked
@@ -100,6 +105,10 @@ file ownership; give each remote lead a base revision, acceptance checks, local
 fanout limit, report time and integration instructions. Every brief repeats the
 owner's repository constraints, including any prohibition on commits, pushes,
 branches or particular tests. Dispatch never expands the owner's authorization.
+Every brief also says: post each owner-only action (merge, release, login,
+token, root step, decision) to the owner inbox with a paste-able command, the
+task bid and the PR, and end the turn with the report, not with a question
+the inbox already holds.
 A worker that needs root runs `sudo -A <command>`: its launch sets
 `SUDO_ASKPASS`, and the owner approves the exact command and types the
 password on the phone. Plain `sudo` fails without a terminal.
@@ -189,13 +198,23 @@ Finished worker panes close after their done return is read. Use
 The Hook rechecks its ended turn and skips a pane with new work, background
 tasks, queued messages or uncertain delivery. Intentional closes do not return
 `gone`. Reading returns can close panes, so record any follow-up first.
+`phren dispatch close-self` waits until the agent's turn has ended, so its
+final report is written, and never closes a pane with background tasks or
+child agents still running.
 
-Keep one owner inbox item for each decision or action that waits on the owner.
-Needs-you returns and blocked prompts appear automatically, even if their
-returns were read. Add other actions such as restarting the router with
-`owner_inbox(operation:"add", title, project?, id?)` in full or
-`phren_admin(action:"owner_inbox", operation:"add", title, project?, id?)` in
-core; keep the id on retries.
+The owner inbox is the one place for every action only the owner can do:
+merges, releases, logins, tokens, root-only steps and decisions. Never leave
+such an ask only in a return, a report or a chat line. Post it as one line plus
+a paste-able command, linked to its task and PR:
+`owner_inbox(operation:"add", title:"Merge phren#940: owner inbox", command:"gh pr merge 940 -R alaarab/phren --squash", task:"bid:ac70edca", pr:"https://github.com/alaarab/phren/pull/940", project:"phren")`
+in full, `phren_admin(action:"owner_inbox", operation:"add", ...)` in core, or
+`phren owner-inbox add <title> --command <cmd> --task <bid> --pr <url>`.
+Posting the same PR or `key` again updates the item rather than adding a
+second one, so post again when the command changes. Items resolve themselves
+when the PR merges or closes, when the linked task is Done, or when the owner
+runs the item's `paste` (the command followed by `phren owner-inbox resolve
+<id>`). Needs-you returns and blocked prompts appear automatically, even if
+their returns were read.
 Resolve an item only once the owner decided or completed the action. Resolution
 does not send an answer, approve a prompt, or mark a task complete. Send an
 owner's answer separately with queued `hand_off`. A source that stopped waiting
@@ -236,7 +255,7 @@ screen and transcript have stopped changing while working. Check it and report
 what is known; do not launch a duplicate or interrupt it just because of the flag.
 
 Never submit, clear or relay text you read in a Claude pane's input box as the
-owner's words. After a turn Claude draws its own guess at the owner's next
+owner's words, or report it as their unsent draft. After a turn Claude draws its own guess at the owner's next
 message there, dim; a plain screen read shows it as if typed, and Enter does not
 send it. The Hook keeps a delivery record for each phone message, so an owner
 message never needs rescuing from a pane. Ask the owner instead. The Hook

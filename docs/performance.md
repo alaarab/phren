@@ -74,7 +74,10 @@ synthetic fixture guards known failure classes; tune retrieval thresholds only
 against a private snapshot with `--store <path> --cases <file>`. Private runs
 print aggregates, and per-case `--out <file>` is allowed only outside the
 repository. Use `--write-baseline` to record the public fixture's score and
-`--check` to detect changes; baselines omit machine-dependent timings.
+`--check` to detect changes; baselines omit machine-dependent timings. Two
+ranking cases run against their own small fixture: each findings document carries
+one dated heading, the score reads the latest heading, and the eval checks that
+the older answer still makes the top three against newer distractors.
 
 Judged precision asks whether each injected snippet was useful for its prompt.
 Each (case prompt, snippet) pair is looked up in a JSONL cache of judgments

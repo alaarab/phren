@@ -24,11 +24,12 @@ tectonic docs/whitepaper.tex --outdir docs
 - `docs/performance.md`: Retrieval and indexing performance notes.
 - `docs/shell.md`: Interactive shell user guide: views, keyboard shortcuts, palette commands, the terminal Graph view, the splash.
 - `docs/graph-viewer.md`: The 3D memory viewer: web UI, VS Code and iPhone navigation, node dossiers, selection camera, review and bulk actions.
+- [Obsidian vault export](obsidian.md) covers linked Markdown notes, project filters, and regeneration.
 - `docs/code-index.md`: Local code indexing, what changed, scoped browsing, most used, and notes remembered and sent to agents.
 - `docs/conductor.md`: Conductor launch, verified computers, dispatch, hand-off, standing grants and Siri controls.
 - `docs/fanout.md`: Worker selection, manifests, permission failures, phone visibility and archive retention.
 - `docs/schedules.md`: Scheduled prompts, run history and local reminders.
-- `docs/dreaming.md`: Dreaming, the offline pass that corrects and reorganizes a project's memory from recent transcripts: config, cadences, propose vs apply, pages, the injected budget, outputs, undo and the eval.
+- `docs/dreaming.md`: Dreaming, the offline pass that corrects and reorganizes a project's memory from recent transcripts: config, cadences, propose vs apply, proposal acceptance, pages, the injected budget, outputs, undo and the eval.
 - `docs/desktop.md`: Phren desktop (owner-only, unreleased): linking computers, sections, tiles and keys, desk-first approvals, trust model, what needs the next CLI release.
 - `docs/api-reference.md`: MCP tools and Hook routes, including Code notes, model catalogues, file reads and live previews.
 - `docs/footprint.md`: Files phren writes and external files Hook reads, including Claude Code's cached model catalogue.

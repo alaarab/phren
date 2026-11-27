@@ -3,7 +3,7 @@ import * as path from "path";
 import { getProjectDirs } from "./phren-paths.js";
 import { PhrenError } from "./phren-core.js";
 import { isValidProjectName, safeProjectPath } from "./utils.js";
-import { resolveAllStores, type StoreEntry } from "./store-registry.js";
+import { getStoreProjectDirs, resolveAllStores, type StoreEntry } from "./store-registry.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,8 +62,13 @@ export function resolveProject(
   phrenPath: string,
   input: string,
   profile?: string,
+  options: { subscribedOnly?: boolean } = {},
 ): ResolvedProject {
-  const { storeName, projectName } = parseStoreQualified(input);
+  const ref = input.trim();
+  if (/^\.{1,2}[\\/]/.test(ref)) {
+    throw new Error(`${PhrenError.VALIDATION_ERROR}: Invalid project name: "${ref}"`);
+  }
+  const { storeName, projectName } = parseStoreQualified(ref);
 
   if (!isValidProjectName(projectName)) {
     throw new Error(`${PhrenError.VALIDATION_ERROR}: Invalid project name: "${projectName}"`);
@@ -83,7 +88,7 @@ export function resolveProject(
       throw new Error(`${PhrenError.NOT_FOUND}: Store "${storeName}" not found. Available: ${available}`);
     }
 
-    const projectDir = findProjectInStore(store, projectName, profile);
+    const projectDir = findProjectInStore(store, projectName, profile, options.subscribedOnly);
     if (!projectDir) {
       throw new Error(`${PhrenError.NOT_FOUND}: Project "${projectName}" not found in store "${storeName}"`);
     }
@@ -94,7 +99,7 @@ export function resolveProject(
   // Bare project: scan all stores
   const matches: ResolvedProject[] = [];
   for (const store of stores) {
-    const projectDir = findProjectInStore(store, projectName, profile);
+    const projectDir = findProjectInStore(store, projectName, profile, options.subscribedOnly);
     if (projectDir) {
       matches.push({ store, projectName, projectDir });
     }
@@ -168,11 +173,14 @@ function isValidStoreName(name: string): boolean {
 function findProjectInStore(
   store: StoreEntry,
   projectName: string,
-  profile?: string,
+  profile: string | undefined,
+  subscribedOnly = false,
 ): string | null {
   if (!fs.existsSync(store.path)) return null;
 
-  const dirs = getProjectDirs(store.path, store.role === "primary" ? profile : undefined);
+  const dirs = subscribedOnly && store.role !== "primary"
+    ? getStoreProjectDirs(store)
+    : getProjectDirs(store.path, store.role === "primary" ? profile : undefined);
   for (const dir of dirs) {
     if (path.basename(dir) === projectName) return dir;
   }

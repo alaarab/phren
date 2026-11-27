@@ -96,6 +96,21 @@ describe("the worker session's task ledger in dispatch returns", () => {
       tasks: [{ stableId: "aaaa0001", resolution: "open" }] });
   });
 
+  it("sends a CI wait an older conductor reads as unfinished and a current one reads as waiting, even with an open task", async () => {
+    const waiting: WorkerReaders = { ...readers([task("open", "aaaa0001")]), turn: async () => endedTurn("Opened #940. Waiting on CI for #940.") };
+    const { workers: [seen] } = await workerStates({ targets: [target] }, waiting);
+    expect(seen).toMatchObject({ state: "done", completed: true, waiting: "Waiting on CI for #940.",
+      unfinished: "Stopped waiting: Waiting on CI for #940." });
+    // 0.3.96 uses unfinished to classify a completed turn with no owner question.
+    const legacyState = seen.completed && seen.unfinished ? "needs-you" : seen.state;
+    expect(legacyState).toBe("needs-you");
+    const value = receipt();
+    observe(value, seen, now);
+    expect(value.returned).toMatchObject({ state: "waiting", waitingOn: "ci", waitingFor: "Waiting on CI for #940.",
+      tasks: [{ stableId: "aaaa0001", resolution: "open" }] });
+    expect(value.returned).not.toHaveProperty("question");
+  });
+
   it("reads the ledger on the snapshot path too, without a turn record", async () => {
     const final: FinalTurn = { completed: true, lastAssistant: "Done." };
     const answer = await workerStates({ targets: [target] }, readers([task("open", "aaaa0001")], { turn: undefined, finalTurn: async () => final }));

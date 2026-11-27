@@ -13,12 +13,14 @@ import { dispatchStatus, type Receipt } from "./dispatch.js";
 import { noteTurn, turnPath } from "./turn-records.js";
 import { recordBriefArrival } from "./launch-brief.js";
 import { handOff } from "./hand-off.js";
+import { HandOffQueue } from "./hand-off-queue.js";
+import { readFinalTurn } from "./schedule-watch.js";
 import { recentUncommitted } from "./worker-unfinished.js";
 import { dispatchClonePaths } from "./dispatch-clone.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
 
 vi.mock("./herdr.js", async original => ({ ...await original<object>(), snapshot: vi.fn(), sharedSnapshot: vi.fn(), paneIdentity: vi.fn(), validateTarget: vi.fn() }));
-vi.mock("./schedule-watch.js", async original => ({ ...await original<object>(), readFinalTurn: async () => ({ completed: true, lastAssistant: "Checks passed" }) }));
+vi.mock("./schedule-watch.js", async original => ({ ...await original<object>(), readFinalTurn: vi.fn() }));
 vi.mock("./hand-off.js", async original => ({ ...await original<object>(), handOff: vi.fn() }));
 vi.mock("./worker-unfinished.js", async original => ({ ...await original<object>(), recentUncommitted: vi.fn() }));
 const target: Target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "11111111-1111-4111-8111-111111111111" };
@@ -27,6 +29,9 @@ const prs = [{ url: "https://github.com/alaarab/phren/pull/999", repo: "alaarab/
 let root: string, pane: Json, panes: Json[], restore: () => void;
 const closePane = vi.fn();
 const event = (event: string) => noteTurn(target.server, target.pane, { event, terminal: String(pane.terminal_id), source: target.source, session: target.session, dispatch, reply: event === "Stop" ? "Checks passed" : undefined });
+// A lead's own turn events: no dispatch id, so close-self defers on its own.
+const leadEvent = (event: string, stop: { background?: number } = {}) => noteTurn(target.server, target.pane,
+  { event, terminal: String(pane.terminal_id), source: target.source, session: target.session, reply: event === "Stop" ? "Checks passed" : undefined, ...stop });
 const receipt = (): Receipt => ({ id: dispatch, computer: "Desk", project: "phren", harness: "claude", label: "checks", state: "accepted", target, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
 const save = (value: Receipt) => atomicInPrivateDir(path.join(root, "dispatches", `${value.id}.json`), value);
 beforeEach(async () => {
@@ -34,7 +39,8 @@ beforeEach(async () => {
   pane = { pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab, terminal_id: "term1", agent: "claude", agent_status: "idle" }; panes = [pane];
   vi.mocked(snapshot).mockImplementation(async () => ({ panes })); vi.mocked(sharedSnapshot).mockImplementation(async () => ({ panes }));
   vi.mocked(paneIdentity).mockResolvedValue(target.session); vi.mocked(validateTarget).mockImplementation(async () => ({ ...pane }));
-  closePane.mockReset().mockImplementation(async () => { panes = []; }); restore = setTerminalProvider({ closePane, processes: async () => ({ foregroundPids: [] }) } as unknown as TerminalProvider);
+  closePane.mockReset().mockImplementation(async () => { panes = []; }); restore = setTerminalProvider({ closePane, processes: async () => ({ foregroundPids: pane.agent === "opencode" ? [41] : [] }) } as unknown as TerminalProvider);
+  vi.mocked(readFinalTurn).mockReset().mockResolvedValue({ completed: true, lastAssistant: "Checks passed" });
   vi.mocked(handOff).mockReset().mockResolvedValue({ ok: true, delivered: false, queued: true, target });
   vi.mocked(recentUncommitted).mockReset().mockResolvedValue(0);
   await event("UserPromptSubmit"); await event("Stop");
@@ -43,12 +49,18 @@ afterEach(async () => { vi.clearAllTimers(); vi.useRealTimers(); restore(); vi.u
 
 describe("an agent closing its own pane", () => {
   const origin = { server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane };
-  it("answers first, then closes only that pane", async () => {
+  it("answers first, then closes that pane only once its turn has ended", async () => {
+    vi.useFakeTimers();
     await rm(turnPath(target.server, target.pane));
+    await leadEvent("UserPromptSubmit"); pane.agent_status = "working";
     const result = await closeOwnPane({ origin }, 20);
-    expect(result).toMatchObject({ ok: true, closed: true, pending: false, pane: target.pane });
+    expect(result).toMatchObject({ ok: true, closed: false, pending: true, pane: target.pane });
     expect(closePane).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(closePane).toHaveBeenCalledWith(target.server, target.pane));
+    await vi.advanceTimersByTimeAsync(20); await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    await leadEvent("Stop"); pane.agent_status = "idle";
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(closePane).toHaveBeenCalledExactlyOnceWith(target.server, target.pane));
   });
   it("keeps the last turn alive until its done return reaches the conductor", async () => {
     vi.useFakeTimers();
@@ -108,6 +120,137 @@ describe("an agent closing its own pane", () => {
       expect(closePane).not.toHaveBeenCalled();
     }
   });
+  it("never closes a lead's pane over background work, and closes once it ends", async () => {
+    vi.useFakeTimers();
+    await rm(turnPath(target.server, target.pane));
+    await leadEvent("UserPromptSubmit"); pane.agent_status = "working";
+    await closeOwnPane({ origin }, 20);
+    await leadEvent("Stop", { background: 2 }); pane.agent_status = "idle";
+    await vi.advanceTimersByTimeAsync(20); await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    // The two tasks finished; this turn's later Stop reports none still running.
+    await leadEvent("Stop", { background: 0 });
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(closePane).toHaveBeenCalledExactlyOnceWith(target.server, target.pane));
+  });
+  it("cancels a lead's close when the pane takes new work", async () => {
+    vi.useFakeTimers();
+    await rm(turnPath(target.server, target.pane));
+    await leadEvent("UserPromptSubmit"); pane.agent_status = "working";
+    await closeOwnPane({ origin }, 20);
+    await leadEvent("Stop"); pane.agent_status = "idle";
+    await leadEvent("UserPromptSubmit"); pane.agent_status = "working";
+    vi.mocked(validateTarget).mockClear();
+    await vi.advanceTimersByTimeAsync(600_000); await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    // The close was cancelled, not kept waiting: exactly one recheck ran.
+    expect(validateTarget).toHaveBeenCalledTimes(1);
+  });
+  it.each(["a new conversation discovered later", "a known conversation without a prompt record"])("leaves the pane open with %s", async reason => {
+    vi.useFakeTimers();
+    await rm(turnPath(target.server, target.pane));
+    pane.agent_status = "working";
+    const replacement = reason === "a new conversation discovered later";
+    let session = replacement ? undefined : target.session;
+    vi.mocked(paneIdentity).mockImplementation(async () => session);
+    const result = await closeOwnPane({ origin }, 20);
+    if (replacement) session = "33333333-3333-4333-8333-333333333333";
+    pane.agent_status = "idle";
+    await vi.advanceTimersByTimeAsync(20); await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, closed: false });
+    expect(result).not.toHaveProperty("pending");
+  });
+  it.each(["new prompt", "resumed terminal"])("keeps a lead's pane open when evidence gathering overlaps a %s", async change => {
+    vi.useFakeTimers();
+    await rm(turnPath(target.server, target.pane));
+    await leadEvent("UserPromptSubmit"); pane.agent_status = "working";
+    expect(await closeOwnPane({ origin }, 20)).toMatchObject({ pending: true });
+    await leadEvent("Stop"); pane.agent_status = "idle";
+    vi.mocked(readFinalTurn).mockImplementationOnce(async () => {
+      if (change === "new prompt") await leadEvent("UserPromptSubmit");
+      else pane.agent_status = "working";
+      return { completed: true, lastAssistant: "Checks passed" };
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(readFinalTurn).toHaveBeenCalled());
+    await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+  });
+  it.each(["lead", "dispatch"])("keeps a %s pane open for a queued hand-off", async kind => {
+    vi.useFakeTimers();
+    const dispatched = kind === "dispatch";
+    if (!dispatched) await rm(turnPath(target.server, target.pane));
+    const turn = dispatched ? event : leadEvent;
+    await turn("UserPromptSubmit"); pane.agent_status = "working";
+    const queue = new HandOffQueue({ validate: async () => ({ ...pane }), send: async () => ({ delivered: true }) });
+    const deliveryId = "handoff-close-self";
+    expect(await queue.enqueue({ target, deliveryId, text: "Review the follow-up" })).toMatchObject({ queued: true });
+    expect(await closeOwnPane({ origin }, 20, queue)).toMatchObject({ pending: true });
+    await turn("Stop"); pane.agent_status = "idle";
+    if (dispatched) {
+      const value = receipt();
+      observe(value, (await workerStates({ targets: [target] })).workers[0], Date.now());
+      expect(value.returned?.state).toBe("done");
+      await save(value);
+    }
+    vi.mocked(readFinalTurn).mockClear();
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(readFinalTurn).toHaveBeenCalled());
+    await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    await queue.withdraw(deliveryId, target, "Follow-up withdrawn");
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(closePane).toHaveBeenCalledExactlyOnceWith(target.server, target.pane));
+  });
+  it("closes OpenCode after its second turn with the same busy timestamp", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("PHREN_PATH", root);
+    const opencode = { ...target, source: "opencode", session: "ses_closeSelf" };
+    pane.agent = opencode.source;
+    vi.mocked(paneIdentity).mockResolvedValue(opencode.session);
+    const folder = path.join(root, ".runtime", "sessions");
+    await mkdir(folder, { recursive: true });
+    const stamp = (busyAt: string, idleAt: string) => writeFile(path.join(folder, "opencode-status-41.json"),
+      JSON.stringify({ status: pane.agent_status, session: opencode.session, at: busyAt > idleAt ? busyAt : idleAt, busyAt, idleAt }));
+    const firstIdle = "2026-11-26T12:00:02.000Z", secondBusy = "2026-11-26T12:00:03.000Z";
+    await stamp("2026-11-26T12:00:01.000Z", firstIdle);
+    expect((await workerStates({ targets: [opencode] })).workers[0]).toMatchObject({ completed: true, stopSeq: 2 });
+    pane.agent_status = "working";
+    await stamp(secondBusy, firstIdle);
+    expect(await closeOwnPane({ origin }, 20)).toMatchObject({ pending: true });
+    pane.agent_status = "idle";
+    await stamp(secondBusy, "2026-11-26T12:00:04.000Z");
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(closePane).toHaveBeenCalledExactlyOnceWith(target.server, target.pane));
+  });
+  it("retries every refused dispatched close until the worker reads clean", async () => {
+    vi.useFakeTimers();
+    const value = receipt(); await save(value);
+    await noteTurn(target.server, target.pane, { event: "Stop", terminal: String(pane.terminal_id), source: target.source,
+      session: target.session, dispatch, background: 2, reply: "Checks passed" });
+    pane.agent_status = "idle";
+    observe(value, (await workerStates({ targets: [{ ...target, dispatch }] })).workers[0], Date.now());
+    expect(value.returned).toMatchObject({ state: "done", background: 2 });
+    await save(value);
+    expect(await closeOwnPane({ origin }, 20)).toMatchObject({ closed: false, pending: true, dispatch });
+    await vi.advanceTimersByTimeAsync(20); await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    // The tasks finished; the same turn's later Stop reports none still running.
+    await noteTurn(target.server, target.pane, { event: "Stop", terminal: String(pane.terminal_id), source: target.source,
+      session: target.session, dispatch, background: 0, reply: "Checks passed" });
+    observe(value, (await workerStates({ targets: [{ ...target, dispatch }] })).workers[0], Date.now());
+    expect(value.returned).not.toHaveProperty("background");
+    await save(value);
+    // The worker stopped over uncommitted work: the close itself refuses.
+    pane.cwd = "/work/phren-wt";
+    vi.mocked(recentUncommitted).mockResolvedValue(3);
+    await vi.advanceTimersByTimeAsync(20); await sleep(50);
+    expect(closePane).not.toHaveBeenCalled();
+    vi.mocked(recentUncommitted).mockResolvedValue(0);
+    await vi.advanceTimersByTimeAsync(20);
+    await vi.waitFor(() => expect(closePane).toHaveBeenCalledExactlyOnceWith(target.server, target.pane));
+  });
   it("does nothing for a pane that is already gone and refuses a body naming anything else", async () => {
     panes = [];
     expect(await closeOwnPane({ origin }, 20)).toMatchObject({ ok: true, closed: false });
@@ -163,10 +306,12 @@ describe("finished worker lifecycle", () => {
     expect((await workerStates({ targets: [target] })).workers[0].state).toBe("closed");
     const value = receipt(); observe(value, { state: "closed" }, Date.now()); expect(value.returned).toBeUndefined();
   });
-  it("keeps a worker open if another completed turn appears during the final binding check", async () => {
+  it.each(["a newer completed turn", "a missing record"])("keeps a worker open when the final binding check finds %s", async change => {
     const value = receipt(); observe(value, (await workerStates({ targets: [target] })).workers[0], Date.now()); await save(value);
     vi.mocked(validateTarget).mockResolvedValueOnce({ ...pane }).mockImplementationOnce(async () => {
-      await event("UserPromptSubmit"); await event("Stop"); return { ...pane };
+      if (change === "a missing record") await rm(turnPath(target.server, target.pane));
+      else { await event("UserPromptSubmit"); await event("Stop"); }
+      return { ...pane };
     });
     const returns = new DispatchReturns({ peers: async () => [], close: current => closeFinishedWorker({ target, dispatch, turn: current.closePending!.turn }) });
     await returns.take(); expect(closePane).not.toHaveBeenCalled();
@@ -255,6 +400,17 @@ describe("finished worker lifecycle", () => {
     expect(await stat(paths.cloneDir).catch(() => undefined)).toBeUndefined();
     expect(await stat(paths.gitConfigFile).catch(() => undefined)).toBeUndefined();
     expect(await stat(paths.agentTokenFile).catch(() => undefined)).toBeUndefined();
+  });
+  it("keeps a worker's pane open while its finished turn waits on CI", async () => {
+    const turn = (event: string, reply?: string) => noteTurn(target.server, target.pane,
+      { event, terminal: String(pane.terminal_id), source: target.source, session: target.session, dispatch, ...(reply ? { reply } : {}) });
+    await turn("UserPromptSubmit"); await turn("Stop", "PR #940 is up. Waiting on CI for #940.");
+    const seen = (await workerStates({ targets: [target] })).workers[0];
+    expect(seen).toMatchObject({ state: "done", completed: true, waiting: "Waiting on CI for #940." });
+    const value = receipt(); observe(value, seen, Date.now());
+    expect(value.returned).toMatchObject({ state: "waiting", waitingOn: "ci", waitingFor: "Waiting on CI for #940." });
+    expect(await closeFinishedWorker({ target, dispatch, turn: value.returned!.turn })).toEqual({ ok: true, closed: false });
+    expect(closePane).not.toHaveBeenCalled();
   });
   it("refuses to close a different completed turn", async () => {
     const wrong = createHash("sha256").update("wrong turn").digest("hex").slice(0, 16);

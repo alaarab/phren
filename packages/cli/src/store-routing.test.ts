@@ -131,8 +131,8 @@ describe("store-routing", () => {
       expect(() => resolveProject(phrenDir, "UPPERCASE")).toThrow(/Invalid project name/);
     });
 
-    it("throws for path traversal in store-qualified ref", () => {
-      expect(() => resolveProject(phrenDir, "../traversal")).toThrow(/Invalid store name/);
+    it("rejects a relative path as a whole project reference", () => {
+      expect(() => resolveProject(phrenDir, "../traversal")).toThrow('Invalid project name: "../traversal"');
     });
 
     it("resolves unique project across multiple stores without qualification", () => {

@@ -1,10 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { applyDreamProposals, pendingDreamProposals } from "../dream/apply.js";
+import { applyDreamProposals } from "../dream/apply.js";
+import { DREAM_ACCEPTANCE_DEFAULT_LIMIT, pendingDreamProposals } from "../dream/records.js";
 import { redactSecretsForLog } from "../content/secrets.js";
 import { z } from "zod";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { permissionDeniedError } from "../governance/rbac.js";
-import { DREAM_LOG_DEFAULT_LIMIT, DREAM_LOG_MAX_LIMIT, dreamStatuses, readDreamJournal, runDream } from "../cli/dream.js";
+import { DREAM_LIST_MAX_LIMIT, DREAM_LOG_DEFAULT_LIMIT, dreamStatuses, readDreamJournal, runDream } from "../cli/dream.js";
 
 /**
  * Dreaming over MCP: `dream_run`, `dream_apply`, `dream_status` and `dream_log`, with the
@@ -25,16 +26,23 @@ const projectParam = z.string().describe("Project name, optionally store-qualifi
 export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool("dream_apply", {
     title: "◆ phren · dream apply",
-    description: "Apply pending structured proposals from a stored dream, refusing missing or changed target findings. Indices are zero-based; adds are approved through the review queue.",
-    inputSchema: z.object({ project: projectParam, runId: z.string(), only: z.array(z.number().int().nonnegative()).optional() }),
-  }, async ({ project: projectInput, runId, only }) => {
+    description: "Apply or reject pending structured proposals from a stored dream, or explicitly resolve one conflicted proposal. Applying refuses missing or changed targets. Review-queue additions are outside decision tracking.",
+    inputSchema: z.object({
+      project: projectParam,
+      runId: z.string(),
+      only: z.array(z.number().int().nonnegative()).optional().describe("Zero-based proposal indices. Omit for all pending proposals."),
+      reject: z.boolean().optional().describe("Reject the selected proposals."),
+      resolve: z.enum(["applied", "rejected"]).optional().describe("Resolve opposing decisions for the single index in only. Records the chosen outcome after you reconcile the memory changes."),
+      reason: z.string().optional().describe("Reason to record for rejection or conflict resolution."),
+    }),
+  }, async ({ project: projectInput, runId, only, reject, resolve, reason }) => {
     const resolved = target(ctx, projectInput, "write");
     if (!resolved.ok) return mcpResponse({ ok: false, error: resolved.error });
     const { phrenPath, project } = resolved.value;
     const denied = permissionDeniedError(phrenPath, "edit_finding", project);
     if (denied) return mcpResponse({ ok: false, error: denied });
     try {
-      const record = await applyDreamProposals(phrenPath, project, runId, only);
+      const record = await applyDreamProposals(phrenPath, project, runId, only, { reject, resolve, reason });
       await ctx.rebuildIndex().catch(() => {});
       return mcpResponse({ ok: true, data: record });
     } catch (err) { return mcpResponse({ ok: false, error: redactSecretsForLog(err instanceof Error ? err.message : String(err)) }); }
@@ -46,8 +54,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       description:
         "Run a dream now for one project: an offline pass that reads recent transcripts, findings, truths, pages and git, " +
         "then corrects, merges and reorganizes memory. Propose mode queues adds and stores other operations for dream_apply; apply mode makes " +
-        "the changes and logs them in dreams/journal.md. Refused while dreaming is off unless force; returns busy while another " +
-        "dream for the project runs. Uses the project's helper account; can take minutes.",
+        "the changes and logs them in dreams/journal.md. Refused while dreaming is off unless force; returns busy if another " +
+        "dream or proposal decision holds the project lock. Uses the project's helper account; can take minutes.",
       inputSchema: z.object({
         project: projectParam,
         dryRun: z.boolean().optional().describe("Return the changeset without writing anything."),
@@ -84,11 +92,14 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ phren · dream status",
       description:
-        "Dreaming status: enabled, mode, cadence, window, last run, next eligible time and the last run's outcome counts. " +
+        "Dreaming status: timing, last run, proposal acceptance by operation and opposing decisions by run and index. " +
         "Without project, every project in the active profile.",
-      inputSchema: z.object({ project: projectParam.optional() }),
+      inputSchema: z.object({
+        project: projectParam.optional(),
+        limit: z.number().int().min(1).max(DREAM_LIST_MAX_LIMIT).optional().describe(`Most recent runs to summarize. Defaults to ${DREAM_ACCEPTANCE_DEFAULT_LIMIT}.`),
+      }),
     },
-    async ({ project: projectInput }) => {
+    async ({ project: projectInput, limit }) => {
       let phrenPath = ctx.phrenPath;
       let project: string | undefined;
       if (projectInput) {
@@ -96,7 +107,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!resolved.ok) return mcpResponse({ ok: false, error: resolved.error });
         ({ phrenPath, project } = resolved.value);
       }
-      const statuses = dreamStatuses(phrenPath, project, ctx.profile);
+      const statuses = dreamStatuses(phrenPath, project, ctx.profile, undefined, limit);
       const on = statuses.filter((status) => status.enabled).length;
       return mcpResponse({
         ok: true,
@@ -114,7 +125,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       description: "The latest entries of a project's dream journal (dreams/journal.md), newest first: what each dream did.",
       inputSchema: z.object({
         project: projectParam,
-        limit: z.number().int().min(1).max(DREAM_LOG_MAX_LIMIT).optional().describe(`Entries to return. Defaults to ${DREAM_LOG_DEFAULT_LIMIT}.`),
+        limit: z.number().int().min(1).max(DREAM_LIST_MAX_LIMIT).optional().describe(`Entries to return. Defaults to ${DREAM_LOG_DEFAULT_LIMIT}.`),
       }),
     },
     async ({ project: projectInput, limit }) => {
