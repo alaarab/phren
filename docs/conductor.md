@@ -1090,7 +1090,9 @@ offer this action.
 Peer launches use `POST /v1/sessions/move/launch` with a stable brief/move ID and
 the expected destination `computerId`; `GET` on the same route reads its placement.
 The receiver persists an uncertain intent before creation and replays the saved
-target on retry. A peer launch first pulls the canonical, owner-admitted source
+target on retry. After the pass over the moves removes a settled move's intent, a
+duplicate launch `POST` can get 404; the placement `GET` still returns the saved
+result. A peer launch first pulls the canonical, owner-admitted source
 intent from `GET /v1/sessions/move/intent?id=<move-id>` over the receiver's own
 verified reverse enrollment; knowing an id cannot authorize an arbitrary launch.
 That intent route admits only the move's recorded destination. A never-received

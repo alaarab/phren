@@ -16,7 +16,7 @@ import * as peers from "./peers.js";
 import * as harnesses from "./harnesses.js";
 import { localMoveAvailability, moveComputers } from "./move-computers.js";
 import { recordConductor, recordedConductor, resetRoleState } from "./conductor-role.js";
-import { SessionMover, conversationCopy, listMoves, readMove, sourceOutOfUsage, targetSummaryBody, type MoverDeps } from "./session-move.js";
+import { SessionMover, conversationCopy, listMoves, readMove, recordStat, sourceOutOfUsage, targetSummaryBody, type MoverDeps } from "./session-move.js";
 import { finalTurnFromLines } from "./schedule-watch.js";
 import { capabilitiesForModules, createRouteHandler, type RouteContext } from "./server-routes.js";
 import { BUILTIN_MODULES } from "../modules/registry.js";
@@ -25,7 +25,7 @@ import { DispatchReturns, observe, workerStates } from "./dispatch-returns.js";
 import { dispatchStatus, type Receipt } from "./dispatch.js";
 import { peerFingerprint } from "./dispatch-hosts.js";
 import { setTerminalProvider } from "./terminal.js";
-import { continuationPlacement, fetchContinuationConversation, launchContinuation, saveContinuationConversation } from "./continuation-launch.js";
+import { continuationPlacement, fetchContinuationConversation, launchContinuation, saveContinuationConversation, saveContinuationIntent } from "./continuation-launch.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 import { LaunchLimiter } from "./limits.js";
 import { BridgeError, objects, type Json, type Target } from "./protocol.js";
@@ -162,19 +162,30 @@ describe.skipIf(process.platform === "win32")("continue on another computer", ()
     const tail = await f.deps.transcript(from);
     f.deps.conversation = async () => ({ lines: [JSON.stringify({ type: "user", message: { role: "user", content: "The very first ask." } }), ...tail], complete: true });
     expect((await request(f.mover, "GET", "/v1/health")).body.capabilities).toMatchObject({ moveSummaryByTarget: true, moveConversationCopy: true });
+    // The launch is held, so the move is still running while the destination reads its intent.
+    const original = f.transport.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    f.transport.mockImplementation(async (to, route, data, timeout) => {
+      if (route.startsWith("/v1/sessions/move/launch?server=")) await held;
+      return route === "/v1/health" ? { computer: { id: B_ID } } : original(to, route, data, timeout);
+    });
     const answer = await request(f.mover, "POST", "/v1/sessions/move", { target: from, to: { harness: "claude", computer: "remote" } });
-    await f.mover.settled(from.server, from.pane);
     const id = answer.body.move.id as string;
+    const peer = (await peers.hookPeers())[0];
+    const headers = { "x-phren-origin": "peer", "x-phren-peer": Buffer.from(JSON.stringify({ name: peer.name, fingerprint: peerFingerprint(peer) })).toString("base64url") };
+    const intents = path.join(root, "bridge", "move-intents");
+    await vi.waitFor(async () => expect(existsSync(path.join(intents, `${id}.json`))).toBe(true));
+    expect((await readMove(id))?.state).not.toBe("moved");
+    expect((await request(f.mover, "GET", `/v1/sessions/move/intent?id=${id}`, {}, headers)).body.brief).toMatchObject({ id });
+    release();
+    await f.mover.settled(from.server, from.pane);
     expect(await readMove(id)).toMatchObject({ state: "moved", continuation: "summary-by-target" });
     // The brief keeps room for the line the destination adds about the copy.
     const brief = String(f.brief()?.text);
     expect(brief.length).toBeLessThanOrEqual(32_768 - 400);
     expect(brief).not.toContain("turn 0 ");
     // The destination, as the move's verified peer, pulls the copy page by page.
-    const peer = (await peers.hookPeers())[0];
-    const original = f.transport.getMockImplementation()!;
-    f.transport.mockImplementation(async (to, route, data, timeout) => route === "/v1/health" ? { computer: { id: B_ID } } : original(to, route, data, timeout));
-    const headers = { "x-phren-origin": "peer", "x-phren-peer": Buffer.from(JSON.stringify({ name: peer.name, fingerprint: peerFingerprint(peer) })).toString("base64url") };
     const copy = await fetchContinuationConversation(async offset => {
       const page = await request(f.mover, "GET", `/v1/sessions/move/intent?id=${id}&conversation=${offset}`, {}, headers);
       expect(page.status).toBe(200);
@@ -191,50 +202,90 @@ describe.skipIf(process.platform === "win32")("continue on another computer", ()
     // Another peer cannot read it.
     const stranger = { ...headers, "x-phren-peer": Buffer.from(JSON.stringify({ name: "third-peer", fingerprint: peerFingerprint({ ...peer, username: "carol" }) })).toString("base64url") };
     expect((await request(f.mover, "GET", `/v1/sessions/move/intent?id=${id}&conversation=0`, {}, stranger)).status).toBe(403);
-    // The move is done, so the next pass over the moves removes its copy; the intent itself stays.
+    // The move is done, so the next pass over the moves removes its copy and its intent, and a late duplicate
+    // launch is refused; its placement GET still answers with the saved result.
     await listMoves();
+    expect((await request(f.mover, "GET", `/v1/sessions/move/intent?id=${id}`, {}, headers)).status).toBe(404);
     expect((await request(f.mover, "GET", `/v1/sessions/move/intent?id=${id}&conversation=0`, {}, headers)).status).toBe(404);
-    expect((await request(f.mover, "GET", `/v1/sessions/move/intent?id=${id}`, {}, headers)).body.brief).toMatchObject({ id });
   });
 
-  it("judges a copy with no readable record by whether its record file exists", async () => {
+  it("judges a copy and an intent with no readable record by whether the record file exists", async () => {
     const intents = path.join(root, "bridge", "move-intents");
-    // Copies with no record: one just written (a move in another process records itself first), one two hours old;
+    // Files with no record: one just written (a move in another process records itself first), one two hours old;
     // and one whose record is there but cannot be read (it may be a running move's).
     const fresh = "b0000000-0000-4000-8000-00000000e001", orphan = "b0000000-0000-4000-8000-00000000e002", unreadable = "b0000000-0000-4000-8000-00000000e003";
     for (const other of [fresh, orphan, unreadable]) await saveContinuationConversation(other, "conversation");
+    for (const other of [fresh, orphan, unreadable]) await saveContinuationIntent({ brief: { id: other } });
     const twoHours = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    for (const other of [orphan, unreadable]) await utimes(path.join(intents, `${other}.conversation.md`), twoHours, twoHours);
+    for (const other of [orphan, unreadable]) for (const extension of [".conversation.md", ".json"]) await utimes(path.join(intents, `${other}${extension}`), twoHours, twoHours);
     await mkdir(path.join(root, "bridge", "moves"), { recursive: true });
     await writeFile(path.join(root, "bridge", "moves", `${unreadable}.json`), "not a move record");
     await listMoves();
-    expect(existsSync(path.join(intents, `${fresh}.conversation.md`))).toBe(true);
-    expect(existsSync(path.join(intents, `${orphan}.conversation.md`))).toBe(false);
-    expect(existsSync(path.join(intents, `${unreadable}.conversation.md`))).toBe(true);
+    for (const other of [fresh, unreadable]) for (const extension of [".conversation.md", ".json"]) expect(existsSync(path.join(intents, `${other}${extension}`))).toBe(true);
+    for (const extension of [".conversation.md", ".json"]) expect(existsSync(path.join(intents, `${orphan}${extension}`))).toBe(false);
   });
 
   it("keeps a running move's copy through a pass over the moves", async () => {
     const f = fixture({ exhausted: true });
     // The destination never confirms the launch: the move stays running.
     const original = f.transport.getMockImplementation()!;
-    let release!: () => void;
+    let release!: () => void, launchRequested = false;
     const held = new Promise<void>(resolve => { release = resolve; });
     f.transport.mockImplementation(async (to, route, data, timeout) => {
-      if (route.startsWith("/v1/sessions/move/launch?server=")) await held;
+      if (route.startsWith("/v1/sessions/move/launch?server=")) { launchRequested = true; await held; }
       return original(to, route, data, timeout);
     });
     const answer = await request(f.mover, "POST", "/v1/sessions/move", { target: from, to: { harness: "claude", computer: "remote" } });
     const id = answer.body.move.id as string;
     const copy = path.join(root, "bridge", "move-intents", `${id}.conversation.md`);
-    await vi.waitFor(async () => expect((await readMove(id))?.state).toBe("uncertain"));
+    const intent = path.join(root, "bridge", "move-intents", `${id}.json`);
+    // The peer launch request comes after the intent is saved, and it is held there.
+    await vi.waitFor(() => expect(launchRequested).toBe(true));
+    expect((await readMove(id))?.state).toBe("uncertain");
     expect(existsSync(copy)).toBe(true);
+    expect(existsSync(intent)).toBe(true);
     await listMoves();
     expect(existsSync(copy)).toBe(true);
+    expect(existsSync(intent)).toBe(true);
     release();
     await f.mover.settled(from.server, from.pane);
     expect((await readMove(id))?.state).toBe("moved");
     await listMoves();
     expect(existsSync(copy)).toBe(false);
+    expect(existsSync(intent)).toBe(false);
+  });
+
+  it("sweeps a settled move stored under an upper-case id, keeping its spelling", async () => {
+    const upper = "B0000000-0000-4000-8000-00000000E00A";
+    const at = new Date().toISOString();
+    await mkdir(path.join(root, "bridge", "moves"), { recursive: true });
+    await writeFile(path.join(root, "bridge", "moves", `${upper}.json`), JSON.stringify({
+      id: upper, state: "moved", createdAt: at, updatedAt: at, from: { target: from }, to: { harness: "claude" }, cwd: path.join(root, "checkout") }));
+    await saveContinuationIntent({ brief: { id: upper } });
+    await saveContinuationConversation(upper, "conversation");
+    const intents = path.join(root, "bridge", "move-intents");
+    const moves = await listMoves();
+    expect(moves.map(move => move.id)).toEqual([upper]);
+    expect(existsSync(path.join(intents, `${upper}.json`))).toBe(false);
+    expect(existsSync(path.join(intents, `${upper}.conversation.md`))).toBe(false);
+  });
+
+  it("keeps an intent when the record cannot be checked for a reason other than its absence", async () => {
+    const id = "b0000000-0000-4000-8000-00000000e011";
+    await saveContinuationIntent({ brief: { id } });
+    const intent = path.join(root, "bridge", "move-intents", `${id}.json`);
+    const twoHours = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await utimes(intent, twoHours, twoHours);
+    const denied = vi.spyOn(recordStat, "lstat").mockRejectedValue(Object.assign(new Error("permission denied"), { code: "EACCES" }));
+    // A move pending recovery is not assumed gone because its folder cannot be read.
+    await listMoves();
+    expect(existsSync(intent)).toBe(true);
+    // The seven-day backstop still removes it.
+    const week = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000 - 60_000);
+    await utimes(intent, week, week);
+    await listMoves();
+    expect(existsSync(intent)).toBe(false);
+    denied.mockRestore();
   });
 
   it("keeps the newest messages of a conversation too long to copy whole, and says what it left out", () => {

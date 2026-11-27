@@ -399,12 +399,14 @@ nothing to that checkout.
   which also holds the full hand-off (`handoff.md`); the move's record
   (`<bridge>/moves/<id>.json`: the old and new targets, harnesses, hand-off
   path and outcome, no prompt text) is kept seven days and at most 256.
-  A summary-by-target move to another computer also saves the whole
-  conversation, redacted, as `<bridge>/move-intents/<id>.conversation.md`
-  (0600, at most 2,000,000 characters) for the destination to pull. The next
-  pass over the moves removes it once the move has moved or failed, an hour
-  after it was written if the move has no record file at all, and after seven
-  days in any case. The destination puts its copy in the new
+  A move to another computer saves its launch intent, redacted, as
+  `<bridge>/move-intents/<id>.json` (0600) for the destination to pull; a
+  summary-by-target move there also saves the whole conversation as
+  `<bridge>/move-intents/<id>.conversation.md` (0600, at most 2,000,000
+  characters). The next pass over the moves removes both once the move has
+  moved or failed, an hour after they were written if the move has no record
+  file at all, and after seven days in any case; a half-written file a crash
+  left behind goes after an hour. The destination puts its copy in the new
   agent's brief folder (`<bridge>/briefs/<id>/conversation.md`), which goes with
   that folder;
   `<bridge>/codex-servers/<id>/` (0700) holds one Codex pane's Phren-owned
