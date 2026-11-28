@@ -212,11 +212,12 @@ a paste-able command, linked to its issue and PR:
 in full, `phren_admin(action:"owner_inbox", operation:"add", ...)` in core, or
 `phren owner-inbox add <title> --command <cmd> --pr <url>`.
 Posting the same PR or `key` again updates the item rather than adding a
-second one, so post again when the command changes. Items resolve themselves
-when the PR merges or closes, when the linked issue closes, or when the owner
-runs the item's `paste` (the command followed by `phren owner-inbox resolve
-<id>`). Needs-you returns and blocked prompts appear automatically, even if
-their returns were read.
+second one, so post again when the command changes. A manual item resolves
+automatically when its linked PR merges or closes. An issue link provides
+context. For an item without a PR, resolve the item once the owner has acted,
+or use the item's `paste` to run the command followed by
+`phren owner-inbox resolve <id>`. Needs-you returns and blocked prompts appear
+automatically, even if their returns were read.
 Resolve an item only once the owner decided or completed the action. Resolution
 does not send an answer, approve a prompt, or close an issue. Send an
 owner's answer separately with queued `hand_off`. A source that stopped waiting

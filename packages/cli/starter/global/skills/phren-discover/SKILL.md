@@ -1,6 +1,6 @@
 ---
 name: phren-discover
-description: Audit the phren memory store and report what needs attention, such as stale content, projects missing a summary, skill gaps and unhealthy task queues, with the top three things to fix.
+description: Audit the phren memory store and report what needs attention, such as stale content, projects missing a summary and skill gaps, with the top three things to fix.
 dependencies:
   - git
   - gh
@@ -113,9 +113,9 @@ phren-discover
 Projects without core files:
 
 | Project | AGENTS.md | summary.md | FINDINGS.md |
-|---------|-----------|------------|--------------|------------|
-| myapp   | ok        | MISSING    | MISSING      | ok         |
-| api     | ok        | ok         | ok           | MISSING    |
+|---------|-----------|------------|-------------|
+| myapp   | ok        | MISSING    | MISSING     |
+| api     | ok        | ok         | ok          |
 
 ## Section 2: Stale content
 
@@ -131,7 +131,7 @@ Things you do repeatedly that could be skills:
 ## Top 3 things to work on next
 
 1. **Add FINDINGS.md to myapp.** You've been working on it actively but capturing nothing. Use `add_finding()` during your next session.
-3. **Create a `/changelog` skill.** You're doing it manually in 3 projects. 15 minutes to write the skill saves hours over time.
+2. **Create a `/changelog` skill.** You're doing it manually in 3 projects. 15 minutes to write the skill saves hours over time.
 ```
 
 The "Top 3" section is the most important part. Make these:

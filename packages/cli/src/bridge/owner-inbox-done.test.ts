@@ -4,7 +4,7 @@ import type { ForgeItem } from "../forge/links.js";
 import { grantAdmin, makeTempDir, writeFile } from "../test-helpers.js";
 import { PROVIDERS, providerFor } from "./git-hosts.js";
 import { ownerInboxDone } from "./owner-inbox-done.js";
-import type { InboxItem } from "./owner-inbox.js";
+import { inboxIssueTitle, type InboxItem } from "./owner-inbox.js";
 
 vi.mock("./git-hosts.js", async original => ({ ...await original<typeof import("./git-hosts.js")>(), providerFor: vi.fn() }));
 
@@ -15,7 +15,7 @@ const item = (over: Partial<InboxItem> & Pick<InboxItem, "id">): InboxItem =>
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.resetAllMocks(); });
 
 describe("owner inbox auto-resolution", () => {
-  it("resolves merged and closed pulls, leaves open and unread ones alone", async () => {
+  it("resolves merged and closed pulls and leaves open, unread and issue-only items alone", async () => {
     const pull = vi.fn(async (url: string) =>
       url.endsWith("/877") ? { state: "merged" } : url.endsWith("/878") ? { state: "closed" } : url.endsWith("/879") ? { state: "open" } : undefined);
     const items = [
@@ -23,12 +23,14 @@ describe("owner inbox auto-resolution", () => {
       item({ id: "22222222-2222-4222-8222-222222222222", pr: "https://github.com/o/r/pull/878" }),
       item({ id: "33333333-3333-4333-8333-333333333333", pr: "https://github.com/o/r/pull/879" }),
       item({ id: "44444444-4444-4444-8444-444444444444", pr: "https://github.com/o/r/pull/880" }),
+      item({ id: "55555555-5555-4555-8555-555555555555", title: inboxIssueTitle({ title: "Owner action", issue: "github.com/o/r#877" }) }),
     ];
     const done = await ownerInboxDone(items, { pull });
     expect(done.get(items[0].id)).toBe("done: PR merged");
     expect(done.get(items[1].id)).toBe("done: PR closed without merging");
     expect(done.has(items[2].id)).toBe(false);
     expect(done.has(items[3].id)).toBe(false);
+    expect(done.has(items[4].id)).toBe(false);
     expect(pull).toHaveBeenCalledTimes(4);
   });
 
