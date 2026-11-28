@@ -712,20 +712,21 @@ function titleFor(title: string | null, session: string): string {
   return redacted.slice(0, MAX_TITLE_CHARS);
 }
 
-async function resolvePanes(keys: Set<string>, deadline: number): Promise<Map<string, string>> {
+async function resolvePanes(keys: Set<string>, deadline: number): Promise<{ panes: Map<string, string>; cut: boolean }> {
   const panes = new Map<string, string>();
+  const probe = { cut: false };
   // Live snapshots are primary evidence, including OpenCode, whose lifecycle
   // lives in per-PID status files rather than the persisted turn directory.
   const serverNames = new Set(["default"]);
   const candidates = new Map<string, PaneCandidate>();
   for (const server of serverNames) {
     if (Date.now() >= deadline) break;
-    const view = await withinDeadline(snapshot(server).catch(() => undefined), deadline, undefined);
+    const view = await withinDeadline(snapshot(server).catch(() => undefined), deadline, undefined, probe);
     for (const pane of objects(view?.panes)) {
       if (Date.now() >= deadline) break;
       const source = String(pane.agent);
       if (!["claude", "codex", "copilot", "opencode"].includes(source)) continue;
-      const identity = await withinDeadline(paneIdentity(server, pane, true).catch(() => undefined), deadline, undefined);
+      const identity = await withinDeadline(paneIdentity(server, pane, true).catch(() => undefined), deadline, undefined, probe);
       const key = `${source}\0${identity}`;
       if (!identity || !keys.has(key)) continue;
       const name = String(pane.pane_id), terminal = String(pane.terminal_id);
@@ -740,22 +741,24 @@ async function resolvePanes(keys: Set<string>, deadline: number): Promise<Map<st
       }
     }
     if (server === "default" && candidates.size < keys.size && Date.now() < deadline) {
-      const listed = await withinDeadline(recentServers().catch(() => []), deadline, []);
+      const listed = await withinDeadline(recentServers().catch(() => []), deadline, [], probe);
       for (const item of listed) {
         if (Date.now() >= deadline) break;
         serverNames.add(String(item.session));
       }
     }
   }
-  return panes;
+  return { panes, cut: probe.cut };
 }
 
 /** Bound external terminal probes too; the underlying read-only probe may
- * finish later, but cannot delay the response beyond this request's budget. */
-async function withinDeadline<T>(work: Promise<T>, deadline: number, fallback: T): Promise<T> {
+ * finish later, but cannot delay the response beyond this request's budget.
+ * A timer can fire a millisecond before Date.now() reaches the deadline
+ * (Windows), so a cut probe is recorded rather than inferred from the clock. */
+async function withinDeadline<T>(work: Promise<T>, deadline: number, fallback: T, probe?: { cut: boolean }): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([work, new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback), Math.max(0, deadline - Date.now())); })]);
+    return await Promise.race([work, new Promise<T>(resolve => { timer = setTimeout(() => { if (probe) probe.cut = true; resolve(fallback); }, Math.max(0, deadline - Date.now())); })]);
   } finally { clearTimeout(timer); }
 }
 
@@ -836,8 +839,9 @@ async function search(q: string | null | undefined, limit: string | null | undef
     if (!exhausted && page.length < count) partial = true;
     const next = exhausted ? null : encodeCursor(position);
     const wanted = new Set(page.map(row => `${String(row.source)}\0${String(row.conversation)}`));
-    const panes = wanted.size && Date.now() < deadline ? await resolvePanes(wanted, deadline) : new Map<string, string>();
-    if (Date.now() >= deadline) partial = true;
+    const resolved = wanted.size && Date.now() < deadline ? await resolvePanes(wanted, deadline) : { panes: new Map<string, string>(), cut: false };
+    const panes = resolved.panes;
+    if (resolved.cut || Date.now() >= deadline) partial = true;
     return {
       results: page.map(row => ({
         conversation: String(row.conversation), source: String(row.source) as ConversationSource,
