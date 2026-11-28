@@ -691,13 +691,29 @@ test.describe.serial("graph visualization e2e", () => {
     const hasUpdate = await page.evaluate(() => typeof (window as any).phrenGraph?.updateNode === "function");
     expect(hasUpdate).toBe(true);
 
-    // Pick an existing finding
+    // Pick an existing finding. Task nodes no longer exist; a finding's
+    // mutable attributes are its label/full text and its topic (the tier
+    // updateNode re-colours the dot from).
     const target = await page.evaluate(() => {
       const pg = (window as any).phrenGraph;
       const node = pg.getData().nodes.find((n: any) => n.kind === "finding");
-      return node ? { id: node.id, label: node.label } : null;
+      return node
+        ? { id: node.id, label: node.label, topicSlug: node.topicSlug, baseColor: node.baseColor }
+        : null;
     });
     expect(target).not.toBeNull();
+
+    // Pick a topic tier different from the finding's current one so the
+    // derived base colour must change too.
+    const nextTopic = await page.evaluate((current: string) => {
+      const topics = [
+        { slug: "architecture", label: "Architecture" },
+        { slug: "testing", label: "Testing" },
+        { slug: "performance", label: "Performance" },
+      ];
+      return topics.find((topic) => topic.slug !== current) || null;
+    }, target!.topicSlug);
+    expect(nextTopic).not.toBeNull();
 
     const canvasBefore = await page.evaluate(() => {
       const canvas = document.querySelector("#graph-canvas canvas") as HTMLCanvasElement | null;
@@ -708,21 +724,36 @@ test.describe.serial("graph visualization e2e", () => {
 
     const countBefore = (await getNodeIds(page)).length;
 
-    const result = await page.evaluate((id: string) => {
-      return (window as any).phrenGraph.updateNode(id, {
+    const result = await page.evaluate((args: { id: string; topicSlug: string; topicLabel: string }) => {
+      return (window as any).phrenGraph.updateNode(args.id, {
         text: "Renamed by in-place update test",
+        topicSlug: args.topicSlug,
+        topicLabel: args.topicLabel,
       });
-    }, target!.id);
+    }, { id: target!.id, topicSlug: nextTopic!.slug, topicLabel: nextTopic!.label });
     expect(result).toBe(true);
 
     const after = await page.evaluate((id: string) => {
       const pg = (window as any).phrenGraph;
       const node = pg.getData().nodes.find((n: any) => n.id === id);
-      return node ? { label: node.label, fullLabel: node.fullLabel } : null;
+      return node
+        ? {
+            label: node.label,
+            fullLabel: node.fullLabel,
+            topicSlug: node.topicSlug,
+            topicLabel: node.topicLabel,
+            baseColor: node.baseColor,
+            kind: node.kind,
+          }
+        : null;
     }, target!.id);
     expect(after).not.toBeNull();
-    expect(after!.section).toBe("Done");
+    expect(after!.kind).toBe("finding");
     expect(after!.label).toContain("Renamed");
+    expect(after!.fullLabel).toBe("Renamed by in-place update test");
+    expect(after!.topicSlug).toBe(nextTopic!.slug);
+    expect(after!.topicLabel).toBe(nextTopic!.label);
+    expect(after!.baseColor).not.toBe(target!.baseColor);
 
     const countAfter = (await getNodeIds(page)).length;
     expect(countAfter).toBe(countBefore);
