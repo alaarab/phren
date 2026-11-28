@@ -1,5 +1,6 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
+import { homedir } from "node:os";
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { loadYamlDocument } from "./phren-core.js";
@@ -58,6 +59,8 @@ export interface ProjectConfig {
    * its repositories to this project. Optional; never used to fetch.
    */
   remote?: string;
+  /** The forge repository that holds this project's issues. */
+  issues?: string;
   skills?: boolean;
   hooks?: {
     enabled?: boolean;
@@ -229,6 +232,19 @@ export function getProjectSourcePath(
     : undefined;
   const raw = typeof perMachine === "string" && perMachine.trim() ? perMachine : resolved.sourcePath;
   return typeof raw === "string" && raw.trim() ? path.resolve(raw) : undefined;
+}
+
+const PROJECT_SEARCH_ROOTS = ["", "Sites", "Projects", "projects", "Code", "code", "dev", "src", "repos", "workspace"];
+
+/** Local folders for a project, in the order the code index checks them. */
+export function projectCheckoutCandidates(project: string, sourcePath: string | undefined, env: NodeJS.ProcessEnv = process.env): string[] {
+  const roots = [...(env.PROJECTS_DIR ? [env.PROJECTS_DIR] : []), ...PROJECT_SEARCH_ROOTS.map(root => path.join(homedir(), root))];
+  const paths = [...(sourcePath ? [sourcePath] : []), ...roots.map(root => path.join(root, project))];
+  return [...new Set(paths.map(directory => path.resolve(directory)))].filter(directory => fs.existsSync(directory));
+}
+
+export function isGitRepository(directory: string): boolean {
+  return fs.existsSync(path.join(directory, ".git"));
 }
 
 /**
