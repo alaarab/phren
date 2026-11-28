@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Forge issues core for GitHub and gitboy, with project repository lookup, checklists, and computer claims.
+
 ## [0.3.100] - 2026-11-27
 
 ### Added

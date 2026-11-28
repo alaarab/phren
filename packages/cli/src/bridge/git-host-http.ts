@@ -36,7 +36,7 @@ export interface HostRequest {
   token?: string;
   /** How the token is sent: GitLab's PRIVATE-TOKEN header or a bearer token. */
   scheme: "private-token" | "bearer";
-  method?: "GET" | "POST" | "PUT";
+  method?: "GET" | "POST" | "PUT" | "PATCH";
   body?: Json;
   timeoutMs?: number;
 }

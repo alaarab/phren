@@ -211,7 +211,7 @@ export function checkRuns(items: unknown): Json[] {
 
 /** gh never prompts, never nags about updates, and talks to the remote's own
  * domain (a GitHub Enterprise server as much as the public one). */
-function ghEnv(host: GitHost): NodeJS.ProcessEnv {
+export function ghEnv(host: Pick<GitHost, "domain">): NodeJS.ProcessEnv {
   return { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", NO_COLOR: "1", ...(host.domain ? { GH_HOST: host.domain } : {}) };
 }
 
