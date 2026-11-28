@@ -558,7 +558,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         result = tokenRoute
           ? await projectHostToken(modules.store, project, await journal.recent(), await body(request))
           : await projectGit(modules.store, project, await journal.recent());
-      } else if (url.pathname === "/v1/store/directory") {
+      } else if (url.pathname === "/v1/store/directory" || url.pathname === "/v1/tasks/stores") {
         if (request.method !== "GET") throw new BridgeError(405, "Unsupported request method.");
         result = await storeDirectory(modules.store);
       } else if (url.pathname === "/v1/store/pull-now") {

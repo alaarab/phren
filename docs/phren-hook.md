@@ -1967,7 +1967,7 @@ unverified rather than resolved. No phone UI changes are included here.
 
 ## Store directory
 
-`GET /v1/store/directory` lists available stores, their project names, and the portable repository identities used for store pulls.
+`GET /v1/store/directory` lists available stores, their project names, and the portable repository identities used for store pulls. `GET /v1/tasks/stores` is a read-only alias kept for older phones that verify the store before reading finding freshness. Both paths return the identity flags older phones decode (`identityReady` and `ambiguous`), with `metadataWritable: false`.
 
 ## Issues from the phone
 

@@ -26,6 +26,8 @@ export async function storeDirectory(base: string) {
     const repositoryIdentity = available && !ambiguous ? await storeRepositoryIdentity(store.path) : undefined;
     return {
       id: store.storeId ?? null, name: store.name, role: store.role, primary: store.role === "primary", available,
+      // Older phones decode these fields before resolving the store for finding freshness.
+      identityReady: !!store.storeId && !ambiguous, ambiguous, metadataWritable: false,
       ...(repositoryIdentity ? { repositoryIdentity } : {}),
       projects: storeProjects(store),
     };

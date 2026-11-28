@@ -153,7 +153,7 @@ describe("built-in registration declarations", () => {
     const store = source("bridge/memory-store.ts");
     const storeRoutes = (method: string) => [...store.matchAll(new RegExp(`method === "${method}" && url.pathname === STORE_ROUTES\\.(\\w+)`, "g"))]
       .map(match => `/v1/store/${match[1]}`);
-    const currentGets = [...[...getBlock.matchAll(/case "(\/v1\/[^\"]+)"/g)].map(match => match[1]), ...storeRoutes("GET"), "/v1/store/directory", "/v1/browsers", "/v1/browsers/recordings", "/v1/browsers/recordings/index", "/v1/browsers/recordings/frame"];
+    const currentGets = [...[...getBlock.matchAll(/case "(\/v1\/[^\"]+)"/g)].map(match => match[1]), ...storeRoutes("GET"), "/v1/store/directory", "/v1/tasks/stores", "/v1/browsers", "/v1/browsers/recordings", "/v1/browsers/recordings/index", "/v1/browsers/recordings/frame"];
     expect(declared.filter(route => route.method === "GET").map(route => route.path).sort()).toEqual(currentGets.sort());
     const postBlock = server.slice(server.indexOf('} else if (request.method === "POST")'), server.indexOf('} else throw new BridgeError(405'))
       + source("bridge/server-pane-routes.ts");

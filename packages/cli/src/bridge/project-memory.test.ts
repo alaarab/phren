@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 import { clearProjectConfigCache, getProjectRemote } from "../project-config.js";
+import { registerStoreIdentity } from "../store-registry.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { MEMORY_LIMITS, memoryForFiles, memorySearch, projectMemory, saveFinding } from "./project-memory.js";
 
@@ -50,6 +51,23 @@ beforeEach(() => {
   clearProjectConfigCache();
 });
 afterEach(() => cleanup());
+
+it("lets older phones verify the store before reading finding freshness", async () => {
+  write("app/FINDINGS.md", "# app Findings\n");
+  const storeId = registerStoreIdentity(store);
+  const legacy = await hookGet("/v1/tasks/stores");
+  expect(legacy.status).toBe(200);
+  expect(legacy.body).toMatchObject({
+    ok: true, version: 1,
+    stores: [expect.objectContaining({
+      id: storeId, name: expect.any(String), role: "primary", projects: ["app"],
+      primary: true, available: true, identityReady: true, ambiguous: false, metadataWritable: false,
+    })],
+  });
+  expect(await hookGet("/v1/store/directory")).toEqual(legacy);
+  expect((await hookGet("/v1/projects/app/memory")).body).toMatchObject({ store_id: storeId });
+  expect((await hookGet("/v1/tasks/stores", "POST")).status).toBe(405);
+});
 
 describe("GET /v1/projects/:project/memory", () => {
   it("returns the gitboy contract with empty task groups even for a legacy store", () => {

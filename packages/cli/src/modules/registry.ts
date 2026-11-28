@@ -46,7 +46,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       { agents: ["claude", "codex", "copilot", "cursor"], events: ["Stop"], handler: "phren hook-stop" },
       { agents: ["claude"], events: ["PostToolUse"], handler: "phren hook-tool" },
     ],
-    hookRoutes: [...routes("GET", ["/v1/store/directory", "/v1/store/head", "/v1/store/tree", "/v1/store/blob"]), ...routes("POST", ["/v1/store/pull-now", "/v1/store/blobs", "/v1/store/file", "/v1/store/delete"])],
+    hookRoutes: [...routes("GET", ["/v1/store/directory", "/v1/tasks/stores", "/v1/store/head", "/v1/store/tree", "/v1/store/blob"]), ...routes("POST", ["/v1/store/pull-now", "/v1/store/blobs", "/v1/store/file", "/v1/store/delete"])],
     capabilities: ["memory", "memoryStore", "memoryStoreBatch", "projectMemory"],
     storeFiles: [
       "phren.root.yaml", "machines.yaml", "profiles/*.yaml", ".config/modules.yaml", ".config/*.json",
