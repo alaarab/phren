@@ -17,11 +17,12 @@ import { sessionId, type Json } from "./protocol.js";
 
 export async function runDispatch(args: string[]): Promise<number> {
   if (args[0] === "report") {
-    const { values } = parseArgs({ args: args.slice(1), options: { prs: { type: "string" } } });
+    const { values } = parseArgs({ args: args.slice(1), options: { prs: { type: "string" }, issue: { type: "string" } } });
     const origin = await terminalPaneFromEnv();
-    if (!origin || !values.prs) throw new Error("Usage inside a worker pane: phren dispatch report --prs <JSON array>");
+    if (!origin || !values.prs) throw new Error("Usage inside a worker pane: phren dispatch report --prs <JSON array> [--issue <repo#N>]");
     const dispatch = dispatchIdFromEnv();
-    console.log(JSON.stringify(await hookRequest("/v1/dispatch/report", { origin, prs: prsSchema.parse(JSON.parse(values.prs)), ...(dispatch ? { dispatch } : {}) }), null, 2)); return 0;
+    console.log(JSON.stringify(await hookRequest("/v1/dispatch/report", { origin, prs: prsSchema.parse(JSON.parse(values.prs)),
+      ...(dispatch ? { dispatch } : {}), ...(values.issue ? { issue: values.issue } : {}) }), null, 2)); return 0;
   }
   if (args.length === 1 && args[0] === "close-self") {
     const origin = await terminalPaneFromEnv();
@@ -86,7 +87,7 @@ export async function runDispatch(args: string[]): Promise<number> {
   return result.ok === true || result.existing === true ? 0 : 1;
 }
 
-const DISPATCH_USAGE = "Usage: phren dispatch <computer|anywhere|local> <project> --prompt <brief> | --prompt-file <path|-> [--harness codex|claude|opencode|copilot] [--label <label>] [--idempotency-key <key>] [--worktree [--branch <name>]] [--model <model>] [--effort minimal|low|medium|high|xhigh|max] [--account <id>] [--permission-mode supervised|auto-edits|auto|full-access] [explicit parent flags]";
+const DISPATCH_USAGE = "Usage: phren dispatch <computer|anywhere|local> <project> --prompt <brief> | --prompt-file <path|-> [--harness codex|claude|opencode|copilot] [--label <label>] [--issue <repo#N>] [--idempotency-key <key>] [--worktree [--branch <name>]] [--model <model>] [--effort minimal|low|medium|high|xhigh|max] [--account <id>] [--permission-mode supervised|auto-edits|auto|full-access] [explicit parent flags]";
 
 /** The brief limit shared with dispatchSchema. */
 export const PROMPT_LIMIT = DISPATCH_PROMPT_LIMIT;
@@ -120,7 +121,7 @@ export async function dispatchInputFromArgs(args: string[], stdin: Readable = pr
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     "keep-open": { type: "boolean" },
     harness: { type: "string", default: "codex" }, model: { type: "string" }, effort: { type: "string" }, account: { type: "string" }, "permission-mode": { type: "string" },
-    prompt: { type: "string" }, "prompt-file": { type: "string" }, label: { type: "string" }, "idempotency-key": { type: "string" },
+    prompt: { type: "string" }, "prompt-file": { type: "string" }, label: { type: "string" }, issue: { type: "string" }, "idempotency-key": { type: "string" },
     worktree: { type: "boolean" }, branch: { type: "string" },
     "parent-provider": { type: "string" }, "parent-session": { type: "string" }, "parent-computer": { type: "string" },
     "parent-server": { type: "string" }, "parent-workspace": { type: "string" }, "parent-tab": { type: "string" }, "parent-pane": { type: "string" },

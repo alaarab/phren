@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Forge issues core for GitHub and gitboy, with project repository lookup, checklists, and computer claims.
+- Dispatches can bind to a forge issue, give workers its closing instructions, and post each reported PR link once per Hook.
 
 ## [0.3.100] - 2026-11-27
 

@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readAccountLimits, type AccountRoom } from "./account-choice.js";
 import { AccountFailover, continuationBrief, planContinuation, type ComputerRooms } from "./account-failover.js";
+import { writeDispatchIssue } from "./dispatch-issue.js";
 import { dispatchStatus, type Receipt } from "./dispatch.js";
 import type { Json } from "./protocol.js";
 
@@ -82,11 +83,14 @@ describe("continuing a stopped worker from the returns loop", () => {
 
   it("dispatches the next account with room once, holds the stopped login back, and returns \"continued on account X\" unread", async () => {
     save(stoppedReceipt());
+    const issue = { repo: "github.com/example/widgets", number: 42 };
+    await writeDispatchIssue(id, issue);
     const calls: Array<[Json, unknown, string]> = [];
     const run = failover(async (input, origin, continues) => { calls.push([input, origin, continues]); return { id: "11111111-1111-4111-8111-111111111111", state: "accepted" }; });
     await run.run(); await run.run();
     expect(calls).toHaveLength(1);
-    expect(calls[0][0]).toMatchObject({ computer: "Mini", project: "phren", harness: "claude", account: "work", model: "opus", label: "Fix parser (continued)" });
+    expect(calls[0][0]).toMatchObject({ computer: "Mini", project: "phren", harness: "claude", account: "work", model: "opus",
+      label: "Fix parser (continued)", issue });
     expect(calls[0][1]).toEqual({ server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1" });
     expect(calls[0][2]).toBe(id);
     expect(String(calls[0][0].prompt)).toContain("Fix the parser.");

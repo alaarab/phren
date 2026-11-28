@@ -1,9 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { hookRequest } from "../bridge/client.js";
 import { hookPeers, peerRequest } from "../bridge/peers.js";
 import { lookupCommand } from "../cli-registry.js";
-import { createToolGate, type ToolHandler } from "../mcp/profile.js";
+import { createToolGate, type BuiltTool, type ToolHandler } from "../mcp/profile.js";
 import { register } from "./dispatch.js";
 
 vi.mock("../bridge/client.js", () => ({ hookRequest: vi.fn() }));
@@ -15,14 +16,18 @@ const overview = { groups: [{ id: "w1", children: [{ id: "t1", target }] }] };
 
 describe("dispatch entry points", () => {
   afterEach(() => { vi.restoreAllMocks(); vi.resetAllMocks(); });
-  it.each(["core", "full"] as const)("reaches the same Hook through the %s MCP profile", async profile => {
-    const exposed = new Map<string, ToolHandler>();
-    const gate = createToolGate({ profile, register: (name, _config, handler) => exposed.set(name, handler) });
+  it.each(["core", "full"] as const)("dispatches an issue through the %s MCP profile", async profile => {
+    const exposed = new Map<string, BuiltTool>();
+    const gate = createToolGate({ profile, register: (name, config, handler) => exposed.set(name, { name, config, handler }) });
     register({ registerTool: gate.registerTool } as unknown as McpServer); gate.finish();
     vi.mocked(hookRequest).mockResolvedValue({ ok: true, computer: "Desk", state: "accepted" });
-    const result = await exposed.get(profile === "full" ? "dispatch" : "phren_admin")!({ ...brief, ...(profile === "core" ? { action: "dispatch" } : {}) });
+    const tool = exposed.get(profile === "full" ? "dispatch" : "phren_admin")!;
+    const issue = { repo: "github.com/example/widgets", number: 42 };
+    const task = { storeId: "12345678", project: "phren", stableId: "12345678" };
+    const input = { ...brief, issue: "github.com/example/widgets#42", task, ...(profile === "core" ? { action: "dispatch" } : {}) };
+    const result = await tool.handler((tool.config.inputSchema as z.ZodObject).parse(input));
     expect(JSON.parse((result as { content: { text: string }[] }).content[0].text).ok).toBe(true);
-    expect(hookRequest).toHaveBeenCalledWith("/v1/dispatch", brief, undefined, 180_000);
+    expect(hookRequest).toHaveBeenCalledWith("/v1/dispatch", { ...brief, issue, task }, undefined, 180_000);
   });
 
   it.each(["core", "full"] as const)("always identifies move_session as an agent call in the %s profile", async profile => {

@@ -18,6 +18,7 @@ import { hookRequest } from "./client.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
 import { atomicInPrivateDir, type Json } from "./protocol.js";
+import { legacyReceipt } from "./__fixtures__/dispatch-receipt-v1.js";
 
 // Worker identity reads the process start time with `ps -o lstart`, which Windows lacks.
 const noProcessStart = process.platform === "win32";
@@ -68,6 +69,22 @@ describe("local dispatch", () => {
   };
 
   const launches = () => vi.mocked(hookRequest).mock.calls.filter(call => call[0].startsWith("/v1/workspaces/launch"));
+
+  it("writes an issue-bound dispatch receipt that a strict older Hook accepts", async () => {
+    const session = { server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane,
+      source: "codex", session: "30000000-0000-4000-8000-000000000010" };
+    vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 0 }
+      : route.startsWith("/v1/workspaces/launch") ? { ok: true, target: session } : { ok: true });
+    const issue = { repo: "gitboy.example/example/widgets", number: 42 };
+    const task = { storeId: "12345678", project: "phren", stableId: "12345678" };
+    const result = await service().dispatch({ ...brief, issue, task });
+    expect(result).toMatchObject({ ok: true, state: "accepted", target: session });
+    const saved = JSON.parse(await readFile(path.join(root, "dispatches", `${result.id}.json`), "utf8"));
+    expect(legacyReceipt.parse(saved)).toMatchObject({ id: result.id, target: session });
+    expect(vi.mocked(hookRequest).mock.calls.find(call => call[0] === "/v1/prompt")?.[1]?.text)
+      .toContain("PRs against gitboy.example/example/widgets say Closes #42.");
+  });
 
   it("reads the brief from stdin, never argv, and refuses both or an oversized brief", async () => {
     const secret = "SECRET-BRIEF-FROM-STDIN";
