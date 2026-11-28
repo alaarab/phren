@@ -145,6 +145,14 @@ describe("forge errors map to HTTP statuses", () => {
     expect(answer.body).toMatchObject({ error: "The forge said no.", code: `forge-${code}` });
   });
 
+  it("returns the holding computer when a signed claim conflicts", async () => {
+    restore = setIssueRouteDeps({ ...forged, claim: async () => { throw new ForgeError("conflict", "claimed by desk"); } });
+    const body = { repo: "github.com/example/widgets", number: 7 };
+    const url = "/v1/issues/claim";
+    const answer = await request("POST", url, body, { [OWNER_PROOF_HEADER]: proofHeader("POST", url, JSON.stringify(body)) }, store);
+    expect(answer).toEqual({ status: 409, body: expect.objectContaining({ code: "forge-conflict", error: "claimed by desk" }) });
+  });
+
   it("maps an invalid repository on a write to 400", async () => {
     const body = { repo: "not a repo", title: "T" };
     const answer = await request("POST", "/v1/issues/create", body, { [OWNER_PROOF_HEADER]: proofHeader("POST", "/v1/issues/create", JSON.stringify(body)) }, store);

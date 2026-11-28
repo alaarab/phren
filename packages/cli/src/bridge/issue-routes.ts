@@ -57,7 +57,7 @@ export const issueCloseSchema = z.object({ repo: repoRef, number: issueNumber, c
 
 /** Forge failures reach the phone as stable HTTP statuses and `forge-<code>` codes. */
 const FORGE_STATUS: Record<ForgeError["code"], number> = {
-  auth: 502, "not-found": 404, forbidden: 403, "rate-limited": 429, unavailable: 503, invalid: 400,
+  auth: 502, "not-found": 404, forbidden: 403, "rate-limited": 429, unavailable: 503, invalid: 400, conflict: 409,
 };
 
 function forgeBridgeError(error: unknown): never {

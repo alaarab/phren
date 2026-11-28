@@ -1,5 +1,5 @@
 export class ForgeError extends Error {
-  constructor(public code: "auth" | "not-found" | "forbidden" | "rate-limited" | "unavailable" | "invalid", message: string) {
+  constructor(public code: "auth" | "not-found" | "forbidden" | "rate-limited" | "unavailable" | "invalid" | "conflict", message: string) {
     super(message);
     this.name = "ForgeError";
   }
@@ -11,6 +11,7 @@ const MESSAGES: Record<ForgeError["code"], string> = {
   forbidden: "The forge denied access to this operation.",
   "rate-limited": "The forge rate limit was reached. Try again later.",
   unavailable: "The forge did not complete the request.",
+  conflict: "The forge reported a conflict.",
   invalid: "The forge rejected the request.",
 };
 
@@ -21,6 +22,7 @@ export function forgeFailure(status: number, rateLimited = false): ForgeError {
   else if (status === 401) code = "auth";
   else if (status === 403) code = "forbidden";
   else if (status === 404 || status === 410) code = "not-found";
+  else if (status === 409) code = "conflict";
   else if (status >= 400 && status < 500) code = "invalid";
   return new ForgeError(code, MESSAGES[code]);
 }

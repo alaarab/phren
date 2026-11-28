@@ -34,7 +34,7 @@ export const gitboyIssues = issueProvider("gitboy", async ({ domain, path, repo 
         try { id = record(await call(`${base}/labels`, "POST", { name })).id; }
         catch (error) {
           // A concurrent request may have just created this name.
-          if (!(error instanceof ForgeError) || !["invalid", "unavailable"].includes(error.code)) throw error;
+          if (!(error instanceof ForgeError) || !["invalid", "unavailable", "conflict"].includes(error.code)) throw error;
           known = await load();
           id = known.get(key);
           if (id === undefined) throw error;
@@ -80,6 +80,17 @@ export const gitboyIssues = issueProvider("gitboy", async ({ domain, path, repo 
       if (assignees) result = await call(`${endpoint}/assignees`, "PUT", { usernames: assignees });
       if (label_ids) result = await call(`${endpoint}/labels`, "PUT", { label_ids });
       return record(result);
+    },
+    async lockClaim(name) {
+      let id: unknown;
+      try { id = record(await call(`${base}/labels`, "POST", { name })).id; }
+      catch (error) {
+        if (error instanceof ForgeError && error.code === "conflict") return undefined;
+        throw error;
+      }
+      if (typeof id !== "string") throw forgeFailure(0);
+      const endpoint = `${base}/labels/${encodeURIComponent(id)}`;
+      return async () => { await call(endpoint, "DELETE"); };
     },
     async comment(number, body) {
       const { id } = record(await call(`${item(number)}/comments`, "POST", { body }));

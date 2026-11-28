@@ -8,9 +8,9 @@ GitHub uses the local `gh` sign-in. Fine-grained GitHub tokens need Issues read 
 
 Gitboy uses the Hook's host credentials or the `GITBOY_HOST` and `GITBOY_TOKEN` pair. Give the token `read:issue` for reading, plus `write:issue` for writes and `read:user` for claiming or listing issues assigned to the signed-in user. Label and assignee changes also require repository write access.
 
-A claim adds `working-on:<computer>`, removes the other claim labels it read, and assigns the signed-in user. Release removes this computer's label and checks the issue again. It keeps the assignee when another computer's claim label is present. Phren verifies changes with a fresh read and retries once on a conflict.
+A claim adds `working-on:<computer>` and assigns the signed-in user only if no other computer holds the issue. A competing claim fails with `claimed by <computer>`. To transfer a claim, release it on the holding computer and then claim it on the destination. Release removes that computer's label and keeps the assignee if another computer's claim label appears.
 
-GitHub changes individual labels. Gitboy replaces the full label set, so Phren preserves the other labels from its last read when it writes a claim change. Until Gitboy adds targeted label endpoints, a release racing another computer's claim in the same second can clear the new claim if it lands between the release's read and write.
+Claim and release serialize across computers using a temporary, uniquely named repository label (`phren:claim-lock:<issue number>`). If a process dies while holding this label, an owner can delete it from the repository after confirming the process has stopped. Make claim changes through Phren to participate in the same coordination.
 
 Issue reads collect Markdown checkboxes throughout the body. Checklist edits replace the last block delimited by `<!-- phren:checklist -->` and `<!-- /phren:checklist -->` outside fenced code. The rest of the body is preserved byte for byte.
 

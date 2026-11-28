@@ -80,6 +80,22 @@ export const githubIssues = issueProvider("github", async ({ domain, path, repo 
     async unassign(number, user) {
       await gh(`${item(number)}/assignees`, "DELETE", { assignees: [user] });
     },
+    async lockClaim(name) {
+      const endpoint = `${base}/labels/${encodeURIComponent(name)}`;
+      try { await gh(`${base}/labels`, "POST", { name, color: "7ba95b" }); }
+      catch (error) {
+        if (!(error instanceof ForgeError) || error.code !== "invalid") throw error;
+        // GitHub also uses 422 for invalid input. The lock may already
+        // have been deleted by the time we probe it. Recheck the issue
+        // and retry acquisition within the provider's deadline.
+        try { await gh(endpoint); }
+        catch (lookup) {
+          if (!(lookup instanceof ForgeError) || lookup.code !== "not-found") throw error;
+        }
+        return undefined;
+      }
+      return async () => { await gh(endpoint, "DELETE"); };
+    },
     async comment(number, body) {
       const { id } = record(await gh(`${item(number)}/comments`, "POST", { body }));
       if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1) throw forgeFailure(0);

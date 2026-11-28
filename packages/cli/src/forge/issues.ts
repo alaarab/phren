@@ -51,7 +51,7 @@ export interface IssueProvider {
   create(input: NewIssue): Promise<Issue>;
   edit(ref: IssueRef, edit: IssueEdit): Promise<Issue>;
   comment(ref: IssueRef, body: string): Promise<{ url: string }>;
-  /** Assign to the signed-in user and replace any working-on label. Release only acts on this computer's label. */
+  /** Assign to the signed-in user if another computer has no claim. Release only acts on this computer's label. */
   claim(ref: IssueRef, computer: string, release?: boolean): Promise<Issue>;
   close(ref: IssueRef, comment?: string): Promise<Issue>;
 }

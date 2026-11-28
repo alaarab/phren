@@ -127,14 +127,16 @@ interface ClaimState {
 
 function gitboyClaimFixture(options: {
   initial?: ClaimState;
-  afterFirstRead?: ClaimState;
+  onLockCollision?: () => void;
+  beforeAssign?: () => Promise<void>;
   beforeRead?: (read: number) => ClaimState | undefined;
 } = {}) {
   const labels: { id: string; name: string }[] = [];
+  let labelId = 0;
   const labelFor = (name: string) => {
     const existing = labels.find(label => label.name === name);
     if (existing) return existing;
-    const label = { id: `l${labels.length + 1}`, name };
+    const label = { id: `l${++labelId}`, name };
     labels.push(label);
     return label;
   };
@@ -155,18 +157,27 @@ function gitboyClaimFixture(options: {
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture-token");
     const payload = init?.body ? JSON.parse(String(init.body)) : {};
     const method = init?.method;
+    if (method === "DELETE" && target.pathname.startsWith(`${base}/labels/`)) {
+      const index = labels.findIndex(label => label.id === target.pathname.split("/").at(-1));
+      if (index !== -1) labels.splice(index, 1);
+      return Response.json({ ok: true });
+    }
     switch (`${method} ${target.pathname}`) {
       case "GET /api/v1/user": return Response.json({ username: "alex" });
       case `GET ${base}/issues/1`: {
         reads++;
         apply(options.beforeRead?.(reads));
-        const reply = Response.json(issue());
-        if (reads === 1) apply(options.afterFirstRead);
-        return reply;
+        return Response.json(issue());
       }
       case `GET ${base}/labels`: return Response.json(labels);
-      case `POST ${base}/labels`: return Response.json(labelFor(payload.name), { status: 201 });
+      case `POST ${base}/labels`:
+        if (labels.some(label => label.name === payload.name)) {
+          options.onLockCollision?.();
+          return Response.json({}, { status: 409 });
+        }
+        return Response.json(labelFor(payload.name), { status: 201 });
       case `PUT ${base}/issues/1/assignees`:
+        await options.beforeAssign?.();
         assignees = payload.usernames.map((username: string) => ({ username }));
         return Response.json(issue());
       case `PUT ${base}/issues/1/labels`: {
@@ -184,7 +195,7 @@ function gitboyClaimFixture(options: {
   return (status: number) => { nextLabelStatus = status; };
 }
 
-function githubClaimFixture(claimOptions: { initial?: ClaimState; afterFirstRead?: ClaimState } = {}) {
+function githubClaimFixture(claimOptions: { initial?: ClaimState; afterFirstRead?: ClaimState; releasedLockRace?: ClaimState } = {}) {
   const knownLabels = new Set(claimOptions.initial?.labels ?? ["bug", "working-on:old"]);
   let labels = [...knownLabels];
   let assignees = claimOptions.initial?.assignees ?? ["previous"];
@@ -199,12 +210,20 @@ function githubClaimFixture(claimOptions: { initial?: ClaimState; afterFirstRead
     if (route === "user") return ghJson({ login: "alex" });
     if (route === "repos/example/widgets/labels" && args.includes("POST")) {
       const { name } = JSON.parse(options.input ?? "");
+      if (name.startsWith("phren:claim-lock:") && claimOptions.releasedLockRace) {
+        labels = claimOptions.releasedLockRace.labels;
+        assignees = claimOptions.releasedLockRace.assignees;
+        for (const label of labels) knownLabels.add(label);
+        throw ghFailure(422);
+      }
+      if (knownLabels.has(name)) throw ghFailure(422);
       knownLabels.add(name);
       return ghJson({ name });
     }
     const name = decodeURIComponent(route.split("/").at(-1) ?? "");
     if (route.startsWith("repos/example/widgets/labels/")) {
       if (!knownLabels.has(name)) throw ghFailure(404);
+      if (args.includes("DELETE")) { knownLabels.delete(name); return { stdout: "", stderr: "" }; }
       return ghJson({ name });
     }
     if (route === labelsPath && args.includes("POST")) {
@@ -243,10 +262,12 @@ describe("claims", () => {
   const deskClaim = { labels: ["bug", "working-on:desk"], assignees: ["alex"] };
   const otherClaim = { labels: ["bug", "working-on:other"], assignees: ["alex"] };
 
-  it.each([[gitboy, gitboyClaimFixture], [github, githubClaimFixture]] as const)("replaces the claim and releases it on %s", async (repo, fixture) => {
+  it.each([[gitboy, gitboyClaimFixture], [github, githubClaimFixture]] as const)("refuses another computer’s claim, then permits claiming after release on %s", async (repo, fixture) => {
     fixture();
     const provider = providerFor(repo);
     const ref = { repo, number: 1 };
+    await expect(provider.claim(ref, "desk")).rejects.toMatchObject({ code: "conflict", message: "claimed by old" });
+    await provider.claim(ref, "old", true);
     await expect(provider.claim(ref, "desk")).resolves.toMatchObject({
       labels: ["bug", "working-on:desk"],
       assignees: ["alex"],
@@ -257,38 +278,64 @@ describe("claims", () => {
   });
 
   it("converges when retrying a gitboy claim after the label write fails", async () => {
-    gitboyClaimFixture()(503);
+    gitboyClaimFixture({ initial: { labels: ["bug"], assignees: [] } })(503);
     const provider = providerFor(gitboy);
     const ref = { repo: gitboy, number: 1 };
     await expect(provider.claim(ref, "desk")).rejects.toMatchObject({ code: "unavailable" });
     await expect(provider.claim(ref, "desk")).resolves.toMatchObject({ labels: ["bug", "working-on:desk"], assignees: ["alex"] });
   });
 
-  it("writes both parts of a claim even when the initial snapshot already matches", async () => {
-    const expected = { ...deskClaim, labels: [...deskClaim.labels, "triaged"] };
+  it("admits only one of two conductors racing after listing the same issue", async () => {
+    const initial = { labels: ["bug"], assignees: [] };
+    let signalCollision!: () => void;
+    const collision = new Promise<void>(resolve => { signalCollision = resolve; });
     gitboyClaimFixture({
-      initial: expected,
-      afterFirstRead: { labels: [...otherClaim.labels, "triaged"], assignees: ["riley"] },
+      initial,
+      onLockCollision: signalCollision,
+      beforeAssign: () => collision,
     });
     const provider = providerFor(gitboy);
-    await expect(provider.claim(ref, "desk")).resolves.toMatchObject(expected);
-    await expect(provider.get(ref)).resolves.toMatchObject(expected);
+    const reads = await Promise.all([provider.get(ref), provider.get(ref)]);
+    expect(reads.map(issue => issue.claimedBy)).toEqual([undefined, undefined]);
+
+    const results = await Promise.allSettled([provider.claim(ref, "desk"), provider.claim(ref, "other")]);
+    const winners = results.filter(result => result.status === "fulfilled");
+    expect(winners).toHaveLength(1);
+    const winner = winners[0].value.claimedBy?.computer;
+    expect(winner).toMatch(/^(desk|other)$/);
+    expect(results.filter(result => result.status === "rejected")).toEqual([
+      { status: "rejected", reason: expect.objectContaining({ code: "conflict", message: `claimed by ${winner}` }) },
+    ]);
+    expect(await provider.get(ref)).toMatchObject({
+      labels: ["bug", `working-on:${winner}`], assignees: ["alex"],
+    });
   });
 
-  it("retries when an overlapping claim changes the assignee after the writes", async () => {
+  it("reads the GitHub winner even after its temporary lock has gone", async () => {
+    githubClaimFixture({ initial: { labels: ["bug"], assignees: [] }, releasedLockRace: otherClaim });
+    const provider = providerFor(github);
+    const ref = { repo: github, number: 1 };
+    await expect(provider.claim(ref, "desk")).rejects.toMatchObject({ code: "conflict", message: "claimed by other" });
+    expect(await provider.get(ref)).toMatchObject(otherClaim);
+  });
+
+  it("retries when an external edit changes the assignee after the writes", async () => {
     gitboyClaimFixture({
+      initial: { labels: ["bug"], assignees: [] },
       beforeRead: read => read === 2 ? { ...deskClaim, assignees: ["riley"] } : undefined,
     });
     const provider = providerFor(gitboy);
     await expect(provider.claim(ref, "desk")).resolves.toMatchObject(deskClaim);
-    await expect(provider.get(ref)).resolves.toMatchObject(deskClaim);
   });
 
-  it("reports the competing label when the claim loses both verification reads", async () => {
-    gitboyClaimFixture({ beforeRead: read => read === 2 || read === 3 ? otherClaim : undefined });
-    await expect(providerFor(gitboy).claim(ref, "desk")).rejects.toMatchObject({
-      code: "invalid", message: expect.stringMatching(/claim conflict.*working-on:other/i),
+  it("reports a competing label on verification without trying to replace it", async () => {
+    gitboyClaimFixture({
+      initial: { labels: ["bug"], assignees: [] },
+      beforeRead: read => read === 2 ? otherClaim : undefined,
     });
+    const provider = providerFor(gitboy);
+    await expect(provider.claim(ref, "desk")).rejects.toMatchObject({ code: "conflict", message: "claimed by other" });
+    expect(await provider.get(ref)).toMatchObject(otherClaim);
   });
 
   it.each([
@@ -297,7 +344,7 @@ describe("claims", () => {
   ])("leaves a release with no matching claim unchanged ($labels)", async current => {
     gitboyClaimFixture({ initial: current });
     await expect(providerFor(gitboy).claim(ref, "desk", true)).resolves.toMatchObject(current);
-    expect(fetchForge).toHaveBeenCalledTimes(1);
+    expect(fetchForge.mock.calls.some(([, request]) => request?.method === "PUT")).toBe(false);
   });
 
   it("retries release when the claimant and the label reappear after the writes", async () => {
@@ -314,15 +361,6 @@ describe("claims", () => {
     const ref = { repo: github, number: 1 };
     await expect(provider.claim(ref, "desk", true)).resolves.toMatchObject(otherClaim);
     await expect(provider.get(ref)).resolves.toMatchObject(otherClaim);
-  });
-
-  it("documents the known Gitboy race where a stale release can overwrite a new claim", async () => {
-    // Gitboy's PUT replaces the entire label set, including labels added after the read.
-    gitboyClaimFixture({ initial: deskClaim, afterFirstRead: otherClaim });
-    const provider = providerFor(gitboy);
-    const released = { labels: ["bug"], assignees: [] };
-    await expect(provider.claim(ref, "desk", true)).resolves.toMatchObject(released);
-    await expect(provider.get(ref)).resolves.toMatchObject(released);
   });
 
   it("keeps a Gitboy claim that appears at the release verification read", async () => {

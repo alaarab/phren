@@ -1169,7 +1169,7 @@ Change an issue's title, body, checklist, labels or state. `checklist` is the co
 
 ### `claim_issue`
 
-Assign the issue to the signed-in user and label it `working-on:<this computer>`, replacing any other `working-on:*` label. `release: true` removes this computer's label and the matching assignment instead. Phren verifies both changes with a fresh read and retries once on a conflict; a claim that does not settle returns `INVALID`.
+Assign the issue to the signed-in user and label it `working-on:<this computer>` if no other computer holds it. A competing claim returns `CONFLICT` with the computer name. `release: true` removes this computer's label and the matching assignment. Phren verifies both changes with a fresh read.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

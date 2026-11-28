@@ -224,7 +224,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     "claim_issue",
     {
       title: "◆ phren · claim issue",
-      description: "Assign an issue to the signed-in forge user and label it working-on:<this computer> (replacing any other working-on label). release undoes both for this computer. The claim is verified with a fresh read.",
+      description: "Assign an issue to the signed-in forge user and label it working-on:<this computer> if another computer has no claim. release undoes both for this computer. The claim is verified with a fresh read.",
       inputSchema: z.object({
         ...issueRefShape,
         release: z.boolean().optional().describe("Release this computer's claim instead of taking one."),

@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import type { Json } from "../bridge/protocol.js";
 import { parseChecklist, rewriteChecklist } from "./checklist.js";
 import { forgeFailure, ForgeError } from "./errors.js";
@@ -19,6 +20,7 @@ export interface IssueBackend {
   edit(number: number, patch: IssuePatch): Promise<Json>;
   changeLabels?(number: number, add: string[], remove: string[]): Promise<void>;
   unassign?(number: number, user: string): Promise<void>;
+  lockClaim(name: string): Promise<(() => Promise<void>) | undefined>;
   comment(number: number, body: string): Promise<{ url: string }>;
   currentUser(): Promise<string>;
 }
@@ -197,11 +199,34 @@ export function issueProvider(kind: ForgeKind, connect: (repo: ReturnType<typeof
     },
     async claim(ref, computer, release = false) {
       const label = WORKING_ON + computer.trim();
-      if (!release && (!computer.trim() || /[\r\n]/.test(computer))) throw new ForgeError("invalid", "Use a valid computer name.");
-      return write(ref, async (backend, current) => {
-        const { repo, number } = current;
-        const read = async () => normalize(repo, await backend.get(number));
-        const otherClaim = (name: string) => workingOn(name) && !sameName(name, label);
+      if (!computer.trim() || /[\r\n]/.test(computer)) throw new ForgeError("invalid", "Use a valid computer name.");
+      const location = issueRef(ref);
+      const { repo } = location;
+      const { number } = ref;
+      const backend = await connect(location);
+      const read = async () => normalize(repo, await backend.get(number));
+      const otherClaim = (name: string) => workingOn(name) && !sameName(name, label);
+      function assertUnclaimed(issue: Issue) {
+        const other = issue.labels.find(otherClaim);
+        if (other) throw new ForgeError("conflict", `claimed by ${other.slice(WORKING_ON.length)}`);
+      }
+      // Neither forge makes a conditional issue-label write available. Atomic
+      // creation of a uniquely named repository label serializes the fresh read
+      // and mutation across processes and computers using the same forge.
+      const lockName = `phren:claim-lock:${number}`;
+      let unlock: (() => Promise<void>) | undefined;
+      const deadline = Date.now() + 2_000;
+      do {
+        unlock = await backend.lockClaim(lockName);
+        if (unlock) break;
+        const current = await read();
+        if (!release) assertUnclaimed(current);
+        await delay(100);
+      } while (Date.now() < deadline);
+      if (!unlock) throw new ForgeError("conflict", `Issue claim is busy (${lockName}).`);
+
+      try {
+        let current = await read();
         if (release) {
           if (!hasName(current.labels, label)) return current;
           const user = current.claimedBy?.user;
@@ -218,26 +243,22 @@ export function issueProvider(kind: ForgeKind, connect: (repo: ReturnType<typeof
             if (current.labels.some(otherClaim)
               || (!current.labels.some(workingOn) && !hasName(current.assignees, user))) return current;
           }
-          throw new ForgeError("invalid", `Issue claim conflict for ${label}. The release did not settle after two attempts.`);
+          throw new ForgeError("conflict", `Issue claim conflict for ${label}. The release did not settle after two attempts.`);
         }
 
+        assertUnclaimed(current);
         const user = await backend.currentUser();
-        let competingLabels: string[] = [];
         for (let attempt = 0; attempt < 2; attempt++) {
-          // Publish the label first so a releasing computer can see the new claim.
-          await changeClaimLabels(backend, current, [label], current.labels.filter(otherClaim));
-          await backend.edit(number, { assignees: [user] });
+          if (!hasName(current.labels, label)) await changeClaimLabels(backend, current, [label], []);
+          if (!hasName(current.assignees, user)) await backend.edit(number, { assignees: [user] });
           current = await read();
-          const claims = current.labels.filter(workingOn);
-          if (claims.length === 1 && hasName(claims, label) && hasName(current.assignees, user)) return current;
-          const others = claims.filter(otherClaim);
-          if (others.length) competingLabels = others;
+          assertUnclaimed(current);
+          if (hasName(current.labels, label) && hasName(current.assignees, user)) return current;
         }
-        const conflict = competingLabels.length
-          ? `Observed competing labels ${competingLabels.map(name => JSON.stringify(name)).join(", ")}.`
-          : "The assignee and claim label did not settle after two attempts.";
-        throw new ForgeError("invalid", `Issue claim conflict for ${label}. ${conflict}`);
-      });
+        throw new ForgeError("conflict", `Issue claim conflict for ${label}. The assignee and claim label did not settle after two attempts.`);
+      } finally {
+        await unlock();
+      }
     },
     close(ref, comment) {
       return write(ref, async (backend, current) => {
