@@ -568,7 +568,7 @@ function firstUsable(ui, computer) {
   if (ui.state.chat) return "phren";
   const profile = ui.state.profiles.get(computer);
   const harnesses = profile?.harnesses;
-  const kinds = ui.ui.state.role === "conductor" ? HARNESS_ORDER.filter((kind) => kind !== "phren") : HARNESS_ORDER;
+  const kinds = ui.state.role === "conductor" ? HARNESS_ORDER.filter((kind) => kind !== "phren") : HARNESS_ORDER;
   // Prefer a harness whose account still has quota on that computer.
   const out = new Set((profile?.capacity?.usage ?? []).filter(exhausted).map((row) => String(row.source)));
   if (harnesses) {
