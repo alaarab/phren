@@ -39,4 +39,4 @@ An issue reference (`<ref>`) is `repo#N` (the repository may be `owner/name`, `d
 
 ## Dispatch and the owner Inbox
 
-Pass `--issue github.com/example/widgets#12` to `phren dispatch`. The worker brief asks for one summary comment and a closing reference in any PR. `dispatch_report` attaches PR URLs to the issue. Dispatch returns include the issue reference. Use `phren owner-inbox add --issue github.com/example/widgets#12 <title>` for a related owner action.
+Pass `--issue github.com/example/widgets#12` to `phren dispatch`. The worker brief asks for one summary comment and a closing reference in any PR. `dispatch_report` attaches PR URLs to the issue. Dispatch returns include the issue reference. A worker keeps its issue binding when moved to another Hook. Use `phren owner-inbox add --issue github.com/example/widgets#12 <title>` for a related owner action.

@@ -1,4 +1,5 @@
 import { dispatchIssueSchema, issueBriefBlock, writeDispatchIssue } from "./dispatch-issue.js";
+import type { ContinuationLaunch } from "./continuation-launch.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 import { integratorSchema, prsSchema } from "./return-contract.js";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -1514,9 +1515,9 @@ export class DispatchService {
 
   /** Owner continuation: use the same pinned transport and launch/arrival
    * protocol as dispatch, without turning the new chat into a worker. */
-  async continueChat(peer: DispatchHost, project: string, to: z.infer<typeof moveToSchema>, brief: { id: string; text: string }, label: string, placed?: (target: unknown) => Promise<void>, computerId?: string, worker = false, workerDispatch?: string): Promise<Target> {
+  async continueChat(peer: DispatchHost, intent: ContinuationLaunch, placed?: (target: unknown) => Promise<void>): Promise<Target> {
+    const { to, brief } = intent;
     if (to.harness === "copilot") throw new BridgeError(409, PEER_COPILOT_REASON);
-    const { computer: _computer, ...destination } = to;
     const readPlacement = async () => {
       const saved = await peer.request(`/v1/sessions/move/launch?id=${encodeURIComponent(brief.id)}`, undefined, 5_000).catch(() => undefined);
       if (saved?.paneTarget) await placed?.({ paneTarget: saved.paneTarget });
@@ -1524,7 +1525,7 @@ export class DispatchService {
     };
     let complete = false;
     const pendingLaunch = peer.request(`/v1/sessions/move/launch?server=${encodeURIComponent(peer.server)}`,
-      { computerId, project, to: destination, label, brief, worker, ...(workerDispatch ? { workerDispatch } : {}) }, 65_000).then(result => { complete = true; return { result }; }, error => { complete = true; return { error }; });
+      intent, 65_000).then(result => { complete = true; return { result }; }, error => { complete = true; return { error }; });
     // Track a created pane while its harness is still starting. Every probe
     // is bounded, and completion stops the monitor before any later move.
     const monitor = (async () => {

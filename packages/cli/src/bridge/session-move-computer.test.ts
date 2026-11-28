@@ -1,5 +1,6 @@
 import * as hookClient from "./client.js";
 import * as terminals from "./terminal.js";
+import { readDispatchIssue } from "./dispatch-issue.js";
 import { relocationSupport } from "./worker-relocation.js";
 import { writeLaunchBrief, recordBriefArrival } from "./launch-brief.js";
 import * as herdr from "./herdr.js";
@@ -25,7 +26,7 @@ import { DispatchReturns, observe, workerStates } from "./dispatch-returns.js";
 import { dispatchStatus, type Receipt } from "./dispatch.js";
 import { peerFingerprint } from "./dispatch-hosts.js";
 import { setTerminalProvider } from "./terminal.js";
-import { continuationPlacement, fetchContinuationConversation, launchContinuation, saveContinuationConversation, saveContinuationIntent } from "./continuation-launch.js";
+import { continuationIntent, continuationPlacement, fetchContinuationConversation, launchContinuation, saveContinuationConversation, saveContinuationIntent } from "./continuation-launch.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 import { LaunchLimiter } from "./limits.js";
 import { BridgeError, objects, type Json, type Target } from "./protocol.js";
@@ -906,12 +907,22 @@ it.skipIf(process.platform === "win32")("keeps the original dispatcher receipt t
     }
     return original(peer, route, data, timeout);
   });
-  await launchContinuation({ computerId: A_ID, project: "repo", to: { harness: "claude" }, label: "Received worker", worker: true, workerDispatch: dispatch, brief: { id: B_ID, text: "Original worker" } }, async () => ({ target: from, briefLaunched: true }));
+  const issue = { repo: "github.com/example/widgets", number: 7 };
+  await launchContinuation({ computerId: A_ID, project: "repo", to: { harness: "claude" }, label: "Received worker", worker: true, workerDispatch: dispatch, issue, brief: { id: B_ID, text: "Original worker" } }, async () => ({ target: from, briefLaunched: true }));
   f.deps.paneDispatch = async () => B_ID;
   const move = await f.mover.start({ target: from, to: { harness: "claude", computer: "remote" } }, { owner: true });
   await f.mover.settled(from.server, from.pane);
   expect(await readMove(move.id)).toMatchObject({ state: "moved", dispatch: B_ID, workerDispatch: dispatch });
-  expect(f.sent.find(call => call.route.includes("/launch"))?.data).toMatchObject({ worker: true, workerDispatch: dispatch });
+  const launch = f.sent.find(call => call.route.startsWith("/v1/sessions/move/launch?server="))?.data;
+  expect(launch).toEqual(await continuationIntent(move.id));
+  expect(launch).toMatchObject({ worker: true, workerDispatch: dispatch, issue, brief: { id: move.id } });
+
+  // A receiving Hook has no access to either of the source's sidecars.
+  vi.stubEnv("PHREN_BRIDGE_HOME", path.join(root, "destination"));
+  await launchContinuation(launch, async () => {
+    expect(await readDispatchIssue(move.id)).toEqual(issue);
+    return { target, briefLaunched: true };
+  });
 });
 
 
