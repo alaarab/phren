@@ -1,6 +1,6 @@
 import { capacityRoom, type AccountUsage } from "./usage.js";
 import { targetTranscriptPath } from "./transcripts.js";
-import { CONVERSATION_LIMIT, CONVERSATION_MARKER, ORPHAN_GRACE_MS, pruneContinuationFiles, saveContinuationConversation, saveContinuationIntent } from "./continuation-launch.js";
+import { CONVERSATION_LIMIT, CONVERSATION_MARKER, continuationLaunchSchema, ORPHAN_GRACE_MS, pruneContinuationFiles, saveContinuationConversation, saveContinuationIntent } from "./continuation-launch.js";
 import type { ConductorSuccessionService } from "./conductor-succession.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 // Moving a live session to another agent: the Hook saves its history and an
@@ -24,6 +24,7 @@ import { redactSecretsForLog } from "../content/secrets.js";
 import { redactApproval } from "./approval-summary.js";
 import { stableComputerName } from "./computer-names.js";
 import type { DispatchHost } from "./dispatch-hosts.js";
+import { readDispatchIssue } from "./dispatch-issue.js";
 import { randomUUID } from "node:crypto";
 import { copyFile, cp, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
@@ -997,13 +998,15 @@ export class SessionMover {
     await this.assertNotAborted(record);
     await this.update(record, { state: "uncertain", placement: "peer" });
     const label = redactSecretsForLog(redactPeerHandoff(redactApproval(briefText(record.from.label ?? "Continued chat"))));
-    const { computer: _destination, ...destination } = record.to;
-    await saveContinuationIntent({ computerId: record.computerId, project, to: destination, label, brief: { id: record.id, text: remotePrompt }, worker: !!record.dispatch, ...(record.workerDispatch ? { workerDispatch: record.workerDispatch } : {}) });
-    if (record.modeForced === "conductor") {
-      const { computer: _computer, ...to } = record.to;
-      await this.deps.succession!.saveLaunch(record.id, { computerId: record.computerId, project, to, label, brief: { id: record.id, text: remotePrompt }, worker: !!record.dispatch, ...(record.workerDispatch ? { workerDispatch: record.workerDispatch } : {}) });
-    }
-    const target = await new DispatchService().continueChat(peer, project, record.to, { id: record.id, text: remotePrompt }, label, async target => {
+    const { computer: _destination, ...to } = record.to;
+    const issue = record.dispatch ? await readDispatchIssue(record.dispatch) : undefined;
+    const intent = continuationLaunchSchema.parse({
+      computerId: checked.computerId, project, to, label, brief: { id: record.id, text: remotePrompt },
+      worker: !!record.dispatch, workerDispatch: record.workerDispatch, issue,
+    });
+    await saveContinuationIntent(intent);
+    if (record.modeForced === "conductor") await this.deps.succession!.saveLaunch(record.id, intent);
+    const target = await new DispatchService().continueChat(peer, intent, async target => {
       const parsed = targetSchema.safeParse(target);
       const pane = targetSchema.omit({ session: true }).safeParse(object(target).paneTarget);
       if (pane.success) await this.update(record, { state: "uncertain", paneTarget: pane.data, placement: "peer" });
@@ -1011,7 +1014,7 @@ export class SessionMover {
         await this.update(record, { state: "uncertain", target: parsed.data, placement: "peer" });
         if (record.modeForced === "conductor") await this.deps.succession!.prepared(record.id, parsed.data);
       }
-    }, record.computerId, !!record.dispatch, record.workerDispatch);
+    });
     return target;
   }
 

@@ -40,7 +40,6 @@ describe("startLiveStatePoller", () => {
 
   it("repaints when the live-state token changes", async () => {
     const shell = {
-      invalidateSubsectionsCache: vi.fn(),
       setMessage: vi.fn(),
     };
     const repaint = vi.fn(async () => {});
@@ -61,9 +60,7 @@ describe("startLiveStatePoller", () => {
     expect(repaint).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(100);
-    expect(shell.invalidateSubsectionsCache).toHaveBeenCalledTimes(1);
-    expect(shell.setMessage).toHaveBeenCalledTimes(1);
-    expect(shell.setMessage.mock.calls[0]?.[0]).toContain("Live");
+    expect(shell.setMessage).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("Live"));
     expect(repaint).toHaveBeenCalledTimes(1);
 
     stop();
@@ -71,7 +68,6 @@ describe("startLiveStatePoller", () => {
 
   it("does not start a new poll while a repaint is still in flight", async () => {
     const shell = {
-      invalidateSubsectionsCache: vi.fn(),
       setMessage: vi.fn(),
     };
     let releaseRepaint!: () => void;
@@ -110,7 +106,6 @@ describe("startLiveStatePoller", () => {
 
   it("stops polling once the shell is exiting", async () => {
     const shell = {
-      invalidateSubsectionsCache: vi.fn(),
       setMessage: vi.fn(),
     };
     const repaint = vi.fn(async () => {});
@@ -128,7 +123,6 @@ describe("startLiveStatePoller", () => {
     });
 
     await vi.advanceTimersByTimeAsync(300);
-    expect(shell.invalidateSubsectionsCache).not.toHaveBeenCalled();
     expect(repaint).not.toHaveBeenCalled();
 
     stop();
@@ -136,7 +130,6 @@ describe("startLiveStatePoller", () => {
 
   it("does not repaint after stop() is called", async () => {
     const shell = {
-      invalidateSubsectionsCache: vi.fn(),
       setMessage: vi.fn(),
     };
     const repaint = vi.fn(async () => {});
@@ -155,7 +148,6 @@ describe("startLiveStatePoller", () => {
 
     stop();
     await vi.advanceTimersByTimeAsync(300);
-    expect(shell.invalidateSubsectionsCache).not.toHaveBeenCalled();
     expect(repaint).not.toHaveBeenCalled();
   });
 });

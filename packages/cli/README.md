@@ -6,13 +6,13 @@ On startup it walks your phren directory, reads all `.md` files, and builds an i
 
 Periodic remote checks are off by default. Enable them with `phren config pull-interval 60` to check shared Git stores every minute while running, coordinated across MCP clients using the same store. Changed refs are fetched and applied only as clean fast-forwards; dirty or diverged stores are deferred. Pulled changes refresh the index and existing managed skill/instruction mirrors. Configure this machine with `phren config pull-interval 600` (ten minutes) or `phren config pull-interval off`. Periodic checks are disabled for project-local stores and the manual preset; existing lifecycle hooks are configured separately.
 
-Public surface: 78 MCP implementation tools across 17 catalog modules (search, tasks, findings, notes, memory, data, graph, sessions, ops/review, skills, hooks, config, extraction).
+Public surface: 82 MCP implementation tools (search, forge issues, findings, notes, memory, data, graph, sessions, ops/review, skills, hooks, config, extraction).
 
 Notable shipped capabilities:
 - finding lifecycle tools: `supersede_finding`, `retract_finding`, `resolve_contradiction`, `get_contradictions`
 - finding provenance: `add_finding.source` (`human|agent|hook|extract|consolidation|unknown`)
 - lightweight daily notes: CRUD in `<project>/notes/YYYY-MM-DD.md`, explicit search, and promotion to findings without automatic prompt injection
-- cross-session continuity: task checkpoints + `session_history`
+- cross-session continuity: `session_history`
 - finding impact scoring from injected-context outcomes
 - skill registry behavior: scope precedence, alias-collision handling, visibility gating, generated `skill-manifest.json`
 - lifecycle penalties: superseded 0.25×, retracted 0.1×, contradicted 0.4× confidence in retrieval
@@ -66,7 +66,7 @@ Full-text search across all indexed markdown files with synonym expansion.
 ```
 query: string              - FTS5 query (supports AND, OR, NOT, "phrase matching")
 limit?: number             - Max results, 1-20, default 5
-type?: string              - Filter: "claude", "findings", "reference", "summary", "task", "skill"
+type?: string              - Filter: "claude", "findings", "reference", "summary", "skill"
 project?: string           - Filter to a specific project
 tag?: string               - Filter findings by type tag: decision, pitfall, pattern, tradeoff, architecture, bug
 since?: string             - Filter findings by date: "7d", "30d", "YYYY-MM", "YYYY-MM-DD"
@@ -98,7 +98,7 @@ No parameters.
 5. Builds an in-memory SQLite FTS5 index with Porter stemming
 6. Serves tools over stdio using the MCP protocol
 
-File types are derived from filenames and directories: `AGENTS.md` -> "claude", `summary.md` -> "summary", `FINDINGS.md` -> "findings", `tasks.md` -> "task", files under `notes/` -> "notes", files under `reference/` -> "reference", files under `skills/` -> "skill".
+File types are derived from filenames and directories: `AGENTS.md` -> "claude", `summary.md` -> "summary", `FINDINGS.md` -> "findings", files under `notes/` -> "notes", files under `reference/` -> "reference", files under `skills/` -> "skill".
 
 ## Development
 

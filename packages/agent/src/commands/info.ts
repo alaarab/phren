@@ -48,7 +48,6 @@ export function helpCommand(_parts: string[], _ctx: CommandContext): boolean {
   /ask <question>  Quick LLM query (no tools, not added to session)
   /mem search <query>  Search phren memory directly
   /mem findings [project]  Show recent findings
-  /mem tasks [project]  Show tasks
   /mem add <finding>  Quick-add a finding
   /preset [name|save|delete|list]  Config presets
   /exit       Exit the REPL${RESET}\n`);

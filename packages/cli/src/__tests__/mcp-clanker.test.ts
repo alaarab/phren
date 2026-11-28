@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
 import { register as registerSearch } from "../tools/search.js";
-import { register as registerTasks } from "../tools/tasks.js";
 import { buildIndex, type SqlJsDatabase } from "../shared/index.js";
 import type { McpContext } from "../tools/types.js";
 import { resolveClanker } from "../clanker.js";
@@ -48,7 +47,6 @@ describe("clanker mode tools", () => {
     };
     const server = { registerTool: (name: string, _meta: unknown, handler: ToolHandler) => tools.set(name, handler) };
     registerSearch(server as never, ctx);
-    registerTasks(server as never, ctx);
     process.env.PHREN_CLANKER = "on";
   });
 
@@ -61,7 +59,6 @@ describe("clanker mode tools", () => {
     const search = await call("search_knowledge", { query: "redis eviction", project: "app" });
     expect(search.json.ok).toBe(true);
     expect(search.json.data.ids).toContain("fid:aaaa1111");
-    expect(search.json.data.ids).toContain("bid:cccc3333");
     // A title, not the whole finding: its tail stays out of the row.
     expect(search.text).not.toContain("alert on evicted_keys above zero");
 
@@ -70,9 +67,6 @@ describe("clanker mode tools", () => {
     expect(finding.json.data.content).toContain("phren:cite");
     expect(finding.json.data.content).not.toContain("Postgres");
 
-    const task = await call("get_memory_detail", { id: "bid:cccc3333" });
-    expect(task.json.data.content).toContain("threshold needs a floor");
-    expect(task.json.data.content).not.toContain("worker pool");
 
     const missing = await call("get_memory_detail", { id: "fid:eeee5555" });
     expect(missing.json.ok).toBe(false);
@@ -97,7 +91,7 @@ describe("clanker mode tools", () => {
     }
   });
 
-  it("get_findings and get_tasks list ids and titles without the full text", async () => {
+  it("get_findings lists ids and titles without the full text", async () => {
     const findings = await call("get_findings", { project: "app" });
     expect(findings.json.data.total).toBe(2);
     expect(findings.json.message).toMatch(/fid:aaaa1111 \S+ Redis eviction/);
@@ -106,10 +100,6 @@ describe("clanker mode tools", () => {
     expect(findings.json.message).toContain("Postgres max_connections exhaustion");
     expect(findings.json.message).not.toContain("alert on evicted_keys above zero");
 
-    const tasks = await call("get_tasks", { project: "app" });
-    expect(tasks.json.message).toContain("bid:cccc3333 Tune Redis eviction alerts");
-    expect(tasks.json.message).toContain("bid:dddd4444 Split the worker pool");
-    expect(tasks.json.message).not.toContain("threshold needs a floor");
   });
 });
 

@@ -16,13 +16,12 @@ function configure(text: string): void {
 
 describe("module runtime loading", () => {
   it("ignores an unknown module key with one warning and keeps known values", () => {
-    const source = "version: 1\nenabled:\n  hook: true\n  tasks: false\n  future-module: true\n";
+    const source = "version: 1\nenabled:\n  hook: true\n  future-module: true\n";
     configure(source);
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const snapshot = moduleSnapshot(tmp.path, "");
     expect(snapshot.has("memory")).toBe(true);
     expect(snapshot.has("hook")).toBe(true);
-    expect(snapshot.has("tasks")).toBe(false);
     expect(snapshot.has("future-module")).toBe(false);
     expect(error.mock.calls.map(([line]) => String(line)))
       .toEqual([`warning: unknown module "future-module" in .config/modules.yaml ignored by Hook ${VERSION}`]);

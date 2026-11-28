@@ -4,7 +4,7 @@ import { bootstrapFromExisting } from "./project-registry.js";
 import { resolveActiveProfile } from "../profile-store.js";
 import type { ProjectOwnershipMode } from "../project-config.js";
 import { isValidProjectName } from "../utils-paths.js";
-import { FINDINGS_FILENAME, TASKS_FILENAME } from "../filenames.js";
+import { FINDINGS_FILENAME } from "../filenames.js";
 
 interface AddedProjectData {
   project: string;
@@ -15,7 +15,6 @@ interface AddedProjectData {
     claude: string | null;
     summary: string;
     findings: string;
-    task: string;
   };
 }
 
@@ -69,7 +68,6 @@ export function addProjectFromPath(
       claude: added.claudePath,
       summary: path.join(writePhrenPath, added.project, "summary.md"),
       findings: path.join(writePhrenPath, added.project, FINDINGS_FILENAME),
-      task: path.join(writePhrenPath, added.project, TASKS_FILENAME),
     },
   });
 }

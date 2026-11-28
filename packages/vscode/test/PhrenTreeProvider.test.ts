@@ -27,11 +27,11 @@ describe("PhrenTreeProvider.getChildren: delegates to TreeDataSource", () => {
     expect(children.map((c) => (c.kind === "rootSection" ? c.section : c.kind))).toContain("projects");
   });
 
-  it("a project node expands to its 8 fixed categories", async () => {
+  it("a project node expands to its 7 fixed categories", async () => {
     const provider = new PhrenTreeProvider(fakeClient(), STORE_PATH);
     const children = await provider.getChildren({ kind: "project", projectName: "app" });
     expect(children.map((c) => (c.kind === "category" ? c.category : undefined))).toEqual([
-      "findings", "notes", "truths", "sessions", "task", "queue", "hooks", "reference",
+      "findings", "notes", "truths", "sessions", "queue", "hooks", "reference",
     ]);
   });
 
@@ -58,14 +58,7 @@ describe("PhrenTreeProvider.getChildren: delegates to TreeDataSource", () => {
     expect(children).toEqual([{ kind: "findingDateGroup", projectName: "app", date: "2026-01-15", count: 1 }]);
   });
 
-  it("a globalTaskSectionGroup delegates to the matching section", async () => {
-    const getAllTasks = vi.fn(async () => ok({
-      projects: [{ project: "app", items: { Active: [{ id: "1", line: "a", pinned: true }] } }],
-    }));
-    const provider = new PhrenTreeProvider(fakeClient({ getAllTasks }), STORE_PATH);
-    const children = await provider.getChildren({ kind: "globalTaskSectionGroup", section: "Pinned", count: 1 });
-    expect(children.map((c) => (c.kind === "task" ? c.id : undefined))).toEqual(["1"]);
-  });
+
 });
 
 describe("PhrenTreeProvider.getTreeItem: delegates to buildTreeItem with the current date filter", () => {

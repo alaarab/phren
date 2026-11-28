@@ -6,7 +6,7 @@ dependencies:
 ---
 # phren-init - Scaffold a new project
 
-> Set up a new project in phren with summary, AGENTS.md, task, and skill templates.
+> Set up a new project in phren with summary, AGENTS.md and skill templates.
 
 Add a new project to your phren instance, or bootstrap phren itself if you're starting fresh.
 
@@ -92,19 +92,7 @@ Ask the user for these if you can't figure them out from the project directory. 
 
 Pre-fill from the project's existing README or package.json if available. Leave architecture and conventions as placeholders with the HTML comments.
 
-### 5. Create tasks.md
-
-```markdown
-# <project-name> tasks
-
-## Active
-
-## Queue
-
-## Done
-```
-
-### 6. Create skills README
+### 5. Create skills README
 
 ```markdown
 # <project-name> skills
@@ -114,7 +102,7 @@ Project-specific skills go here. Add `.md` files and Phren will resolve them tog
 
 Write this to `$PHREN_DIR/<project-name>/skills/README.md`.
 
-### 7. Add to profile(s)
+### 6. Add to profile(s)
 
 Check if profiles exist:
 ```bash
@@ -128,7 +116,7 @@ If no profiles exist, offer to create one:
 
 Then add the project name to the chosen profile's `projects` list.
 
-### 8. Commit (if git repo)
+### 7. Commit (if git repo)
 
 ```bash
 cd "$PHREN_DIR"
@@ -168,7 +156,7 @@ If `gh` isn't available, show the manual steps:
 >
 > Once it's on GitHub, clone it on any machine and run `phren:sync` to activate."
 
-### 9. Report
+### 8. Report
 
 ```
 phren-init <project-name>
@@ -176,7 +164,6 @@ phren-init <project-name>
 Created:
   $PHREN_DIR/<project-name>/summary.md
   $PHREN_DIR/<project-name>/AGENTS.md
-  $PHREN_DIR/<project-name>/tasks.md
   $PHREN_DIR/<project-name>/skills/README.md
 
 Added to profile: default
@@ -211,4 +198,3 @@ If phren doesn't exist at all, offer to bootstrap it from scratch.
 
 - `phren-sync`: activate the new project on this machine after init
 - `phren-discover`: find what to build next in a project
-- `/tasks`: manage the project's task queue

@@ -1,6 +1,6 @@
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
-import { moduleEnabled, moduleSnapshot } from "../modules/runtime.js";
-import { skillEnabled, reconcileStarterSkills, starterInstructions } from "../modules/provision.js";
+import { moduleSnapshot } from "../modules/runtime.js";
+import { skillEnabled, reconcileStarterSkills } from "../modules/provision.js";
 /**
  * Governance files, root file migration, verification, starter templates, bootstrap.
  */
@@ -37,7 +37,6 @@ import {
   type ManagementCapabilities,
   type ManagementPreset,
 } from "./management-preset.js";
-import { TASKS_FILENAME } from "../data/tasks.js";
 import { writeSkillMd } from "../link/skills.js";
 import { syncScopeSkillsToDir } from "../skill/files.js";
 import { isCopilotInstalled } from "../hooks.js";
@@ -701,7 +700,6 @@ export function ensureGovernanceFiles(phrenPath: string): string[] {
         schemaVersion: sv,
         lowConfidenceThreshold: 0.7,
         riskySections: ["Stale", "Conflicts"],
-        taskMode: "auto",
       }, null, 2) + "\n"
     );
     created.push(".config/workflow-policy.json");
@@ -754,14 +752,12 @@ export function applyTemplate(projectDir: string, templateName: string, projectN
   function copyTemplateDir(srcDir: string, destDir: string) {
     fs.mkdirSync(destDir, { recursive: true });
     for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
-      if (entry.name === TASKS_FILENAME && !moduleEnabled(path.dirname(projectDir), "tasks")) continue;
       const src = path.join(srcDir, entry.name);
       const dest = path.join(destDir, entry.name);
       if (entry.isDirectory()) {
         copyTemplateDir(src, dest);
       } else {
         let content = fs.readFileSync(src, "utf8");
-        if (entry.name === "AGENTS.md") content = starterInstructions(path.dirname(projectDir), content);
         content = content.replace(/\{\{project\}\}/g, projectName);
         content = content.replace(/\{\{date\}\}/g, new Date().toISOString().slice(0, 10));
         atomicWriteText(dest, content);

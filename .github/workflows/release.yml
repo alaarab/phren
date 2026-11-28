@@ -98,6 +98,26 @@ jobs:
           tar -xzOf "$RUNNER_TEMP/phren-agent-$INPUT_VERSION.tgz" package/package.json \
             | node -e 'const m = JSON.parse(require("fs").readFileSync(0, "utf8")); if (m.dependencies["@phren/cli"] !== process.env.INPUT_VERSION) { console.error("@phren/agent does not pin @phren/cli " + process.env.INPUT_VERSION); process.exit(1); }'
 
+      - name: Pack and verify the optional code package
+        id: pack-code
+        working-directory: packages/code
+        run: |
+          VERSION=$(node -p 'require("./package.json").version')
+          npm pack --pack-destination "$RUNNER_TEMP"
+          TARBALL="$RUNNER_TEMP/phren-code-$VERSION.tgz"
+          tar -xzOf "$TARBALL" package/package.json \
+            | node -e '
+              const fs = require("node:fs");
+              const npm = require("node:module").createRequire(fs.realpathSync(process.argv[1]));
+              const manifest = JSON.parse(fs.readFileSync(0, "utf8"));
+              const peer = manifest.peerDependencies?.["@phren/cli"];
+              if (manifest.name !== "@phren/code" || !npm("semver").satisfies(process.env.INPUT_VERSION, peer)) {
+                console.error("Packed @phren/code does not accept CLI " + process.env.INPUT_VERSION);
+                process.exit(1);
+              }
+            ' "$(command -v npm)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       # A second dispatch of a version that already shipped (0.3.59 was dispatched
       # twice on 2026-10-28) must not fail on npm's "cannot publish over" refusal
       # or tag the release twice. Each publish step asks npm first: the version
@@ -117,6 +137,13 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: bash scripts/release-publish.sh "@phren/agent" "$RUNNER_TEMP/phren-agent-$INPUT_VERSION.tgz"
+
+      - name: Publish code package
+        # Code has its own version. Later CLI releases reuse published code.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CODE_VERSION: ${{ steps.pack-code.outputs.version }}
+        run: bash scripts/release-publish.sh "@phren/code" "$RUNNER_TEMP/phren-code-$CODE_VERSION.tgz" "$CODE_VERSION"
 
       - name: Create git tag
         env:

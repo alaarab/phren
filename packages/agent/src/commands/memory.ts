@@ -6,11 +6,9 @@ import { renderMarkdown } from "../multi/markdown.js";
 import { buildIndex } from "@phren/cli/shared";
 import { searchKnowledgeRows, rankResults } from "@phren/cli/shared/retrieval";
 import { readFindings } from "@phren/cli/data/access";
-import { readTasks } from "@phren/cli/data/tasks";
 import { addFinding } from "@phren/cli/core/finding";
 
 const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
 const CYAN = "\x1b[36m";
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
@@ -28,7 +26,6 @@ export function memCommand(parts: string[], ctx: CommandContext): boolean | Prom
     process.stderr.write(`${DIM}Usage:
   /mem search <query>     Search phren memory
   /mem findings [project] Show recent findings
-  /mem tasks [project]    Show tasks
   /mem add <finding>      Quick-add a finding${RESET}\n`);
     return true;
   }
@@ -91,34 +88,6 @@ export function memCommand(parts: string[], ctx: CommandContext): boolean | Prom
     return true;
   }
 
-  if (sub === "tasks") {
-    const project = parts[2] || pCtx.project;
-    if (!project) {
-      process.stderr.write(`${DIM}Usage: /mem tasks <project>${RESET}\n`);
-      return true;
-    }
-    const result = readTasks(pCtx.phrenPath, project);
-    if (!result.ok) {
-      process.stderr.write(`${RED}${result.error}${RESET}\n`);
-      return true;
-    }
-    const sections: string[] = [];
-    for (const [section, items] of Object.entries(result.data!.items)) {
-      if (section === "Done") continue;
-      if (items.length === 0) continue;
-      const lines = items.map((t: { checked: boolean; line: string }) => {
-        const icon = t.checked ? `${GREEN}\u2713${RESET}` : `${DIM}\u25CB${RESET}`;
-        return `  ${icon} ${t.line}`;
-      });
-      sections.push(`${BOLD}${section}${RESET}\n${lines.join("\n")}`);
-    }
-    if (sections.length === 0) {
-      process.stderr.write(`${DIM}No active tasks for ${project}.${RESET}\n`);
-    } else {
-      process.stderr.write(sections.join("\n") + "\n");
-    }
-    return true;
-  }
 
   if (sub === "add") {
     const finding = parts.slice(2).join(" ").trim();

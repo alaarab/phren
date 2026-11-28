@@ -25,7 +25,6 @@ const READ_ROUTES = [
   "GET /v1/projects/my-app/memory HTTP/1.1",
   "GET /v1/projects/my-app/memory/files?path=src/a.ts HTTP/1.1",
   "GET /v1/projects/my-app/memory/search?q=boom HTTP/1.1",
-  "GET /v1/projects/my-app/tasks?branch=main HTTP/1.1",
 ];
 
 describe("conductor move gateway admission", () => {
@@ -52,14 +51,13 @@ describe("conductor move gateway admission", () => {
 });
 
 describe("gitboy-read scope admission", () => {
-  it("admits the four read routes and rebuilds each request", () => {
+  it("admits the read routes and rebuilds each request", () => {
     expect(forwarded("GET /v1/projects/my-app/memory HTTP/1.0", [])).toBe("GET /v1/projects/my-app/memory HTTP/1.1\r\nHost: phren.local\r\nConnection: close\r\n\r\n");
     expect(forwarded("GET /v1/projects/app/memory/files?path=src%2Fa.ts&path=docs/read+me.md HTTP/1.1", ["Host: evil", "Cookie: x"]))
       .toBe("GET /v1/projects/app/memory/files?path=src%2Fa.ts&path=docs%2Fread+me.md HTTP/1.1\r\nHost: phren.local\r\nConnection: close\r\n\r\n");
     expect(forwarded("GET /v1/projects/app/memory/search?q=TypeError%3A%20x%20is%20undefined%0Aat%20foo&limit=20 HTTP/1.1"))
       .toMatch(/^GET \/v1\/projects\/app\/memory\/search\?q=TypeError%3A\+x\+is\+undefined%0Aat\+foo&limit=20 HTTP/);
     expect(forwarded("GET /v1/projects/app/memory/search?q=boom HTTP/1.1")).toContain("?q=boom&limit=5 ");
-    expect(forwarded("GET /v1/projects/app/tasks?branch=fix%2F123-login HTTP/1.1")).toContain("?branch=fix%2F123-login ");
   });
 
   it("accepts 500 paths and refuses 501", () => {
@@ -101,20 +99,12 @@ describe("gitboy-read scope admission", () => {
     }
   });
 
-  it("admits only an exact-id task completion on the write scope", () => {
-    const body = JSON.stringify({ id: "bid:cccc0001" });
-    const line = "POST /v1/projects/app/tasks/complete HTTP/1.1";
-    const headers = ["Host: x", "Content-Type: application/json", `Content-Length: ${Buffer.byteLength(body)}`];
-    expect(admit(line, headers, body, "gitboy-write")).toMatchObject({ ok: true });
-    expect(admit(line, headers, body, "gitboy-read")).toMatchObject({ ok: false, status: 403 });
-    const loose = JSON.stringify({ id: "Fix login" });
-    expect(admit(line, ["Host: x", "Content-Type: application/json", `Content-Length: ${Buffer.byteLength(loose)}`], loose, "gitboy-write")).toMatchObject({ ok: false });
-  });
+
 
   it("refuses dispatch, store writes, sudo, files and other unregistered routes", () => {
     for (const line of [
       "POST /v1/dispatch HTTP/1.1", "POST /v1/store/file HTTP/1.1", "POST /v1/store/delete HTTP/1.1", "POST /v1/sudo/answer HTTP/1.1",
-      "POST /v1/prompt HTTP/1.1", "POST /v1/tasks/update HTTP/1.1", "GET /v1/files?path=/etc/passwd HTTP/1.1", "GET /v1/health HTTP/1.1",
+      "POST /v1/prompt HTTP/1.1", "POST /v1/issues/edit HTTP/1.1", "GET /v1/files?path=/etc/passwd HTTP/1.1", "GET /v1/health HTTP/1.1",
       "GET /v1/projects/files HTTP/1.1", "POST /v1/projects/add HTTP/1.1", "GET / HTTP/1.1", "POST /v1/notify HTTP/1.1",
       "POST /v1/projects/app/findings HTTP/1.1", "GET /v1/projects/app/findings HTTP/1.1",
     ]) expect(admit(line, ["Content-Length: 0"]), line).toMatchObject({ ok: false, status: 403 });
@@ -142,9 +132,6 @@ describe("gitboy-read scope admission", () => {
       `/v1/projects/app/memory/search?q=${"a".repeat(1001)}`, "/v1/projects/app/memory/search?q=a&q=b", "/v1/projects/app/memory/search?q=a&limit=21",
       "/v1/projects/app/memory/search?q=a&limit=0", "/v1/projects/app/memory/search?q=a&limit=05", "/v1/projects/app/memory/search?q=a&limit=1&limit=2",
       "/v1/projects/app/memory/search?q=a%1Bb", "/v1/projects/app/memory/search?q=a&project=other",
-      "/v1/projects/app/tasks", "/v1/projects/app/tasks?branch=", "/v1/projects/app/tasks?branch=-x", "/v1/projects/app/tasks?branch=a..b",
-      "/v1/projects/app/tasks?branch=a%20b", "/v1/projects/app/tasks?branch=main&branch=dev", "/v1/projects/app/tasks?branch=x.lock",
-      "/v1/projects/app/tasks?branch=main&q=x",
     ]) expect(admit(`GET ${target} HTTP/1.1`), target).toMatchObject({ ok: false, status: 400 });
     // A raw space ends the request target, so the request line itself is malformed.
     expect(admit("GET /v1/projects/app/memory/files?path=a b HTTP/1.1")).toMatchObject({ ok: false, status: 400 });

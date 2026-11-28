@@ -204,7 +204,7 @@ describe("handleConsolidationStatus", () => {
 });
 
 describe("handleSessionContext", () => {
-  it("prints the active session's scope, counts and prior summary", async () => {
+  it("prints the active session's scope, findings count and prior summary", async () => {
     fs.mkdirSync(path.join(phrenPath, ".runtime", "sessions"), { recursive: true });
     fs.writeFileSync(
       path.join(phrenPath, ".runtime", "sessions", "session-test.json"),
@@ -214,7 +214,6 @@ describe("handleSessionContext", () => {
         agentScope: "worker",
         startedAt: "2026-03-01T10:00:00.000Z",
         findingsAdded: 3,
-        tasksCompleted: 2,
         summary: "Prior work",
       }),
     );
@@ -227,7 +226,6 @@ describe("handleSessionContext", () => {
     expect(out).toContain("Agent scope:     worker");
     expect(out).toContain("Started:         2026-03-01 10:00");
     expect(out).toContain("Findings added:  3");
-    expect(out).toContain("Tasks completed: 2");
     expect(out).toContain("Prior summary:   Prior work");
   });
 });

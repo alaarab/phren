@@ -31,8 +31,8 @@ const STALE = "dddddddd-4444-4444-8444-444444444444";
 /** A full stored row: everything a Hook keeps, most of which the phone never needs. */
 const fullRow = (overrides: Json = {}): Json => ({
   id, kind: "manual", title: "OVH US VPS-2 is in stock", state: "open", createdAt: AT, updatedAt: AT,
-  project: "phren", command: "ssh ovh", task: "bid:1234abcd", pr: "https://github.com/a/b/pull/1", key: "ovh",
-  source: "task-stale:phren:bid:1234abcd", live: true, dispatch: "22222222-2222-4222-8222-222222222222",
+  project: "phren", command: "ssh ovh", pr: "https://github.com/a/b/pull/1", key: "ovh",
+  source: "housekeeping:free-disk", live: true, dispatch: "22222222-2222-4222-8222-222222222222",
   actionId: "question-1", inboxComputer: "elsewhere", ...overrides,
 });
 /** What the phone may see. */
@@ -55,11 +55,11 @@ describe("owner inbox compact reads", () => {
   it("keeps a live row from an upgraded peer's compact answer and dedupes it against a legacy peer", async () => {
     // The upgraded peer (this build) filters its own rows and answers compact.
     const forwarded = fullRow({ id: ASK, kind: "needs-you", title: "Approve the deploy?", actionId: "approval-7", target, computer: "Worker" });
-    const stale = fullRow({ id: STALE, kind: "blocked", title: "Claim the stale task", source: "task-stale:phren:bid:c2cc33d0", actionId: undefined, target: undefined });
+    const stale = fullRow({ id: STALE, kind: "blocked", title: "Review disk usage", source: "housekeeping:free-disk", actionId: undefined, target: undefined });
     const desk = await upgradedPeer([forwarded, stale]);
-    expect(desk.items).toEqual([expect.objectContaining({ actionId: "approval-7", live: true }), expect.objectContaining({ source: "task-stale:phren:bid:c2cc33d0", live: true })]);
+    expect(desk.items).toEqual([expect.objectContaining({ actionId: "approval-7", live: true }), expect.objectContaining({ source: "housekeeping:free-disk", live: true })]);
     state.answers.set(`Desk\n${peerURL("&reconcile=1")}`, desk);
-    // A legacy peer ignores both flags and answers in full, describing the same ask and the same unclaimed task.
+    // A legacy peer ignores both flags and answers in full, describing the same approval and the other computer’s housekeeping item.
     state.answers.set(`Studio\n${peerURL("&reconcile=1")}`, {
       ok: true, items: [fullRow({ id: NEW, kind: "blocked", title: "Only on Studio", source: "pane:Studio", actionId: undefined, target: { ...target, pane: "w1:p2" } }), forwarded, stale],
     });
@@ -68,16 +68,15 @@ describe("owner inbox compact reads", () => {
     const items = view.items as Json[];
     expect(view.unreachable).toEqual([]);
     // The upgraded peer's blocked row would have vanished while its peer looked reachable.
-    expect(items.some(item => item.title === "Claim the stale task")).toBe(true);
-    expect(items.find(item => item.title === "Claim the stale task")).toMatchObject({ id: STALE, kind: "blocked" });
-    // The forwarded approval and the unclaimed stale task are described by both Hooks once each.
+    expect(items.some(item => item.title === "Review disk usage")).toBe(true);
+    expect(items.find(item => item.title === "Review disk usage")).toMatchObject({ id: STALE, kind: "blocked" });
+    // The forwarded approval is described by both Hooks once.
     expect(items.filter(item => item.title === "Approve the deploy?")).toHaveLength(1);
-    expect(items.filter(item => item.title === "Claim the stale task")).toHaveLength(1);
     expect(items.some(item => item.title === "Only on Studio")).toBe(true);
     // What crosses the peer exchange is stripped before the phone sees it.
     for (const item of items) expect(Object.keys(item).every(key => COMPACT.includes(key))).toBe(true);
     for (const key of RECONCILE) expect(items.some(item => key in item)).toBe(false);
-    for (const key of ["command", "paste", "task", "pr", "key", "dispatch", "resolvedAt", "resolution"]) expect(items.some(item => key in item)).toBe(false);
+    for (const key of ["command", "paste", "pr", "key", "dispatch", "resolvedAt", "resolution"]) expect(items.some(item => key in item)).toBe(false);
     // Every peer read asked for the compact form, the aggregation keys, and the phone's six-second deadline.
     expect(state.reads.every(read => read.route.includes("compact=1") && read.route.includes("reconcile=1"))).toBe(true);
     expect(state.reads.every(read => read.timeout === COMPACT_PEER_TIMEOUT_MS)).toBe(true);
@@ -88,7 +87,7 @@ describe("owner inbox compact reads", () => {
     const view = await ownerInboxView(inbox([fullRow()]), { action: "list" });
     const items = view.items as Json[];
     expect(items).toHaveLength(2);
-    expect(items[0]).toMatchObject({ command: "ssh ovh", source: "task-stale:phren:bid:1234abcd", live: true, dispatch: "22222222-2222-4222-8222-222222222222" });
+    expect(items[0]).toMatchObject({ command: "ssh ovh", source: "housekeeping:free-disk", live: true, dispatch: "22222222-2222-4222-8222-222222222222" });
     expect(items[0].paste).toContain("phren owner-inbox resolve");
     expect(state.reads.every(read => !read.route.includes("compact") && !read.route.includes("reconcile"))).toBe(true);
     expect(state.reads.every(read => read.timeout === undefined)).toBe(true);
@@ -159,7 +158,7 @@ describe("owner inbox compact reads", () => {
     expect(RECONCILE.every(key => !(key in (plain.items as Json[])[0]))).toBe(true);
     const peer = await ownerInboxView(inbox([row]), { action: "list" }, true, true, true);
     expect(peer.items).toEqual([compactInboxItem(row, true)]);
-    expect((peer.items as Json[])[0]).toMatchObject({ live: true, source: "task-stale:phren:bid:1234abcd", actionId: "question-1" });
+    expect((peer.items as Json[])[0]).toMatchObject({ live: true, source: "housekeeping:free-disk", actionId: "question-1" });
   });
 
   it("compacts a single named peer read too", async () => {

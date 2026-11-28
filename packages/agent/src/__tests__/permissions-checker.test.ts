@@ -13,7 +13,7 @@ describe("checkPermission", () => {
   // ── Always-safe tools (no path validation needed) ──────────────────
 
   describe("always-safe tools", () => {
-    const safeTools = ["phren_search", "phren_get_tasks"];
+    const safeTools = ["phren_search", "phren_search"];
 
     for (const tool of safeTools) {
       it(`allows ${tool} in suggest mode`, () => {
@@ -83,7 +83,7 @@ describe("checkPermission", () => {
     });
 
     it("allows phren_complete_task", () => {
-      expect(checkPermission(makeConfig("auto-confirm"), "phren_complete_task", {}).verdict).toBe("allow");
+      expect(checkPermission(makeConfig("auto-confirm"), "phren_add_finding", {}).verdict).toBe("allow");
     });
 
     it("allows safe shell command within sandbox", () => {

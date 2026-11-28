@@ -48,8 +48,8 @@ selection is not labeled assumed. `PHREN_QUIET=1` suppresses the warning.
 
 | Variable | Values | Default | Effect |
 |----------|--------|---------|--------|
-| `PHREN_MCP_PROFILE` | `core`, `full` | `core` (or whatever `phren config mcp-profile` set) | `core` exposes ten tools with everything else behind `phren_admin`; `full` exposes every tool by name. See `api-reference.md`. |
-| `PHREN_CLANKER` | `on`, `off` | what `phren config clanker` set; on for installs made since clanker mode shipped, off otherwise | Clanker mode: the prompt hook, `search_knowledge`, `get_tasks` and `get_findings` return id, title, keyword and score rows, and `get_memory_detail` fetches the text by id. `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE` is read as an alias when this is unset. The VS Code extension sets it to `off` for its own server. |
+| `PHREN_MCP_PROFILE` | `core`, `full` | `core` (or whatever `phren config mcp-profile` set) | `core` exposes twelve tools with everything else behind `phren_admin`; `full` exposes every tool by name. See `api-reference.md`. |
+| `PHREN_CLANKER` | `on`, `off` | what `phren config clanker` set; on for installs made since clanker mode shipped, off otherwise | Clanker mode: the prompt hook, `search_knowledge` and `get_findings` return id, title, keyword and score rows, and `get_memory_detail` fetches the text by id. `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE` is read as an alias when this is unset. The VS Code extension sets it to `off` for its own server. |
 | `PHREN_CITATION_FRESHNESS` | `off` | enabled | Disables gitboy citation freshness checks and annotations. The prompt hook always uses cached checks only. |
 
 ## Core
@@ -80,9 +80,8 @@ These control how much context the UserPromptSubmit hook injects into each promp
 | `PHREN_CONTEXT_SNIPPET_LINES` | integer | `6` | Maximum lines per injected snippet. |
 | `PHREN_CONTEXT_SNIPPET_CHARS` | integer | `520` | Maximum characters per injected snippet. |
 | `PHREN_MAX_INJECT_TOKENS` | integer | `2000` | Maximum tokens injected per prompt (overrides token budget). Range: 200-20000. |
-| `PHREN_TASK_PRIORITY` | string | `high,medium` | Comma-separated list of task priorities to inject. Set to `high` to inject only high-priority items. |
-| `PHREN_PROACTIVITY` | `high`/`medium`/`low` | `high` | Auto-capture level for findings and tasks. Configured with `phren config proactivity <level>`; overrides the stored value. |
-| `PHREN_PROACTIVITY_FINDINGS`, `PHREN_PROACTIVITY_TASKS` | `high`/`medium`/`low` | base level | Findings-only and task-only overrides. Configured with `phren config proactivity <level> --scope findings|tasks` (or `proactivity.findings` / `proactivity.tasks`), per project with `--project`; over MCP, `set_config` domain `proactivity` with `scope`. Stored as `proactivityFindings` / `proactivityTask` in `.config/install-preferences.json`. |
+| `PHREN_PROACTIVITY` | `high`/`medium`/`low` | `high` | Auto-capture level for findings. Configured with `phren config proactivity <level>`; overrides the stored value. |
+| `PHREN_PROACTIVITY_FINDINGS` | `high`/`medium`/`low` | base level | Finding-only override. Set it with `phren config proactivity <level> --scope findings`, optionally with `--project`, or use the MCP `set_config` proactivity domain with scope `findings`. The global preference is `proactivityFindings` in `.config/install-preferences.json`. |
 
 ## Memory Governance
 
@@ -93,7 +92,7 @@ These control how much context the UserPromptSubmit hook injects into each promp
 | `PHREN_MEMORY_EXTRACT_WINDOW_DAYS` | integer | `30` | How far back (in days) the `extract-memories` command looks in git and GitHub history. |
 | `PHREN_FINDINGS_CAP` | integer | `20` | Maximum findings in FINDINGS.md before auto-archival moves old entries to `reference/`. |
 
-Open-task, review-queue and `.runtime` budgets have no environment variables;
+Review-queue and `.runtime` budgets have no environment variables;
 they live in the retention policy (`phren config policy set --budgets.<name>=<value>`,
 see [Governance](governance.md#budgets)).
 
@@ -222,15 +221,6 @@ may open on the phone, read-only; on WSL the mounted Windows drives
 (`/mnt/<letter>`) are included without it. It is a file rather than an
 environment setting because the Hook service doesn't see shell env (see
 [API reference](api-reference.md), `GET /v1/files/resolve`).
-`PHREN_TASK_WORK=off` stops the Hook's task work sweep (linking pull requests
-that name a task, closing a task whose linked pull request merged or linked issue
-closed) and the recording of dispatch workers on tasks; see
-[task work links](task-responsibility.md#task-work-links).
-`PHREN_TASK_STOP_CHECK=off` stops the Stop hook from asking a session to settle
-the tasks it claimed or moved to Active; `PHREN_TASK_STALE=off` stops the owner
-inbox rows for Active tasks untouched for a day and the scheduled dream's move of
-them back to the Queue; `PHREN_TASK_AUDIT=off` stops the Hook's weekly task
-audit. See [settling tasks](task-responsibility.md#settling-tasks).
 `PHREN_DREAMING=off` stops the Hook's dreaming ticker, whatever each project's
 `dreaming` config says; `PHREN_DREAM_COMMAND` names the `phren` binary the
 ticker runs `phren dream run --scheduled` with (default: `phren` on the Hook's

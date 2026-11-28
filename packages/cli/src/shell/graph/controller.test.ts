@@ -18,18 +18,16 @@ function fixture(): GraphPayload {
   const stale = new Date(Date.now() - 200 * DAY).toISOString();
   return {
     nodes: [
-      { id: "harbor", label: "harbor", group: "project", project: "harbor", findingCount: 2, taskCount: 1 },
-      { id: "api", label: "api", group: "project", project: "api", findingCount: 1, taskCount: 0 },
+      { id: "harbor", label: "harbor", group: "project", project: "harbor", findingCount: 2 },
+      { id: "api", label: "api", group: "project", project: "api", findingCount: 1 },
       { id: "f1", label: "Retry uses jitter", fullLabel: "Retry uses jitter for backoff", group: "topic:architecture", project: "harbor", topicSlug: "architecture", scoreKey: "k1" },
       { id: "f2", label: "Old retry note", group: "topic:debugging", project: "harbor", topicSlug: "debugging", scoreKey: "k2" },
       { id: "f3", label: "Rate limit is 100/s", group: "topic:api", project: "api", topicSlug: "api" },
-      { id: "t1", label: "Ship retry docs", group: "task-active", project: "harbor", section: "Active" },
       { id: "e1", label: "PolicyRetry", group: "entity", entityType: "class", refCount: 3, refDocs: [{ doc: "harbor/FINDINGS.md", project: "harbor" }, { doc: "api/FINDINGS.md", project: "api" }] },
     ],
     links: [
       { source: "harbor", target: "f1" },
       { source: "harbor", target: "f2" },
-      { source: "harbor", target: "t1" },
       { source: "api", target: "f3" },
       { source: "e1", target: "harbor" },
       { source: "e1", target: "api" },
@@ -63,7 +61,7 @@ describe("data loading", () => {
     expect(controller.status).toBe("idle");
     await controller.ensureData();
     expect(controller.status).toBe("ready");
-    expect(controller.visible.nodes.length).toBe(7);
+    expect(controller.visible.nodes.length).toBe(6);
     await controller.ensureData();
     expect(builder).toHaveBeenCalledTimes(1);
   });
@@ -179,8 +177,8 @@ describe("keys", () => {
     expect(h.inputs).toEqual(["graph-search:"]);
     const best = c.applySearch("retry");
     expect(best?.id).toBe("f1"); // label prefix beats substring
-    expect(c.search.results.map((n) => n.id)).toEqual(expect.arrayContaining(["f1", "t1", "e1", "f2"]));
-    expect(c.visible.nodes.length).toBe(7);
+    expect(c.search.results.map((n) => n.id)).toEqual(expect.arrayContaining(["f1", "e1", "f2"]));
+    expect(c.visible.nodes.length).toBe(6);
     c.handleKey("n", h);
     expect(c.search.index).toBe(1);
     c.handleKey("N", h);
@@ -209,7 +207,7 @@ describe("keys", () => {
     expect(c.focusedProject).toBe("harbor");
     c.handleKey("]", h);
     expect(c.focusedProject).toBeNull();
-    expect(c.visible.nodes.length).toBe(7);
+    expect(c.visible.nodes.length).toBe(6);
   });
 
   it("Enter selects the centre node, then toggles focus on a project", async () => {

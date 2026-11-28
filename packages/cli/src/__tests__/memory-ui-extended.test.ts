@@ -205,7 +205,7 @@ describe("web-ui graph API", () => {
     const topicGroups = [...groups].filter((g: any) => typeof g === "string" && g.startsWith("topic:"));
     expect(topicGroups.length).toBeGreaterThan(0);
     // All non-structural groups should be topic-prefixed
-    const nonStructural = [...groups].filter((g: any) => g !== "project" && g !== "entity" && g !== "reference" && !g.startsWith("task-"));
+    const nonStructural = [...groups].filter((g: any) => g !== "project" && g !== "entity" && g !== "reference");
     expect(nonStructural.every((g: any) => g.startsWith("topic:"))).toBe(true);
   });
 
@@ -227,7 +227,6 @@ describe("web-ui graph API", () => {
     const demoProject = data.nodes.find((n: any) => n.id === "demo");
     expect(typeof demoProject?.findingCount).toBe("number");
     expect(demoProject?.findingCount).toBe(3);
-    expect(typeof demoProject?.taskCount).toBe("number");
     const demoFinding = data.nodes.find((n: any) => n.project === "demo" && String(n.group).startsWith("topic:"));
     expect(demoFinding?.date).toBe("2026-03-01");
   });

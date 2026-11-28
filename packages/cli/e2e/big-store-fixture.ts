@@ -90,27 +90,6 @@ function referenceDocs(project: string): Array<{ file: string; body: string }> {
   ];
 }
 
-function tasksFor(project: string): string {
-  return [
-    `# ${project} tasks`,
-    "",
-    "## Active",
-    "",
-    `- [ ] Harden ${project} rate limiter under burst load`,
-    `- [ ] Add tracing spans to ${project} write path`,
-    "",
-    "## Queue",
-    "",
-    `- [ ] Migrate ${project} to cursor pagination`,
-    `- [ ] Backfill ${project} idempotency keys`,
-    `- [ ] Tune ${project} connection pool size`,
-    "",
-    "## Done",
-    "",
-    `- [x] Roll out ${project} circuit breaker`,
-    "",
-  ].join("\n");
-}
 
 /** Write a large, cross-linked store under `phrenDir` and register the projects in the work profile. */
 export function seedBigStore(phrenDir: string, profile = "work"): void {
@@ -128,7 +107,6 @@ export function seedBigStore(phrenDir: string, profile = "work"): void {
     fs.writeFileSync(path.join(dir, "summary.md"), `# ${project}\n\n${project} is a core service in the platform. It owns its data and exposes HTTP/gRPC APIs.\n`);
     fs.writeFileSync(path.join(dir, "AGENTS.md"), `# ${project}\n\nConventions and entry points for working in ${project}.\n`);
     fs.writeFileSync(path.join(dir, "FINDINGS.md"), findingsFor(project, others));
-    fs.writeFileSync(path.join(dir, "tasks.md"), tasksFor(project));
     for (const ref of referenceDocs(project)) {
       const refPath = path.join(dir, "reference", ref.file);
       fs.mkdirSync(path.dirname(refPath), { recursive: true });

@@ -30,7 +30,6 @@ import { applyStarterTemplateUpdates, applyTemplate, getHookEntrypointCheck, rep
 import { VERSION } from "./init/shared.js";
 import { collectNativeMemoryFiles } from "./shared.js";
 import { registeredStoreIdentity } from "./store-registry.js";
-import { taskFormatStatus } from "./data/task-format.js";
 
 describe("mcp mode configuration", () => {
   let tmpRoot: string;
@@ -576,19 +575,7 @@ describe("runInit walkthrough integration", () => {
     expect(insideWorkTree).toBe("true");
   });
 
-  it("fresh init starts with task metadata on, and re-running init leaves an existing store's choice alone", async () => {
-    const phrenPath = path.join(tmpRoot, "phren-task-format");
-    process.env.PHREN_PATH = phrenPath;
 
-    await suppressOutput(() => runInit({ yes: true }));
-
-    expect(registeredStoreIdentity(phrenPath)).toMatch(/^[a-f0-9]{8}$/);
-    expect(taskFormatStatus(phrenPath).enabled).toBe(true);
-
-    fs.unlinkSync(path.join(phrenPath, ".config", "task-format.json"));
-    await suppressOutput(() => runInit({ yes: true }));
-    expect(taskFormatStatus(phrenPath).enabled).toBe(false);
-  });
 
   it("fresh init writes detached ownership as the clean-install default", async () => {
     const phrenPath = path.join(tmpRoot, "phren-clean-defaults");
@@ -801,7 +788,7 @@ describe("runInit walkthrough integration", () => {
     expect(fs.readFileSync(path.join(repoRoot, ".env"), "utf8")).toContain(`PHREN_PATH=${phrenPath}`);
   });
 
-  it("persists onboarding defaults for ownership, proactivity, and task mode", async () => {
+  it("persists onboarding defaults for ownership, proactivity", async () => {
     const phrenPath = path.join(tmpRoot, "phren-onboarding-defaults");
     process.env.PHREN_PATH = phrenPath;
 
@@ -809,8 +796,6 @@ describe("runInit walkthrough integration", () => {
       yes: true,
       projectOwnershipDefault: "detached",
       findingsProactivity: "medium",
-      taskProactivity: "low",
-      taskMode: "suggest",
     }));
 
     const installPrefs = JSON.parse(fs.readFileSync(path.join(phrenPath, ".runtime", "install-preferences.json"), "utf8"));
@@ -819,10 +804,7 @@ describe("runInit walkthrough integration", () => {
 
     expect(installPrefs.projectOwnershipDefault).toBe("detached");
     expect(installPrefs.proactivityFindings).toBe("medium");
-    expect(installPrefs.proactivityTask).toBe("low");
     expect(governancePrefs.proactivityFindings).toBe("medium");
-    expect(governancePrefs.proactivityTask).toBe("low");
-    expect(workflowPolicy.taskMode).toBe("suggest");
   });
 
   it("honors a declined current-project enrollment from onboarding", async () => {

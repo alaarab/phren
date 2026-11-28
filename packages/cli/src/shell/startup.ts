@@ -1,6 +1,6 @@
 /**
- * Deep links into the shell: `phren shell --view tasks --here` opens straight
- * on a project's task list instead of the Projects home screen.
+ * Deep links into the shell: `phren shell --view findings --here` opens straight
+ * on a project's findings instead of the Projects home screen.
  *
  * This exists so an outside launcher — the Herdr plugin, a tmux binding, an
  * editor task — can put the user where they meant to be in one keypress.
@@ -30,10 +30,6 @@ export interface ShellStartupArgs {
 const VIEW_ALIASES: Record<string, ShellView> = {
   projects: "Projects",
   project: "Projects",
-  tasks: "Tasks",
-  task: "Tasks",
-  todo: "Tasks",
-  todos: "Tasks",
   findings: "Findings",
   finding: "Findings",
   memory: "Findings",
@@ -63,7 +59,7 @@ export function normalizeShellView(raw: string | undefined): ShellView | undefin
 export const SHELL_VIEW_ALIASES = Object.keys(VIEW_ALIASES);
 
 /** Views that render nothing useful until a project is in context. */
-const PROJECT_SCOPED_VIEWS = new Set<ShellView>(["Tasks", "Findings", "Review Queue", "Skills"]);
+const PROJECT_SCOPED_VIEWS = new Set<ShellView>(["Findings", "Review Queue", "Skills"]);
 
 /** Parse `--view`/`--project`/`--here`, in both `--flag value` and `--flag=value` form. */
 export function parseShellArgs(args: string[]): ShellStartupArgs {
@@ -74,7 +70,7 @@ export function parseShellArgs(args: string[]): ShellStartupArgs {
     const eq = arg.indexOf("=");
     const flag = eq === -1 ? arg : arg.slice(0, eq);
     const inline = eq === -1 ? undefined : arg.slice(eq + 1);
-    // `--view tasks` consumes the next argv entry; `--view=tasks` does not.
+    // `--view findings` consumes the next argv entry; `--view=findings` does not.
     const take = (): string | undefined => (inline !== undefined ? inline : args[++i]);
 
     switch (flag) {

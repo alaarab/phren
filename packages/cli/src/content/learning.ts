@@ -26,10 +26,6 @@ import { isDuplicateFinding, scanForSecrets, normalizeObservationTags, resolveCo
 import { validateFindingsFormat, validateFinding } from "./validate.js";
 import { countActiveFindings, autoArchiveToReference } from "./archive.js";
 import {
-  resolveAutoFindingTaskItem,
-  resolveFindingTaskReference,
-} from "../finding/context.js";
-import {
   buildLifecycleComments,
   extractFindingType,
   parseFindingLifecycle,
@@ -185,7 +181,6 @@ function buildFindingCitation(
     symbol: input?.symbol,
     symbol_unresolved: input?.symbol_unresolved ? true : undefined,
     supersedes: input?.supersedes,
-    task_item: input?.task_item,
   };
   if (repo.remote && repo.root) {
     let file: string | undefined;
@@ -219,30 +214,6 @@ function buildFindingCitation(
 
 function buildFindingScope(scope?: string): string | undefined {
   return normalizeMemoryScope(scope) || undefined;
-}
-
-function resolveFindingCitationInput(
-  phrenPath: string,
-  project: string,
-  citationInput?: Partial<FindingCitation>,
-): PhrenResult<Partial<FindingCitation> | undefined> {
-  const resolved = citationInput ? { ...citationInput } : {};
-  if (citationInput?.task_item) {
-    const taskResolution = resolveFindingTaskReference(phrenPath, project, citationInput.task_item);
-    if (taskResolution.error) {
-      return phrenErr(taskResolution.error, PhrenError.VALIDATION_ERROR);
-    }
-    if (taskResolution.stableId) {
-      resolved.task_item = taskResolution.stableId;
-    }
-  } else {
-    const taskItem = resolveAutoFindingTaskItem(phrenPath, project);
-    if (taskItem) {
-      resolved.task_item = taskItem;
-    }
-  }
-
-  return phrenOk(Object.keys(resolved).length > 0 ? resolved : undefined);
 }
 
 /**
@@ -445,9 +416,7 @@ export function addFindingToFile(
   // Secret/PII scan — reject before anything else (before existence check, before lock)
   const nowIso = (opts?.now ?? new Date()).toISOString();
   const today = nowIso.slice(0, 10);
-  const resolvedCitationInputResult = resolveFindingCitationInput(phrenPath, project, citationInput);
-  if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
-  const resolvedCitationInput = resolvedCitationInputResult.data;
+  const resolvedCitationInput = citationInput;
   const scope = buildFindingScope(opts?.scope);
   const citationRepo = resolveCitationRepo(phrenPath, project, resolvedCitationInput);
   const supersedesText = resolvedCitationInput?.supersedes;
@@ -638,11 +607,8 @@ export function addFindingsToFile(
 
   const nowIso = new Date().toISOString();
   const today = nowIso.slice(0, 10);
-  const resolvedCitationInputResult = resolveFindingCitationInput(phrenPath, project);
-  if (!resolvedCitationInputResult.ok) return resolvedCitationInputResult;
-  const resolvedCitationInput = resolvedCitationInputResult.data;
   const scope = buildFindingScope(opts?.scope);
-  const citationRepo = resolveCitationRepo(phrenPath, project, resolvedCitationInput);
+  const citationRepo = resolveCitationRepo(phrenPath, project);
 
   const added: string[] = [];
   const skipped: string[] = [];
@@ -664,7 +630,7 @@ export function addFindingsToFile(
         }
         const prepared = prepareFinding({
           finding: learning, project, fullHistory: content, extraAnnotations,
-          citationInput: resolvedCitationInput, scope, provenance: opts?.provenance, nowIso, citationRepo, phrenPath,
+          scope, provenance: opts?.provenance, nowIso, citationRepo, phrenPath,
         });
         if (prepared.status === "rejected") {
           rejected.push({ text: learning, reason: prepared.reason });
@@ -700,7 +666,7 @@ export function addFindingsToFile(
       }
       const prepared = prepareFinding({
         finding: learning, project, fullHistory: content, extraAnnotations,
-        citationInput: resolvedCitationInput, scope, nowIso, citationRepo, phrenPath,
+        scope, nowIso, citationRepo, phrenPath,
       });
       if (prepared.status === "rejected") {
         rejected.push({ text: learning, reason: prepared.reason });

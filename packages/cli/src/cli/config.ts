@@ -16,7 +16,6 @@ import {
   handleIndexPolicy,
   handleRetentionPolicy,
   handleWorkflowPolicy,
-  handleConfigTaskMode,
   handleConfigFindingSensitivity,
 } from "./config-policy.js";
 import { handleConfigLlm } from "./config-llm.js";
@@ -149,12 +148,9 @@ export async function handleConfig(args: string[]) {
       return handleConfigPullInterval(rest);
     case "proactivity":
     case "proactivity.findings":
-    case "proactivity.tasks":
       return handleConfigProactivity(sub, rest);
     case "project-ownership":
       return handleConfigProjectOwnership(rest);
-    case "task-mode":
-      return handleConfigTaskMode(rest);
     case "finding-sensitivity":
       return handleConfigFindingSensitivity(rest);
     case "access":
@@ -174,18 +170,14 @@ Subcommands:
                                         Full merged config grouped by domain, with the
                                         source (default/global/project) of every value
   phren config policy [get|set ...]     Memory retention, TTL, confidence, decay
-  phren config workflow [get|set ...]   Risky-memory thresholds, task automation mode
+  phren config workflow [get|set ...]   Risky-memory thresholds
   phren config index [get|set ...]      Indexer include/exclude globs
-  phren config proactivity [level] [--scope base|findings|tasks]
+  phren config proactivity [level] [--scope base|findings]
                                         Auto-capture level (high|medium|low); --scope sets
-                                        the findings-only or task-only override instead
+                                        the findings-only override instead
   phren config proactivity.findings [level]
                                         Findings-specific auto-capture level override
-  phren config proactivity.tasks [level]
-                                        Task-specific auto-capture level override
                                         (all take --project <name> for one project)
-  phren config task-mode [get|set <mode>]
-                                        Task automation mode (off|manual|suggest|auto)
   phren config finding-sensitivity [get|set <level>]
                                         Finding capture level (minimal|conservative|balanced|aggressive)
   phren config access [--project <name>] [get|set --admins=...]
@@ -278,7 +270,7 @@ function handleConfigMcpProfile(args: string[]) {
     updateInstallPreferences(phrenPath, () => ({ mcpProfile: want }));
     console.log(`MCP profile set to ${want}. Restart your MCP clients (Claude Code, Cursor, …) to pick it up.`);
     if (want === "core") console.log("Agents see 10 tools; everything else is reachable through phren_admin.");
-    else console.log("Agents see every tool by name, plus the revise_finding / manage_task / session composites.");
+    else console.log("Agents see every tool by name, plus the revise_finding / session composites.");
     return;
   }
   if (want) { console.error(`Unknown profile "${args[0]}". Use core or full.`); process.exitCode = 1; return; }
@@ -286,7 +278,7 @@ function handleConfigMcpProfile(args: string[]) {
   const source = process.env.PHREN_MCP_PROFILE ? "PHREN_MCP_PROFILE" : (readInstallPreferences(phrenPath).mcpProfile ? "install preferences" : "default");
   console.log(`MCP profile: ${current} (${source})`);
   console.log(current === "core"
-    ? "10 tools: search_knowledge, get_memory_detail, get_project_summary, add_finding, revise_finding, get_tasks, add_task, manage_task, session, phren_admin."
+    ? "9 tools: search_knowledge, get_memory_detail, get_project_summary, add_finding, revise_finding, session, phren_admin, list_issues, get_issue."
     : "Every tool by name. `phren config mcp-profile core` for the compact surface.");
 }
 
@@ -304,7 +296,7 @@ function handleConfigClanker(args: string[]) {
   const { on, source } = resolveClanker(phrenPath);
   console.log(`Clanker mode: ${on ? "on" : "off"} (${source})`);
   console.log(on
-    ? "The prompt hook, search_knowledge, get_tasks and get_findings return id, title, keyword and score rows; get_memory_detail fetches an entry by id."
+    ? "The prompt hook, search_knowledge and get_findings return id, title, keyword and score rows; get_memory_detail fetches an entry by id."
     : "The prompt hook and tools return text snippets. `phren config clanker on` for compact rows.");
 }
 

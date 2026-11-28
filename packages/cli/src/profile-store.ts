@@ -14,14 +14,13 @@ import {
 } from "./shared.js";
 import { defaultMachineName, getMachineName } from "./machine-identity.js";
 import { errorMessage, isValidProjectName } from "./utils.js";
-import { FINDINGS_FILENAME, TASK_FILE_ALIASES } from "./filenames.js";
+import { FINDINGS_FILENAME } from "./filenames.js";
 import { withSafeLock } from "./shared/data-utils.js";
 import { logger } from "./logger.js";
 import type { RetentionPolicyPatch } from "./governance/policy.js";
 import {
   VALID_FINDING_SENSITIVITY,
   VALID_PROACTIVITY_LEVELS,
-  VALID_TASK_MODES,
   VALID_RISKY_SECTIONS,
 } from "./governance/policy-constants.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "./store-registry.js";
@@ -30,8 +29,6 @@ export interface ProfilePolicyDefaults {
   findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";
   proactivity?: "high" | "medium" | "low";
   proactivityFindings?: "high" | "medium" | "low";
-  proactivityTask?: "high" | "medium" | "low";
-  taskMode?: "off" | "manual" | "suggest" | "auto";
   retentionPolicy?: RetentionPolicyPatch;
   workflowPolicy?: {
     lowConfidenceThreshold?: number;
@@ -226,10 +223,6 @@ function parseProfilePolicyDefaults(raw: unknown): ProfilePolicyDefaults | undef
   if (pr) result.proactivity = pr;
   const prf = pickEnumVal(data.proactivityFindings, VALID_PROACTIVITY_LEVELS);
   if (prf) result.proactivityFindings = prf;
-  const prt = pickEnumVal(data.proactivityTask, VALID_PROACTIVITY_LEVELS);
-  if (prt) result.proactivityTask = prt;
-  const tm = pickEnumVal(data.taskMode, VALID_TASK_MODES);
-  if (tm) result.taskMode = tm;
 
   if (retentionRaw) {
     const ret: ProfilePolicyDefaults["retentionPolicy"] = {};
@@ -390,8 +383,6 @@ function buildProjectCard(dir: string): ProjectCard {
     .find((line) => line && !line.startsWith("#")) || "";
   const docs = ["AGENTS.md", FINDINGS_FILENAME, "summary.md", "review.md"]
     .filter((file) => fs.existsSync(path.join(dir, file)));
-  const taskFile = TASK_FILE_ALIASES.find((file) => fs.existsSync(path.join(dir, file)));
-  if (taskFile) docs.push(taskFile);
   return { name, summary, docs };
 }
 

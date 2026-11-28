@@ -29,9 +29,8 @@ export const CORE_TOOLS: readonly string[] = [
   "get_project_summary",
   "add_finding",
   "revise_finding",
-  "get_tasks",
-  "add_task",
-  "manage_task",
+  "list_issues",
+  "get_issue",
   "session",
   "phren_admin",
 ];
@@ -79,18 +78,6 @@ const COMPOSITES: Record<string, Composite> = {
       resolve_contradiction: "resolve_contradiction",
       pin: "pin_memory",
       feedback: "memory_feedback",
-    },
-  },
-  manage_task: {
-    title: "◆ phren · manage task",
-    summary: "Change an existing task: complete, update, remove, pin, claim for this computer, or tidy the done list. Pass `action` plus that action's own parameters.",
-    actions: {
-      complete: "complete_task",
-      claim: "claim_task",
-      update: "update_task",
-      remove: "remove_task",
-      pin: "pin_task",
-      tidy: "tidy_done_tasks",
     },
   },
   session: {

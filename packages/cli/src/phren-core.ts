@@ -169,7 +169,7 @@ export const KNOWN_OBSERVATION_TAGS: Set<string> = new Set(FINDING_TAGS);
  * shared/index.ts and shared/retrieval.ts together with this file, since all
  * three must agree on the type string.
  */
-export const DOC_TYPES = ["claude", "findings", "notes", "reference", "skills", "summary", "task", "changelog", "canonical", "review-queue", "skill", "other"] as const;
+export const DOC_TYPES = ["claude", "findings", "notes", "reference", "skills", "summary", "changelog", "canonical", "review-queue", "skill", "other"] as const;
 export type DocType = (typeof DOC_TYPES)[number];
 
 // ── Cache eviction helper ────────────────────────────────────────────────────

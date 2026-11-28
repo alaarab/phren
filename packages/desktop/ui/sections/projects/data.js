@@ -9,8 +9,6 @@ export const KNOBS = {
   findingSensitivity: { label: "Finding sensitivity", caption: "How readily new findings are kept", options: ["minimal", "conservative", "balanced", "aggressive"] },
   proactivity: { label: "Proactivity", caption: "The base auto-capture level", options: ["low", "medium", "high"] },
   proactivityFindings: { label: "Proactivity for findings", caption: "Auto-capture for findings only", options: ["low", "medium", "high"] },
-  proactivityTask: { label: "Proactivity for tasks", caption: "Auto-capture for tasks only", options: ["low", "medium", "high"] },
-  taskMode: { label: "Task mode", caption: "How new tasks are filed", options: ["off", "manual", "suggest", "auto"] },
 };
 
 export function clear(node) { node.replaceChildren(); }
@@ -72,12 +70,10 @@ export function parseKnows(summary) {
   if (!block) return null;
   const inner = ["", ...block.split("\n")];
   const bullets = inner.filter((line) => line.startsWith("- "));
-  const counts = { findings: 0, tasks: null };
+  const counts = { findings: 0 };
   for (const line of bullets) {
     const active = /(\d+) active finding/.exec(line);
-    const tasks = /(\d+) open task/.exec(line);
     if (active) counts.findings = Number(active[1]);
-    if (tasks) counts.tasks = Number(tasks[1]);
   }
   // A topic bullet may carry only its "## Now" heading, with the real line in the next paragraph.
   const prose = inner.slice(1).map((line) => line.trim()).filter((line) => line && !line.startsWith("#") && !line.startsWith("<!--") && !line.startsWith("- "));
@@ -86,16 +82,6 @@ export function parseKnows(summary) {
   return { counts, summaryLine, text: inner.slice(1).join("\n").trim() };
 }
 
-/** Open tasks are the non-empty "- " bullets before the Done section. */
-export function countOpenTasks(markdown) {
-  let count = 0, inDone = false;
-  for (const line of String(markdown).split("\n")) {
-    if (/^##\s+Done\b/.test(line)) { inDone = true; continue; }
-    if (/^##\s+/.test(line)) { inDone = false; continue; }
-    if (!inDone && line.startsWith("- ") && line.slice(2).trim() && !/^-\s*\[x\]/i.test(line)) count++;
-  }
-  return count;
-}
 
 /** Active findings are the "- " bullets in FINDINGS.md (archived ones live elsewhere). */
 export function countActiveFindings(markdown) {

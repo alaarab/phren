@@ -653,18 +653,13 @@ write_context_planning() {
   for project in "${active_projects[@]}"; do
     [ "$project" = "global" ] && continue
     local summary="$SCRIPT_DIR/$project/summary.md"
-    local task="$SCRIPT_DIR/$project/tasks.md"
 
-    if [ -f "$summary" ] || [ -f "$task" ]; then
+    if [ -f "$summary" ]; then
       content+=$'\n'"## $project"$'\n'
     fi
 
     if [ -f "$summary" ]; then
       content+="$(cat "$summary")"$'\n'
-    fi
-    if [ -f "$task" ]; then
-      content+=$'\n'"### Task"$'\n'
-      content+="$(cat "$task")"$'\n'
     fi
   done
 

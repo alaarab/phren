@@ -9,8 +9,6 @@ import { execFileSync } from "child_process";
 import { getPhrenPath } from "../shared.js";
 import { atomicWriteText } from "../phren-paths.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
-import { TASKS_FILENAME } from "../data/tasks.js";
-import { initializeTaskFormat } from "../data/task-format.js";
 import { isValidProjectName, getOptionValue, getPositionalArgs } from "../utils.js";
 import { addProjectToProfile, resolveActiveProfile } from "../profile-store.js";
 import {
@@ -94,8 +92,6 @@ async function handleTeamInit(args: string[]): Promise<void> {
     `# global findings\n`,
   );
 
-  // A new store has no old writers: give it an identity and start with task metadata on.
-  initializeTaskFormat(storePath);
 
   // Initialize git repo
   execFileSync("git", ["init"], {
@@ -283,9 +279,6 @@ async function handleTeamAddProject(args: string[]): Promise<void> {
   // Scaffold project files
   if (!fs.existsSync(path.join(projectDir, FINDINGS_FILENAME))) {
     atomicWriteText(path.join(projectDir, FINDINGS_FILENAME), `# ${projectName} findings\n`);
-  }
-  if (!fs.existsSync(path.join(projectDir, TASKS_FILENAME))) {
-    atomicWriteText(path.join(projectDir, TASKS_FILENAME), `# ${projectName} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
   }
   if (!fs.existsSync(path.join(projectDir, "summary.md"))) {
     atomicWriteText(path.join(projectDir, "summary.md"), `# ${projectName}\n**What:** \n`);

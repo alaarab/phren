@@ -147,17 +147,6 @@ function seedProjectFixtures(phrenDir: string): void {
     ].join("\n"),
   );
   writeFile(
-    path.join(phrenDir, "repo-a", "tasks.md"),
-    [
-      "# repo-a task",
-      "",
-      "## Queue",
-      "",
-      "- [ ] Queue browser task",
-      "",
-    ].join("\n"),
-  );
-  writeFile(
     path.join(phrenDir, "repo-a", "AGENTS.md"),
     "# repo-a\n\nRepo A instructions for browser smoke coverage.\n",
   );
@@ -278,8 +267,6 @@ export async function createWebUiHarness(): Promise<WebUiHarness> {
 
   const { homeDir, phrenDir, env } = makeIsolatedEnv(rootDir);
   runCli(["init", "-y", "--profile", "work"], repoADir, env);
-  // init is memory-only; this fixture also exercises task views and graph nodes.
-  runCli(["modules", "enable", "tasks"], repoADir, env);
   runCli(["add", repoBDir], repoADir, env);
 
   seedHookFixtures(phrenDir, homeDir);

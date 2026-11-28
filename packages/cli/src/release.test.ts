@@ -2,12 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { makeTempDir } from "./test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { configureAllHooks } from "./hooks.js";
 import { configureClaude } from "./init/init.js";
-import { getToolCount } from "./tool-registry.js";
+import { writeSkillMd } from "./link/skills.js";
 
 function npmExec(): string {
   return process.platform === "win32" ? "npm.cmd" : "npm";
@@ -84,12 +83,14 @@ describe("1.10.x release hardening gates", () => {
     120_000,
   );
 
-  it("keeps generated skill metadata aligned with the live tool registry", async () => {
-    const srcDir = path.dirname(fileURLToPath(import.meta.url));
-    const linkSkillsTs = fs.readFileSync(path.join(srcDir, "link", "skills.ts"), "utf8");
-    expect(linkSkillsTs).toContain("getToolCount()");
-    expect(linkSkillsTs).toContain("renderToolCatalogMarkdown()");
-    expect(getToolCount()).toBe(60);
+  it("lists forge issue tools in the generated skill and reports its catalog size", () => {
+    writeSkillMd(phrenPath);
+    const skill = fs.readFileSync(path.join(phrenPath, "phren.SKILL.md"), "utf8");
+    const tools = Array.from(skill.matchAll(/^- `([^`]+)`: /gm), (match) => match[1]);
+    expect(tools).toEqual(expect.arrayContaining([
+      "list_issues", "get_issue", "create_issue", "update_issue", "claim_issue", "comment_issue", "close_issue",
+    ]));
+    expect(skill).toContain(`## MCP tools (${tools.length})`);
   });
 
   it("wires lifecycle hooks + wrappers for Copilot/Cursor/Codex", () => {

@@ -98,13 +98,6 @@ capture nor restore changes the user's index, HEAD, branch or stash refs.
   and `<project>/dreams/` (`last-run.json`, one `<runId>.json` per dream,
   `journal.md`). The Hook starts scheduled dreams as a low-priority
   `phren dream run --scheduled` child; `PHREN_DREAMING=off` stops its ticker.
-- Weekly task audits, on the same projects and window as dreams:
-  `<project>/task-audits/` (`last-run.json`, one `<runId>.json` per audit). The
-  Hook starts them as a low-priority `phren task audit --scheduled` child;
-  `PHREN_TASK_AUDIT=off` stops it.
-- `.runtime/session-tasks/<session>.json`: the tasks each agent session claimed
-  or moved to Active, read by the Stop hook and dispatch returns (at most 64 per
-  session).
 - Inside each store's Git repository, from sync: `refs/phren/backup/<ms>` (the
   pre-merge HEAD whenever local and remote history had both moved, deleted
   after 14 days), `.config/maintenance-writer.json` (which computer rewrites
@@ -361,7 +354,7 @@ nothing to that checkout.
   pairs it with the trace to count the clanker ids a session opened. Kept to the
   newest 5,000 lines once it passes 1 MB; local runtime state, never synced.
 - `<primary store>/.runtime/store-health.jsonl` holds daily counts of findings,
-  citations (with the share checkable on this computer), tasks and review entries for this computer's stores, primary runtime
+  citations (with the share checkable on this computer), review entries for this computer's stores, primary runtime
   file sizes by folder and by class (code indexes, fanout archive, live fanouts,
   sessions, packages, logs, other), the components over their budgets and what
   each budget stops, what runtime age-out removed or would remove, and the last
@@ -466,9 +459,9 @@ uses it to name the agent a heavy process belongs to, and `POST
 /v1/jobs/cleanup` ends only a registered process group whose pane is gone and
 whose lease has passed. The file is private and does not sync either.
 
-## Task responsibility metadata
+### Forge issues
 
-Task writers preserve versioned `Task:` continuations in each project's `tasks.md` and archived task records in `.config/task-archive/<project>.md`. `.config/task-format.json` is written when phren creates a store, or by explicit owner activation on an existing store; an existing store stays disabled until compatible writers are adopted. Canonical identity registration writes the primary entry in synced `stores.yaml`. Task graph mutations lock `.runtime/task-dependencies` in the writable participating stores before locking the task document. Task-bound launch writes a durable Active claim and history to `tasks.md` before invoking the ordinary launcher; its brief uses the existing Hook brief directory. Failed or uncertain launch keeps the claim for explicit review. Revision tokens are derived on read, with no extra state file. Directory discovery does not create identities or migrate attachments. See [Task responsibility](task-responsibility.md).
+Issue references for dispatched work are stored in `<bridge>/dispatch-issues/`. The Hook records PR link attempts under `<bridge>/issue-pr-links/` to prevent duplicate comments after retries.
 
 ### Command approval policy
 
@@ -489,13 +482,3 @@ It writes model metadata only to `~/.phren-agent/model-catalog.json` and stores
 the last provider/model/effort per checkout in `~/.phren-agent/settings.json`.
 Existing Codex model cache and OpenCode API-key connections are read in place;
 no credentials are copied to the model cache. See [provider config](agent-providers.md).
-
-Task merge reconciliation writes private `Links:` continuations in `tasks.md`,
-including repository-qualified PR/branch links, review status and merge evidence.
-`<store>/.config/task-reconcile.json` records explicit `--apply` opt-in;
-`<store>/.runtime/task-reconcile.json` holds a bounded 15-minute GitHub read cache
-and failure backoff; `.runtime/task-reconcile-progress.json` retains the next
-task to check after the request cap, and `.runtime/task-reconcile.lock` serializes sweeps. Dry
-runs may refresh the runtime cache but never task files or the opt-in setting.
-Task-associated worker briefs also contain a private `task.json` sidecar, pruned
-with the existing brief directory. No GitHub metadata or checkout files are written.

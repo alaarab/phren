@@ -326,10 +326,10 @@ describe("CopilotChatTests", () => {
 
   it("mcp call is named for its server", () => {
     const value = readCopilot([
-      { type: "tool.execution_start", data: { toolName: "phren-get_tasks", toolCallId: "c1", arguments: { limit: 5 }, mcpServerName: "phren", mcpToolName: "get_tasks" } },
-      { type: "tool.execution_start", data: { toolName: "phren-add_task", toolCallId: "c2", arguments: { item: ["x"] } } },
+      { type: "tool.execution_start", data: { toolName: "phren-list_issues", toolCallId: "c1", arguments: { limit: 5 }, mcpServerName: "phren", mcpToolName: "list_issues" } },
+      { type: "tool.execution_start", data: { toolName: "phren-add_finding", toolCallId: "c2", arguments: { finding: "x" } } },
     ]);
-    expect(value.messages.map(m => m.title)).toEqual(["mcp__phren__get_tasks", "phren-add_task"]);
+    expect(value.messages.map(m => m.title)).toEqual(["mcp__phren__list_issues", "phren-add_finding"]);
   });
 
   it("thought heading reads as a sentence", () => {

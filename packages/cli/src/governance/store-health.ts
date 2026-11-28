@@ -2,7 +2,6 @@ import * as fs from "fs";
 import { createRequire } from "module";
 import * as path from "path";
 import { parseFindingsContent, readReviewQueue, type FindingItem } from "../data/access.js";
-import { readTasks } from "../data/tasks.js";
 import { isCitationLine, normalizeFindingText } from "../content/metadata.js";
 import { parseCitationComment } from "../content/citation.js";
 import { citationStateKey, readCitationStates, type CitationStates } from "../content/citation-states.js";
@@ -30,8 +29,6 @@ export interface StoreHealthCounts {
    * sweep's `.runtime/citation-states.json`), and of those the ones that name a file.
    */
   checkableCitations: { any: number; withFile: number };
-  openTasks: number;
-  doneTasks: number;
   reviewEntries: number;
 }
 
@@ -41,8 +38,6 @@ export interface StoreHealthRecall {
   abstained: number;
   skipped: number;
   suppressedRepeats: number;
-  /** Prompts that filed no task because their project was over its open-task budget. */
-  taskCapturePaused: number;
   byAbstainReason: Record<string, number>;
   /** Distinct session and id pairs clanker mode injected, and of those the ones get_memory_detail opened later in that session. */
   clankerIds: { injected: number; opened: number };
@@ -52,7 +47,7 @@ export interface StoreHealthRecall {
 export type RuntimeClass = "codeIndexes" | "fanoutArchive" | "fanouts" | "sessions" | "packages" | "logs" | "other";
 
 export interface OverBudget {
-  component: "openTasks" | "reviewEntries" | "runtimeBytes" | "fanoutArchiveBytes";
+  component: "reviewEntries" | "runtimeBytes" | "fanoutArchiveBytes";
   store?: string;
   project?: string;
   value: number;
@@ -101,7 +96,7 @@ function emptyCounts(): StoreHealthCounts {
     duplicateFids: 0, duplicateTexts: 0,
     citations: { none: 0, timestampOnly: 0, withFile: 0, withCommit: 0, withSymbol: 0, withRemote: 0 },
     checkableCitations: { any: 0, withFile: 0 },
-    openTasks: 0, doneTasks: 0, reviewEntries: 0,
+    reviewEntries: 0,
   };
 }
 
@@ -167,11 +162,6 @@ function projectHealth(storePath: string, project: string, states: CitationState
       if (!citation.file && !citation.commit && !citation.symbol && !citation.remote) counts.citations.timestampOnly++;
     }
   }
-  const tasks = readTasks(storePath, project);
-  if (tasks.ok) {
-    counts.openTasks = tasks.data.items.Active.length + tasks.data.items.Queue.length;
-    counts.doneTasks = tasks.data.items.Done.length;
-  }
   const review = readReviewQueue(storePath, project);
   if (review.ok) counts.reviewEntries = review.data.length;
   return counts;
@@ -191,7 +181,7 @@ function bytes(file: string): number {
 
 function recallHealth(phrenPath: string, now: Date): StoreHealthRecall | null {
   if (!fs.existsSync(recallTraceFile(phrenPath))) return null;
-  const counts: StoreHealthRecall = { prompts: 0, injected: 0, abstained: 0, skipped: 0, suppressedRepeats: 0, taskCapturePaused: 0, byAbstainReason: {}, clankerIds: { injected: 0, opened: 0 } };
+  const counts: StoreHealthRecall = { prompts: 0, injected: 0, abstained: 0, skipped: 0, suppressedRepeats: 0, byAbstainReason: {}, clankerIds: { injected: 0, opened: 0 } };
   const reasons = new Map<string, number>();
   const injectedIds = new Map<string, number>();
   for (const entry of readRecallTrace(phrenPath)) {
@@ -208,7 +198,6 @@ function recallHealth(phrenPath: string, now: Date): StoreHealthRecall | null {
     if (typeof entry.suppressedRepeats === "number" && Number.isFinite(entry.suppressedRepeats) && entry.suppressedRepeats > 0) {
       counts.suppressedRepeats += entry.suppressedRepeats;
     }
-    if (entry.taskCapturePaused && typeof entry.taskCapturePaused === "object") counts.taskCapturePaused++;
     for (const row of Array.isArray(entry.injected) && typeof entry.session === "string" ? entry.injected : []) {
       const key = `${entry.session}\n${row?.id}`;
       if (typeof row?.id === "string" && !injectedIds.has(key)) injectedIds.set(key, at);
@@ -254,10 +243,9 @@ export function collectStoreHealth(
     : []);
   const runtimeClasses: Record<RuntimeClass, number> = { codeIndexes: 0, fanoutArchive: 0, fanouts: 0, sessions: 0, packages: 0, logs: 0, other: 0 };
   for (const [name, size] of Object.entries(runtimeBytes)) runtimeClasses[runtimeClass(name)] += size;
-  const over = stores.flatMap(store => store.projects.flatMap(({ project, openTasks, reviewEntries }) => {
+  const over = stores.flatMap(store => store.projects.flatMap(({ project, reviewEntries }) => {
     const budgets = getRetentionPolicy(path.resolve(phrenPath, store.path), project).budgets;
     return [
-      overBudget("openTasks", openTasks, budgets.openTasks, { store: store.name, project }),
       overBudget("reviewEntries", reviewEntries, budgets.reviewEntries, { store: store.name, project }),
     ];
   }));
@@ -275,7 +263,6 @@ export function collectStoreHealth(
 // ── Budgets: which components are over, and what that stops ──
 
 const BUDGET_EFFECTS: Record<OverBudget["component"], string> = {
-  openTasks: "the prompt hook files no new tasks",
   reviewEntries: "machine-generated entries are not queued",
   runtimeBytes: "reported only",
   fanoutArchiveBytes: "the archive sweep deletes the oldest finished folders",
@@ -437,7 +424,7 @@ export function recordStoreHealth(phrenPath: string, now = new Date(), computer 
 }
 
 const COMPONENT_LABELS: Record<OverBudget["component"], string> = {
-  openTasks: "open tasks", reviewEntries: "review entries", runtimeBytes: ".runtime", fanoutArchiveBytes: "fanout archive",
+  reviewEntries: "review entries", runtimeBytes: ".runtime", fanoutArchiveBytes: "fanout archive",
 };
 
 export function budgetComponentName(row: OverBudget): string {

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
-import { TreeDataSource, parseTruths, parseReportedTaskCounts } from "../src/providers/tree-data";
+import { TreeDataSource, parseTruths } from "../src/providers/tree-data";
 import { fakeClient, ok, deviceContext } from "./test-helpers";
 
 // tree-data.ts imports readDeviceContext from ../profileConfig, which — for
@@ -26,12 +26,12 @@ beforeEach(() => {
 });
 
 describe("TreeDataSource.getRootSections", () => {
-  it("always returns the 8 top-level sections in a stable order", async () => {
+  it("always returns the 7 top-level sections in a stable order", async () => {
     const client = fakeClient({ listHooks: vi.fn(async () => ok({ tools: [] })) });
     const data = new TreeDataSource(client, STORE_PATH);
     const sections = await data.getRootSections(undefined);
     expect(sections.map((s) => (s.kind === "rootSection" ? s.section : s.kind))).toEqual([
-      "projects", "tasks", "skills", "machines", "review", "hooks", "graph", "manage",
+      "projects", "skills", "machines", "review", "hooks", "graph", "manage",
     ]);
   });
 
@@ -183,73 +183,12 @@ describe("TreeDataSource notes", () => {
   });
 });
 
-describe("TreeDataSource global task board", () => {
-  function tasksResponse(projects: Array<{ project: string; Active?: unknown[]; Queue?: unknown[] }>) {
-    return ok({
-      projects: projects.map((p) => ({ project: p.project, items: { Active: p.Active ?? [], Queue: p.Queue ?? [] } })),
-    });
-  }
 
-  it("splits into Pinned / Active / Queue groups, excluding pinned items from their raw section", async () => {
-    const client = fakeClient({
-      getAllTasks: vi.fn(async () => tasksResponse([
-        { project: "app", Active: [{ id: "1", line: "pinned active", pinned: true }, { id: "2", line: "plain active" }], Queue: [{ id: "3", line: "queued" }] },
-      ])),
-    });
-    const data = new TreeDataSource(client, STORE_PATH);
-    const groups = await data.getGlobalTaskBoard();
-    expect(groups).toEqual([
-      { kind: "globalTaskSectionGroup", section: "Pinned", count: 1 },
-      { kind: "globalTaskSectionGroup", section: "Active", count: 1 },
-      { kind: "globalTaskSectionGroup", section: "Queue", count: 1 },
-    ]);
-  });
 
-  it('shows "No tasks across any project" when every project is empty', async () => {
-    const client = fakeClient({ getAllTasks: vi.fn(async () => tasksResponse([])) });
-    const data = new TreeDataSource(client, STORE_PATH);
-    expect(await data.getGlobalTaskBoard()).toEqual([{ kind: "message", label: "No tasks across any project", iconId: "checklist" }]);
-  });
+describe("TreeDataSource per-project review queue", () => {
 
-  it("getGlobalTasksForSection returns only pinned items for Pinned regardless of their underlying section", async () => {
-    const client = fakeClient({
-      getAllTasks: vi.fn(async () => tasksResponse([
-        { project: "app", Active: [{ id: "1", line: "pinned", pinned: true }] },
-        { project: "app2", Queue: [{ id: "2", line: "also pinned", pinned: true }] },
-      ])),
-    });
-    const data = new TreeDataSource(client, STORE_PATH);
-    const pinned = await data.getGlobalTasksForSection("Pinned");
-    expect(pinned.map((t) => (t.kind === "task" ? t.projectName : undefined))).toEqual(["app", "app2"]);
-  });
 
-  it("generates a stable fallback id from section+index when the server omits one", async () => {
-    const client = fakeClient({ getAllTasks: vi.fn(async () => tasksResponse([{ project: "app", Active: [{ line: "no id here" }] }])) }) ;
-    const data = new TreeDataSource(client, STORE_PATH);
-    const tasks = await data.getGlobalTasksForSection("Active");
-    expect(tasks).toHaveLength(1);
-    expect(tasks[0].kind === "task" && tasks[0].id).toBe("Active-1");
-  });
-});
 
-describe("TreeDataSource per-project tasks and queue", () => {
-  it("getTaskSectionGroups counts each section and omits empty ones", async () => {
-    const client = fakeClient({
-      getTasks: vi.fn(async () => ok({ items: { Active: [{ id: "1", line: "a" }], Queue: [], Done: [{ id: "2", line: "b", checked: true }] } })),
-    });
-    const data = new TreeDataSource(client, STORE_PATH);
-    expect(await data.getTaskSectionGroups("app")).toEqual([
-      { kind: "taskSectionGroup", projectName: "app", section: "Active", count: 1 },
-      { kind: "taskSectionGroup", projectName: "app", section: "Done", count: 1 },
-    ]);
-  });
-
-  it("Done tasks default checked to true even if the server omits the flag", async () => {
-    const client = fakeClient({ getTasks: vi.fn(async () => ok({ items: { Done: [{ id: "1", line: "b" }] } })) });
-    const data = new TreeDataSource(client, STORE_PATH);
-    const tasks = await data.getTasksForSection("app", "Done");
-    expect(tasks[0].kind === "task" && tasks[0].checked).toBe(true);
-  });
 
   it("getQueueSectionGroups / getAggregateQueueSectionGroups count per section and omit empty ones", async () => {
     const client = fakeClient({
@@ -332,22 +271,22 @@ describe("TreeDataSource sessions", () => {
     expect(sessions).toHaveLength(1);
   });
 
-  it("getSessionChildren buckets findings/tasks and reports an empty message when a session captured neither", async () => {
+  it("getSessionChildren buckets session findings", async () => {
     const client = fakeClient({
-      sessionHistory: vi.fn(async () => ok({ findings: [{ id: "f1", text: "x", date: "2026-01-01" }], tasks: [] })),
+      sessionHistory: vi.fn(async () => ok({ findings: [{ id: "f1", text: "x", date: "2026-01-01" }] })),
     });
     const data = new TreeDataSource(client, STORE_PATH);
     const children = await data.getSessionChildren({ kind: "session", projectName: "app", date: "2026-01-01", sessionId: "s1", startedAt: "2026-01-01T09:00:00Z", findingsAdded: 1, status: "ended" });
     expect(children).toEqual([{ kind: "sessionBucket", projectName: "app", sessionId: "s1", bucket: "findings", count: 1 }]);
   });
 
-  it("getSessionBucketChildren returns full finding/task nodes for the requested bucket", async () => {
+  it("getSessionBucketChildren returns full finding nodes for the requested bucket", async () => {
     const client = fakeClient({
-      sessionHistory: vi.fn(async () => ok({ findings: [], tasks: [{ id: "t1", text: "ship it", section: "Active" }] })),
+      sessionHistory: vi.fn(async () => ok({ findings: [{ id: "f1", text: "saved finding", date: "2026-01-01" }] })),
     });
     const data = new TreeDataSource(client, STORE_PATH);
-    const children = await data.getSessionBucketChildren({ kind: "sessionBucket", projectName: "app", sessionId: "s1", bucket: "tasks", count: 1 });
-    expect(children).toEqual([{ kind: "task", projectName: "app", id: "t1", line: "ship it", section: "Active", checked: false }]);
+    const children = await data.getSessionBucketChildren({ kind: "sessionBucket", projectName: "app", sessionId: "s1", bucket: "findings", count: 1 });
+    expect(children).toEqual([expect.objectContaining({ kind: "finding", projectName: "app", id: "f1", text: "saved finding" })]);
   });
 });
 
@@ -511,90 +450,12 @@ describe("TreeDataSource.sortWithActiveFirst (pure)", () => {
     expect(nodes.every((n) => !n.active)).toBe(true);
   });
 
-  it("attaches per-project open-task counts, matching by case-insensitive name", () => {
-    const data = new TreeDataSource(fakeClient(), STORE_PATH);
-    const projects = [{ name: "App" }];
-    const taskCounts = new Map([["app", { active: 3, queue: 5 }]]);
-    const nodes = data.sortWithActiveFirst(projects, undefined, undefined, taskCounts);
-    expect(nodes[0].activeCount).toBe(3);
-    expect(nodes[0].queueCount).toBe(5);
-  });
+
 });
 
-describe("TreeDataSource.fetchTaskCountsByProject", () => {
-  function projectNode(nodes: Awaited<ReturnType<TreeDataSource["getProjectNodes"]>>, name: string) {
-    const node = nodes.find((n) => n.kind === "project" && n.projectName === name);
-    if (!node || node.kind !== "project") throw new Error(`no project node for ${name}`);
-    return node;
-  }
 
-  it("falls back to counting returned rows when the response carries no counts", async () => {
-    const getAllTasks = vi.fn(async () => ok({
-      projects: [
-        { project: "app", items: { Active: [{ id: "1", line: "a" }, { id: "2", line: "b" }], Queue: [{ id: "3", line: "c" }] } },
-        { project: "other", items: { Active: [{ id: "4", line: "d" }] } },
-      ],
-    }));
-    const listProjects = vi.fn(async () => ok({ projects: [{ name: "app" }, { name: "other" }] }));
-    const data = new TreeDataSource(fakeClient({ getAllTasks, listProjects }), STORE_PATH);
-    const nodes = await data.getProjectNodes(); // no workspace, single store → flat list
-    expect(getAllTasks).toHaveBeenCalledTimes(1);
-    expect(projectNode(nodes, "app").activeCount).toBe(2);
-    expect(projectNode(nodes, "app").queueCount).toBe(1);
-  });
 
-  it("uses the response's uncapped section counts even when they exceed the returned rows", async () => {
-    const getAllTasks = vi.fn(async () => ok({
-      projects: [
-        {
-          project: "big",
-          counts: { Active: 150, Queue: 320, done: 40 },
-          // Only one row per section made it into the capped response.
-          items: { Active: [{ id: "1", line: "a" }], Queue: [{ id: "2", line: "b" }] },
-        },
-      ],
-    }));
-    const listProjects = vi.fn(async () => ok({ projects: [{ name: "big" }] }));
-    const data = new TreeDataSource(fakeClient({ getAllTasks, listProjects }), STORE_PATH);
-    const nodes = await data.getProjectNodes();
-    expect(projectNode(nodes, "big").activeCount).toBe(150);
-    expect(projectNode(nodes, "big").queueCount).toBe(320);
-    expect(projectNode(nodes, "big").openCount).toBeUndefined();
-  });
 
-  it("sums the responsibility buckets into an uncapped open count when there is no section split", async () => {
-    const getAllTasks = vi.fn(async () => ok({
-      projects: [
-        {
-          project: "big",
-          counts: { human: 4, agentReady: 3, agentWaitingOnHuman: 1, agentWaitingOnTask: 2, done: 40 },
-          items: { Active: [{ id: "1", line: "a" }] },
-        },
-      ],
-    }));
-    const listProjects = vi.fn(async () => ok({ projects: [{ name: "big" }] }));
-    const data = new TreeDataSource(fakeClient({ getAllTasks, listProjects }), STORE_PATH);
-    const nodes = await data.getProjectNodes();
-    expect(projectNode(nodes, "big").openCount).toBe(10);
-    expect(projectNode(nodes, "big").activeCount).toBeUndefined();
-    expect(projectNode(nodes, "big").queueCount).toBeUndefined();
-  });
-});
-
-describe("parseReportedTaskCounts", () => {
-  it("reads section counts in several spellings", () => {
-    expect(parseReportedTaskCounts({ Active: 5, Queue: 6 })).toEqual({ active: 5, queue: 6 });
-    expect(parseReportedTaskCounts({ active: 5, queue: 6 })).toEqual({ active: 5, queue: 6 });
-    expect(parseReportedTaskCounts({ sections: { Active: 5, Queue: 6 } })).toEqual({ active: 5, queue: 6 });
-  });
-
-  it("falls back to the responsibility-bucket total, and returns undefined without usable numbers", () => {
-    expect(parseReportedTaskCounts({ human: 1, agentReady: 2, agentWaitingOnHuman: 3, agentWaitingOnTask: 4, done: 9 }))
-      .toEqual({ open: 10 });
-    expect(parseReportedTaskCounts({ done: 9 })).toBeUndefined();
-    expect(parseReportedTaskCounts("nonsense")).toBeUndefined();
-  });
-});
 
 describe("TreeDataSource.getProjectNodes", () => {
   it('shows the "add one" message when there are no projects at all', async () => {

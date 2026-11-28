@@ -12,7 +12,6 @@ const originalEnv = {
   PHREN_ACTOR: process.env.PHREN_ACTOR,
   PHREN_PROACTIVITY: process.env.PHREN_PROACTIVITY,
   PHREN_PROACTIVITY_FINDINGS: process.env.PHREN_PROACTIVITY_FINDINGS,
-  PHREN_PROACTIVITY_TASKS: process.env.PHREN_PROACTIVITY_TASKS,
 };
 
 let tmpDir: string;
@@ -69,7 +68,6 @@ describe("handleConfig proactivity project overrides", () => {
     delete process.env.PHREN_ACTOR;
     delete process.env.PHREN_PROACTIVITY;
     delete process.env.PHREN_PROACTIVITY_FINDINGS;
-    delete process.env.PHREN_PROACTIVITY_TASKS;
   });
 
   afterEach(() => {
@@ -80,7 +78,6 @@ describe("handleConfig proactivity project overrides", () => {
     restoreEnv("PHREN_ACTOR");
     restoreEnv("PHREN_PROACTIVITY");
     restoreEnv("PHREN_PROACTIVITY_FINDINGS");
-    restoreEnv("PHREN_PROACTIVITY_TASKS");
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -90,24 +87,22 @@ describe("handleConfig proactivity project overrides", () => {
 
     await handleConfig(["proactivity", "medium", "--project", "demo"]);
 
-    expect(JSON.parse(output.logs[0])).toEqual({ _project: "demo", base: "medium", findings: null, tasks: null });
+    expect(JSON.parse(output.logs[0])).toEqual({ _project: "demo", base: "medium", findings: null });
     expect(readProjectConfigFile("demo").config).toEqual({ proactivity: "medium" });
     expect(fs.existsSync(governancePrefsPath())).toBe(false);
   });
 
-  it("writes project findings and tasks overrides under their own config keys", async () => {
+  it("writes project base and findings overrides under their own config keys", async () => {
     const { handleConfig } = await importCliConfig();
     const output = captureConsole();
 
     await handleConfig(["proactivity", "high", "--project", "demo"]);
     await handleConfig(["proactivity", "low", "--scope=findings", "--project", "demo"]);
-    await handleConfig(["proactivity", "medium", "--scope", "task", "--project", "demo"]);
 
-    expect(JSON.parse(output.logs[2])).toEqual({ _project: "demo", base: "high", findings: "low", tasks: "medium" });
+    expect(JSON.parse(output.logs[1])).toEqual({ _project: "demo", base: "high", findings: "low" });
     expect(readProjectConfigFile("demo").config).toEqual({
       proactivity: "high",
       proactivityFindings: "low",
-      proactivityTask: "medium",
     });
     expect(fs.existsSync(governancePrefsPath())).toBe(false);
   });
@@ -124,7 +119,6 @@ describe("handleConfig proactivity project overrides", () => {
       _project: "demo",
       base: null,
       findings: "high",
-      tasks: null,
     });
     expect(JSON.parse(fs.readFileSync(governancePrefsPath(), "utf8")).proactivity).toBe("low");
   });
@@ -156,7 +150,7 @@ describe("handleConfig proactivity project overrides", () => {
 
       expect(process.exitCode).toBe(1);
       expect(output.errors.join("\n")).toContain(
-        "Usage: phren config proactivity [high|medium|low] [--scope base|findings|tasks] [--project <name>]",
+        "Usage: phren config proactivity [high|medium|low] [--scope base|findings] [--project <name>]",
       );
       expect(fs.existsSync(governancePrefsPath())).toBe(false);
     } finally {

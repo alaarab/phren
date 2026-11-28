@@ -12,13 +12,6 @@ export const mcpManifest: CapabilityManifest = {
     "finding.pin": { implemented: true, handler: "index.ts:pin_memory" },
 
     // Task management
-    "task.add": { implemented: true, handler: "index.ts:add_task" },
-    "task.complete": { implemented: true, handler: "index.ts:complete_task" },
-    "task.remove": { implemented: true, handler: "index.ts:remove_task" },
-    "task.update": { implemented: true, handler: "index.ts:update_task" },
-    "task.list": { implemented: true, handler: "index.ts:get_tasks" },
-    "task.pin": { implemented: true, handler: "index.ts:update_task (pin)" },
-    "task.github_link": { implemented: true, handler: "index.ts:update_task (github_issue/github_url)" },
 
     // Hook management
     "hook.list": { implemented: true, handler: "index.ts:list_hooks" },
@@ -40,7 +33,7 @@ export const mcpManifest: CapabilityManifest = {
 
     // Config
     "config.get": { implemented: true, handler: "index.ts:get_config (supports all domains including topic)" },
-    "config.set": { implemented: true, handler: "index.ts:set_config (proactivity, taskMode, findingSensitivity, retention, workflow, access, index, topic, dreaming)" },
+    "config.set": { implemented: true, handler: "index.ts:set_config (proactivity, findingSensitivity, retention, workflow, access, index, topic, dreaming)" },
 
     // Health / Sync / Session
     "health.check": { implemented: true, handler: "index.ts:health_check" },

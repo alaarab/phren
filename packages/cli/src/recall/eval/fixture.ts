@@ -109,7 +109,6 @@ export function buildRecallFixture(root: string): RecallFixture {
     write(`${name}/reference/topics/mechanics.older.md`, document("Older mechanics", older, 2, sparse ? 4 : 8));
     write(`${name}/summary.md`, `# ${name}\n\nAn experimental ${domain} with bounded buffers and explicit recovery checkpoints.`);
     write(`${name}/truths.md`, `# ${name} Truths\n\n## Truths\n\n- Preserve ${domain} invariants during recovery. _(added ${dayAgo(now, 3)})_`);
-    write(`${name}/tasks.md`, `# ${name} tasks\n\n## Active\n\n- [ ] Inspect the ${domain} overflow report <!-- bid:${((pi + 1) * 0x10000).toString(16).padStart(8, "0")} rank:1 -->\n\n## Queue\n\n- [ ] Document the bounded recovery path\n\n## Done\n`);
     write(`${name}/AGENTS.md`, `# ${name}\n\nKeep ${domain} changes small and document recovery invariants.`);
   }
   return { phrenPath, projects, retiredTexts };

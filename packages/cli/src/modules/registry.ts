@@ -14,7 +14,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
   {
     schemaVersion: 1, name: "memory", version: VERSION, defaultEnabled: true, requires: [],
     tools: [
-      ...core(["search_knowledge", "get_memory_detail", "get_project_summary", "add_finding", "revise_finding", "session", "phren_admin"]),
+      ...core(["search_knowledge", "get_memory_detail", "get_project_summary", "add_finding", "revise_finding", "session", "phren_admin", "list_issues", "get_issue"]),
       ...full([
         "list_projects", "get_findings", "store_list", "supersede_finding", "retract_finding",
         "resolve_contradiction", "get_contradictions", "edit_finding", "remove_finding", "push_changes",
@@ -26,11 +26,12 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
         "list_hooks", "toggle_hooks", "add_custom_hook", "remove_custom_hook", "get_config", "set_config",
         "get_notes", "add_note", "edit_note", "remove_note", "promote_note", "get_topic_summaries", "set_topic_summary",
         "dream_run", "dream_status", "dream_log", "dream_apply",
+        "create_issue", "update_issue", "claim_issue", "comment_issue", "close_issue",
       ]),
     ],
     cliCommands: [
       "init", "quickstart", "add", "agent", "projects", "search", "status", "doctor", "web-ui", "graph", "export", "shell", "heavy", "reap",
-      "add-finding", "pin", "review", "session-context", "sessions", "finding", "note", "notes",
+      "add-finding", "pin", "review", "session-context", "sessions", "finding", "note", "notes", "issue",
       "search-fragments", "related-docs", "truths", "promote", "skills", "detect-skills", "hooks", "config",
       "maintain", "dream", "consolidation-status", "quality-feedback", "mcp-mode", "hooks-mode", "preset", "snippet",
       "verify", "uninstall", "update", "profile", "store", "team", "modules list", "modules enable", "modules disable",
@@ -45,7 +46,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       { agents: ["claude", "codex", "copilot", "cursor"], events: ["Stop"], handler: "phren hook-stop" },
       { agents: ["claude"], events: ["PostToolUse"], handler: "phren hook-tool" },
     ],
-    hookRoutes: [...routes("GET", ["/v1/store/head", "/v1/store/tree", "/v1/store/blob"]), ...routes("POST", ["/v1/store/pull-now", "/v1/store/blobs", "/v1/store/file", "/v1/store/delete"])],
+    hookRoutes: [...routes("GET", ["/v1/store/directory", "/v1/tasks/stores", "/v1/store/head", "/v1/store/tree", "/v1/store/blob"]), ...routes("POST", ["/v1/store/pull-now", "/v1/store/blobs", "/v1/store/file", "/v1/store/delete"])],
     capabilities: ["memory", "memoryStore", "memoryStoreBatch", "projectMemory"],
     storeFiles: [
       "phren.root.yaml", "machines.yaml", "profiles/*.yaml", ".config/modules.yaml", ".config/*.json",
@@ -57,16 +58,6 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     localFiles: [],
     phoneScreens: [{ screen: "ProjectsView", capability: "memory" }, { screen: "SearchView", capability: "memory" }],
     skills: ["phren-init", "phren-sync", "phren-profiles", "phren-discover", "phren-consolidate", "phren-summarize"],
-  },
-  {
-    schemaVersion: 1, name: "tasks", version: VERSION, defaultEnabled: false, requires: ["memory"],
-    tools: [
-      ...core(["get_tasks", "add_task", "manage_task"]),
-      ...full(["complete_task", "remove_task", "update_task", "tidy_done_tasks", "pin_task", "claim_task"]),
-    ],
-    cliCommands: ["task", "tasks", "config task-mode", "config proactivity.tasks"], agentHooks: [], hookRoutes: [{ method: "GET", path: "/v1/tasks" }, { method: "GET", path: "/v1/tasks/stores" }, { method: "GET", path: "/v1/tasks/detail" }, { method: "POST", path: "/v1/tasks/update" }, { method: "POST", path: "/v1/tasks/create" }, { method: "POST", path: "/v1/tasks/save" }, { method: "POST", path: "/v1/tasks/launch" }], capabilities: ["tasks", "taskDependencies", "taskWriterSafety", "taskAtomicCreate", "taskAtomicSave", "taskBoundLaunch", "taskWork"],
-    storeFiles: ["<project>/tasks.md", ".sessions/checkpoint-*.json", ".config/task-format.json", ".config/task-archive/*.md", "stores.yaml"], localFiles: [".runtime/task-dependencies.lock"],
-    phoneScreens: [{ screen: "TasksView", capability: "tasks" }], skills: [],
   },
   {
     schemaVersion: 1, name: "hook", version: VERSION, defaultEnabled: false, requires: ["memory"],
@@ -90,11 +81,12 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
         "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/mac/windows", "/v1/mac/windows/snapshot", "/v1/files", "/v1/models", "/v1/harnesses", "/v1/projects/files",
         "/v1/uploads/image", "/v1/files/range", "/v1/files/resolve", "/v1/usage", "/v1/resources", "/v1/housekeeping", "/v1/speech/voices", "/v1/push/status", "/v1/projects/locate", "/v1/projects/repos",
         "/v1/workspaces", "/v1/workspaces/panes", "/v1/workspaces/layout", "/v1/transcripts/blob", "/v1/transcripts/history", "/v1/sudo", "/v1/secrets", "/v1/owner-confirms",
-        "/v1/conversations/search",
+        "/v1/conversations/search", "/v1/issues", "/v1/issues/item",
         "/v1/subagents", "/v1/subagents/transcript", "/v1/subagents/messages", "/v1/sessions/move", "/v1/sessions/moves", "/v1/sessions/move/computers", "/v1/sessions/move/availability", "/v1/sessions/move/intent", "/v1/sessions/move/launch", "/v1/dispatch/relocation", "/v1/dispatch/arrival",
       ]),
       ...routes("POST", [
         "/v1/housekeeping/approve", "/v1/housekeeping/dismiss", "/v1/housekeeping/restore", "/v1/housekeeping/scan",
+        "/v1/issues/create", "/v1/issues/edit", "/v1/issues/comment", "/v1/issues/claim", "/v1/issues/close",
         "/v1/push/register", "/v1/push/forget", "/v1/push/answer", "/v1/push/target", "/v1/push/presence", "/v1/files", "/v1/files/delete", "/v1/projects/add", "/v1/simulators/action", "/v1/mac/windows/action", "/v1/mac/windows/permissions",
         "/v1/workspaces/launch", "/v1/workspaces/create", "/v1/workspaces/focus", "/v1/workspaces/rename",
         "/v1/workspaces/close", "/v1/sessions/rename", "/v1/sessions/seen", "/v1/sessions/move", "/v1/accounts/claude/add", "/v1/accounts/claude/settings", "/v1/accounts/allowed-pools", "/v1/sessions/move/abort", "/v1/sessions/move/launch", "/v1/prompt", "/v1/prompt/status", "/v1/prompt/after-turn", "/v1/prompt/after-turn/list", "/v1/prompt/after-turn/edit", "/v1/prompt/after-turn/cancel", "/v1/prompt/queue", "/v1/model", "/v1/settings", "/v1/agents/permission-mode", "/v1/side-question/dismiss", "/v1/keys", "/v1/secret", "/v1/upload",
@@ -104,7 +96,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ...routes("WS", ["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live", "/v1/simulators/stream", "/v1/browsers/stream", "/v1/mac/windows/stream"]),
     ],
     capabilities: [
-      "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "paneTerminal", "paneLayout", "deskPresence", "herdr", "terminalResolve",
+      "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "paneTerminal", "paneLayout", "deskPresence", "herdr", "terminalResolve", "issues",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
       "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "browsers", "simulators", "simulatorStream", "simulatorDevices", "simulatorDrag", "macWindows", "macWindowStream", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "afterTurnQueue", "queuedMessageActions", "deliveryFrames", "resources", "housekeeping", "housekeepingInventory", "sessionRename", "sessionSeen", "sudo", "sudoOutcome", "secretExec", "ownerProof", "ownerConfirm", "previewDeltas", "quickChat", "agentFolder", "launchPermissionMode", "sessionMove", "moveNewChat", "moveConductor", "moveToComputer", "moveResume", "moveSummaryByTarget", "moveConversationCopy", "claudeAccountAdd", "accountPools", "workerRelocation", "conversationSearch",
     ],

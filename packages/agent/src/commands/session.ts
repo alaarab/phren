@@ -91,7 +91,6 @@ export function sessionCommand(parts: string[], ctx: CommandContext): boolean {
       const stateFile = path.join(ctx.phrenPath, ".runtime", "sessions", `session-${ctx.sessionId}.json`);
       const state = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
       lines.push(`  Findings: ${state.findingsAdded ?? 0}`);
-      lines.push(`  Tasks:    ${state.tasksCompleted ?? 0}`);
     } catch { /* session file may not exist */ }
   }
 

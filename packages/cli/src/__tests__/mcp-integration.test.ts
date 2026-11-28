@@ -7,7 +7,6 @@ import { buildIndex, updateFileInIndex, type SqlJsDatabase } from "../shared/ind
 import { register as registerSearch } from "../tools/search.js";
 import { register as registerFinding } from "../tools/finding.js";
 import { register as registerGraph } from "../tools/graph.js";
-import { register as registerTask } from "../tools/tasks.js";
 import type { McpContext } from "../tools/types.js";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
@@ -95,7 +94,6 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
     };
     registerSearch(server as any, ctx);
     registerFinding(server as any, ctx);
-    registerTask(server as any, ctx);
   });
 
   afterEach(() => {
@@ -133,94 +131,5 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
     expect(matchingResults).toHaveLength(0);
   });
 
-  it("tasks round-trip: add -> get -> complete -> get", async () => {
-    const addRes = parseResult(await server.call("add_task", {
-      project: "integ-proj",
-      item: "Implement xylophone frequency calibration module",
-    }));
-    expect(addRes.ok).toBe(true);
 
-    const getRes1 = parseResult(await server.call("get_tasks", {
-      project: "integ-proj",
-    }));
-    expect(getRes1.ok).toBe(true);
-    const queueItems = getRes1.data.items?.Queue || [];
-    const found = queueItems.some((i: any) => (i.line || "").includes("xylophone"));
-    expect(found).toBe(true);
-
-    const completeRes = parseResult(await server.call("complete_task", {
-      project: "integ-proj",
-      item: "xylophone frequency",
-    }));
-    expect(completeRes.ok).toBe(true);
-
-    const getRes2 = parseResult(await server.call("get_tasks", {
-      project: "integ-proj",
-      status: "all",
-    }));
-    expect(getRes2.ok).toBe(true);
-    const doneItems = getRes2.data.items?.Done || [];
-    const foundDone = doneItems.some((i: any) => (i.line || "").includes("xylophone"));
-    expect(foundDone).toBe(true);
-  });
-});
-
-describe("MCP integration: tasks immediately searchable after add", () => {
-  let tmp: { path: string; cleanup: () => void };
-  let server: ReturnType<typeof makeMockServer>;
-  let db: SqlJsDatabase;
-
-  beforeEach(async () => {
-    tmp = makeTempDir("mcp-tasks-search-");
-    grantAdmin(tmp.path);
-    const dir = path.join(tmp.path, "search-proj");
-    fs.mkdirSync(dir, { recursive: true });
-    writeFile(path.join(dir, "summary.md"), "# search-proj\nSearch visibility test project.");
-
-    db = await buildIndex(tmp.path);
-    server = makeMockServer();
-
-    const ctx: McpContext = {
-      phrenPath: tmp.path,
-      profile: "test",
-      db: () => db,
-      rebuildIndex: async () => {
-        db.close();
-        db = await buildIndex(tmp.path);
-      },
-      updateFileInIndex: (filePath: string) => {
-        try { updateFileInIndex(db, filePath, tmp.path); } catch { /* best effort */ }
-      },
-      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
-    };
-    registerSearch(server as any, ctx);
-    registerTask(server as any, ctx);
-  });
-
-  afterEach(() => {
-    delete process.env.PHREN_ACTOR;
-    db.close();
-    tmp.cleanup();
-  });
-
-  it("add_task is visible to search_knowledge after index refresh", async () => {
-    const addRes = parseResult(await server.call("add_task", {
-      project: "search-proj",
-      item: "Implement zymurgy fermentation tracking algorithm for brew optimization",
-    }));
-    expect(addRes.ok).toBe(true);
-
-    // Rebuild to guarantee visibility (tests the add → file write → index round-trip)
-    db.close();
-    db = await buildIndex(tmp.path);
-
-    const searchRes = parseResult(await server.call("search_knowledge", {
-      query: "zymurgy fermentation",
-      project: "search-proj",
-    }));
-    expect(searchRes.ok).toBe(true);
-    expect(searchRes.data.results.length).toBeGreaterThan(0);
-    const texts = searchRes.data.results.map((r: any) => r.snippet || r.text || "").join(" ");
-    expect(texts.toLowerCase()).toContain("zymurgy");
-  });
 });

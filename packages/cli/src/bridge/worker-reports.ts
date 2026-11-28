@@ -1,7 +1,5 @@
-import { mergeTaskIdentitySchema } from "../task/merge-links.js";
-import { recordTaskPrs } from "../task/report-links.js";
-import { linkReportedWork } from "./task-work.js";
-import { phrenStoreRoot } from "./transcripts.js";
+import { ForgeError } from "../forge/issues.js";
+import { dispatchIssueSchema, issueReference, linkIssuePulls, readDispatchIssue } from "./dispatch-issue.js";
 import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -10,7 +8,7 @@ import { atomicInPrivateDir, BridgeError, bridgeRoot, type Json, type Target, ta
 import { paneIdentity, findPane, snapshot, validateTarget } from "./herdr.js";
 import { originPaneSchema } from "./dispatch.js";
 import { paneTurn } from "./dispatch-returns.js";
-import { briefArrival, briefId, briefTask } from "./launch-brief.js";
+import { briefArrival, briefId } from "./launch-brief.js";
 import type { TurnRecord } from "./turn-records.js";
 
 import { integratorSchema, prsSchema, reportText as text, type Integrator, type PullRequest } from "./return-contract.js";
@@ -20,8 +18,8 @@ const reportSchema = z.object({ target: targetSchema, terminal: text(200), promp
 const key = (target: Target) => createHash("sha256").update(JSON.stringify([target.server, target.workspace, target.tab, target.pane, target.source, target.session])).digest("hex");
 const reportFile = (target: Target) => path.join(bridgeRoot(), "worker-reports", `${key(target)}.json`);
 
-/** The worker reports PR evidence to its own Hook, without direct messaging or
- * GitHub comments. Bound to this terminal and submitted turn, not the next one.
+/** The worker reports PR evidence to its own Hook. Bound to this terminal
+ * and submitted turn, not the next one.
  *
  * The pane's turn record can miss that turn: a nested agent run in the
  * worker's own pane (`claude -p` from its shell) inherits the pane's
@@ -30,27 +28,38 @@ const reportFile = (target: Target) => path.join(bridgeRoot(), "worker-reports",
  * still reports; the evidence binds to its current turn, the one the next
  * Stop ends, and never to a prompt submitted after the report. */
 export async function reportWorker(input: unknown): Promise<Json> {
-  const data = z.object({ origin: originPaneSchema, prs: prsSchema, task: mergeTaskIdentitySchema.optional(), dispatch: briefId.optional() }).strict().parse(input);
+  const data = z.object({ origin: originPaneSchema, prs: prsSchema, issue: dispatchIssueSchema.optional(),
+    dispatch: briefId.optional() }).strict().parse(input);
   const pane = findPane(await snapshot(data.origin.server), data.origin);
   if (!pane) throw new BridgeError(409, "The worker pane changed.");
   const session = await paneIdentity(data.origin.server, pane, true);
   const target = targetSchema.parse({ ...data.origin, source: pane.agent, session });
   await validateTarget(target, false, true);
   const record = await paneTurn(target.server, pane, target.source);
-  const promptSeq = record?.prompt && record.session === session && record.terminal === pane.terminal_id ? record.prompt.seq : undefined;
-  if (promptSeq === undefined && !(typeof pane.terminal_id === "string" && await arrivedHere(data.dispatch ?? (record && record.session === session ? record.dispatch : undefined), target)))
+  const turn = record?.session === target.session && record.terminal === pane.terminal_id ? record : undefined;
+  const promptSeq = turn?.prompt?.seq;
+  const dispatch = data.dispatch ?? turn?.dispatch;
+  const arrived = typeof pane.terminal_id === "string" && (promptSeq === undefined || (!!dispatch && dispatch !== turn?.dispatch))
+    ? await arrivedHere(dispatch, target) : false;
+  if (promptSeq === undefined && !arrived)
     throw new BridgeError(409, "The Hook has not recorded this worker's submitted turn yet, and no dispatch it launched arrived in this pane.");
   await atomicInPrivateDir(reportFile(target), reportSchema.parse({ target, terminal: pane.terminal_id, ...(promptSeq !== undefined ? { promptSeq } : {}), prs: data.prs, at: new Date().toISOString() }));
-  const dispatch = data.dispatch ?? record?.dispatch;
-  const task = data.task ?? (dispatch ? await briefTask(dispatch) : undefined);
-  let taskLinks: { linked: boolean; error?: string };
-  try { taskLinks = recordTaskPrs(phrenStoreRoot(), data.prs, task, dispatch); }
-  catch { taskLinks = { linked: false, error: "PR report saved, but the private task link could not be saved. Retry the report." }; }
-  // The task's Work record (task/work.ts) takes the pull request on any forge.
-  let taskWork: { linked: boolean; error?: string };
-  try { taskWork = await linkReportedWork(data.prs, task, dispatch); }
-  catch { taskWork = { linked: false, error: "PR report saved, but the task's work link could not be saved. Retry the report." }; }
-  return { ok: true, target, prs: data.prs, taskLinks, taskWork };
+  let issueLinks: { linked: boolean; error?: string } = { linked: false };
+  try {
+    const boundId = arrived ? dispatch : turn?.dispatch;
+    const bound = boundId ? await readDispatchIssue(boundId) : undefined;
+    if (bound && data.issue && issueReference(bound).toLowerCase() !== issueReference(data.issue).toLowerCase())
+      throw new BridgeError(409, "The reported issue differs from the dispatch's issue.");
+    const issue = bound ?? data.issue;
+    if (issue) {
+      await linkIssuePulls(issue, data.prs);
+      issueLinks = { linked: true };
+    }
+  } catch (error) {
+    const message = error instanceof BridgeError || error instanceof ForgeError ? error.message : "Could not record the issue PR link.";
+    issueLinks = { linked: false, error: message };
+  }
+  return { ok: true, target, prs: data.prs, issueLinks };
 }
 /** Whether this Hook launched dispatch `id` and its brief arrived in exactly this pane and conversation. */
 async function arrivedHere(id: string | undefined, target: Target): Promise<boolean> {

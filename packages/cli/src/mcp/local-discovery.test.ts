@@ -18,9 +18,8 @@ it("refreshes a single live MCP after uncommitted profile and document changes w
   const profile = path.join(store, "profiles", "test.yaml");
   const summary = path.join(store, "media-library", "summary.md");
   writeFile(path.join(store, "phren.root.yaml"), "version: 1\ninstallMode: shared\nsyncMode: managed-git\n");
-  writeFile(path.join(store, ".config", "modules.yaml"), "version: 1\nenabled:\n  tasks: true\n");
   writeFile(profile, "name: test\nprojects: [media-library]\n");
-  writeFile(path.join(store, "media-library", "tasks.md"), "# Tasks\n\n## Queue\n\n- Connect the media library\n");
+  writeFile(path.join(store, "media-library", "AGENTS.md"), "# Tasks\n\n## Queue\n\n- Connect the media library\n");
   execFileSync("git", ["init", "--quiet", store]);
   execFileSync("git", ["-C", store, "remote", "add", "origin", path.join(tmp.path, "absent-remote")]);
   const trace = path.join(tmp.path, "git-trace.log");
@@ -38,7 +37,7 @@ it("refreshes a single live MCP after uncommitted profile and document changes w
   const initial = await call("media-library");
   expect(initial.ok).toBe(true);
   expect(initial.data.summary).toBeNull();
-  expect(initial.data.files.map((f: { filename: string }) => f.filename)).toEqual(["tasks.md"]);
+  expect(initial.data.files.map((f: { filename: string }) => f.filename)).toEqual(["AGENTS.md"]);
 
   // No index event/reload for unchanged reads, even across a freshness interval.
   const events = () => fs.readFileSync(path.join(store, ".runtime", "index-events.jsonl"), "utf8");
@@ -89,8 +88,6 @@ it("refreshes a single live MCP after uncommitted profile and document changes w
   expect(stale.ok).toBe(true);
   expect(stale.data.summary).toContain("Updated local summary.");
   const started = Date.now();
-  const tasks = await client!.callTool({ name: "get_tasks", arguments: { project: "media-library" } });
-  expect(JSON.parse((tasks.content as Array<{ text: string }>)[0].text).ok).toBe(true);
   expect(Date.now() - started).toBeLessThan(250);
   fs.unlinkSync(lock);
   await tick();

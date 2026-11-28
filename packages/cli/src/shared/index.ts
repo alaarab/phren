@@ -36,7 +36,6 @@ function getAllStoreProjectDirs(phrenPath: string, profile?: string): string[] {
 }
 import { getIndexPolicy, withFileLock } from "./governance.js";
 import { tryFileLock } from "../governance/locks.js";
-import { stripTaskDoneSection } from "./content.js";
 import { isInactiveFindingLine } from "../finding/lifecycle.js";
 import { invalidateDfCache } from "./search-fallback.js";
 import { errorMessage } from "../utils.js";
@@ -167,7 +166,6 @@ const FILE_TYPE_MAP: Record<string, string> = {
   "summary.md": "summary",
   "findings.md": "findings",
   "reference.md": "reference",
-  "tasks.md": "task",
   "changelog.md": "changelog",
   "truths.md": "canonical",
   // review.md is indexed on purpose so `search_knowledge` can answer "why is this in my
@@ -582,7 +580,6 @@ function globAllFiles(phrenPath: string, profile?: string, onlyProjectDirs?: rea
   for (const dir of projectDirs) {
     const projectName = path.basename(dir);
     const storePath = path.dirname(dir);
-    const modules = moduleSnapshot(storePath, profile);
     const config = readProjectConfig(storePath, projectName);
     const ownership = getProjectOwnershipMode(storePath, projectName, config);
     const mdFilesSet = new Set<string>();
@@ -598,11 +595,11 @@ function globAllFiles(phrenPath: string, profile?: string, onlyProjectDirs?: rea
     }
     const relFiles = [...mdFilesSet].sort();
     for (const relFile of relFiles) {
+      if (relFile.toLowerCase() === "tasks.md") continue;
       const filename = path.basename(relFile);
       if (ownership === "repo-managed" && ["agents.md", "claude.md"].includes(filename.toLowerCase())) continue;
       const fullPath = path.join(dir, relFile);
       const type = classifyFile(filename, relFile);
-      if (type === "task" && !modules.has("tasks")) continue;
       if (relFile.startsWith("skills/") && !skillEnabled(storePath, relFile.split("/")[1], profile)) continue;
       if (type === "skill" && !statFileOrDirectory(fullPath)?.isFile()) continue;
       entries.push({ fullPath, project: projectName, filename, type, relFile });
@@ -656,9 +653,6 @@ export function normalizeIndexedContent(content: string, type: string, phrenPath
     })
     .replace(/<!--\s*phren:cite\s+\{[\s\S]*?\}\s*-->/g, "");
   normalized = resolveImports(normalized, phrenPath);
-  if (type === "task") {
-    normalized = stripTaskDoneSection(normalized);
-  }
   if (type === "findings") {
     const lines = normalized.split("\n");
     normalized = lines.filter(line => !isInactiveFindingLine(line)).join("\n");
@@ -832,9 +826,8 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
     const rel = path.relative(path.resolve(phrenPath), resolvedPath);
     const project = rel.split(path.sep)[0];
     const relFile = rel.split(path.sep).slice(1).join(path.sep);
+    if (relFile.toLowerCase() === "tasks.md") return;
     const type = classifyFile(filename, relFile);
-    const modules = moduleSnapshot(phrenPath);
-    if (type === "task" && !modules.has("tasks")) return;
     if (relFile.startsWith("skills/") && !skillEnabled(phrenPath, relFile.split("/")[1])) return;
     const entry: FileEntry = { fullPath: resolvedPath, project, filename, type, relFile };
     // Single read feeds the insert, fragment extraction and the content hash.

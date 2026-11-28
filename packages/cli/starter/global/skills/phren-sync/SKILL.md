@@ -31,7 +31,7 @@ The stop hook auto-saves too; a manual push is only for "I want it on the other 
 
 ## Conflicts
 
-`phren store sync` union-merges conflicts in `tasks.md`, `FINDINGS.md`, and task archives. For other conflicts, it aborts the merge and reports the paths for manual resolution. Never drop a side silently.
+`phren store sync` union-merges conflicts in `FINDINGS.md`. For other conflicts, it aborts the merge and reports the paths for manual resolution. Never drop a side silently.
 
 ## Related
 

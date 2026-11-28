@@ -1,5 +1,4 @@
-import { moduleEnabled } from "../modules/runtime.js";
-import { disabledHint } from "../modules/registry.js";
+
 import * as fs from "fs";
 import * as path from "path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -15,7 +14,6 @@ import {
   getIndexPolicy,
   updateIndexPolicy,
   mergeConfig,
-  VALID_TASK_MODES,
   VALID_FINDING_SENSITIVITY,
 } from "../shared/governance.js";
 import {
@@ -197,9 +195,6 @@ async function handleGetConfig(
         _source: src("findingSensitivity"),
       };
     }
-    if (d === "all" || d === "taskMode") {
-      result.taskMode = { taskMode: resolved.taskMode, _source: src("taskMode") };
-    }
     if (d === "all" || d === "retention") {
       result.retention = {
         ...resolved.retentionPolicy,
@@ -216,19 +211,12 @@ async function handleGetConfig(
       const globalSnapshot = proactivitySnapshot(phrenPath).effective;
       const base = resolved.proactivity.base ?? globalSnapshot.proactivity;
       const findings = resolved.proactivity.findings ?? resolved.proactivity.base ?? globalSnapshot.proactivityFindings;
-      const tasks = resolved.proactivity.tasks ?? resolved.proactivity.base ?? globalSnapshot.proactivityTask;
       result.proactivity = {
         base,
         findings,
-        tasks,
         _source: {
           base: hasOwnOverride(projectOverrides, "proactivity") ? "project" : "global",
           findings: hasOwnOverride(projectOverrides, "proactivityFindings")
-            ? "project"
-            : hasOwnOverride(projectOverrides, "proactivity")
-              ? "project"
-              : "global",
-          tasks: hasOwnOverride(projectOverrides, "proactivityTask")
             ? "project"
             : hasOwnOverride(projectOverrides, "proactivity")
               ? "project"
@@ -257,10 +245,6 @@ async function handleGetConfig(
 
   if (d === "all" || d === "proactivity") {
     result.proactivity = proactivitySnapshot(phrenPath);
-  }
-  if (d === "all" || d === "taskMode") {
-    const wf = getWorkflowPolicy(phrenPath);
-    result.taskMode = { taskMode: wf.taskMode };
   }
   if (d === "all" || d === "findingSensitivity") {
     const wf = getWorkflowPolicy(phrenPath);
@@ -294,15 +278,12 @@ async function handleGetConfig(
 async function handleSetConfig(
   ctx: McpContext,
   { domain, settings, project }: {
-    domain: "proactivity" | "taskMode" | "findingSensitivity" | "retention" | "workflow" | "access" | "index" | "topic" | "dreaming";
+    domain: "proactivity" | "findingSensitivity" | "retention" | "workflow" | "access" | "index" | "topic" | "dreaming";
     settings: Record<string, unknown>;
     project?: string;
   },
 ) {
   const { phrenPath } = ctx;
-  if (!moduleEnabled(phrenPath, "tasks", ctx.profile) && (domain === "taskMode" || settings.scope === "tasks" || "taskMode" in settings || "proactivityTask" in settings)) {
-    return mcpResponse({ ok: false, error: disabledHint("tasks"), errorCode: "UNAVAILABLE" });
-  }
   switch (domain) {
 
     // ── proactivity ───────────────────────────────────────────────
@@ -312,17 +293,17 @@ async function handleSetConfig(
         return mcpResponse({ ok: false, error: `Invalid proactivity level. Must be one of: ${PROACTIVITY_LEVELS.join(", ")}.` });
       }
       const scope = (settings.scope as string | undefined) ?? "base";
-      if (!["base", "findings", "tasks"].includes(scope)) {
-        return mcpResponse({ ok: false, error: `Invalid scope. Must be one of: base, findings, tasks.` });
+      if (!["base", "findings"].includes(scope)) {
+        return mcpResponse({ ok: false, error: `Invalid scope. Must be one of: base or findings.` });
       }
-      const s = scope as "base" | "findings" | "tasks";
+      const s = scope as "base" | "findings";
 
       if (project) {
         const err = validateProject(project);
         if (err) return mcpResponse({ ok: false, error: err });
 
         const warning = checkProjectRegistered(phrenPath, project);
-        const key = s === "base" ? "proactivity" : s === "findings" ? "proactivityFindings" : "proactivityTask";
+        const key = s === "base" ? "proactivity" : "proactivityFindings";
         updateProjectConfigOverrides(phrenPath, project, (current) => ({
           ...current,
           [key]: level,
@@ -339,50 +320,12 @@ async function handleSetConfig(
       const patch: Record<string, string> = {};
       if (s === "base") patch.proactivity = level;
       else if (s === "findings") patch.proactivityFindings = level;
-      else if (s === "tasks") patch.proactivityTask = level;
 
       writeGovernanceInstallPreferences(phrenPath, patch);
       return mcpResponse({
         ok: true,
         message: `Proactivity ${s} set to ${level}.`,
         data: proactivitySnapshot(phrenPath),
-      });
-    }
-
-    // ── taskMode ──────────────────────────────────────────────────
-    case "taskMode": {
-      const mode = settings.mode as string | undefined;
-      if (!mode || !(VALID_TASK_MODES as readonly string[]).includes(mode)) {
-        return mcpResponse({ ok: false, error: `Invalid task mode. Must be one of: ${VALID_TASK_MODES.join(", ")}.` });
-      }
-      const validMode = mode as (typeof VALID_TASK_MODES)[number];
-
-      if (project) {
-        const err = validateProject(project);
-        if (err) return mcpResponse({ ok: false, error: err });
-
-        const warning = checkProjectRegistered(phrenPath, project);
-        updateProjectConfigOverrides(phrenPath, project, (current) => ({
-          ...current,
-          taskMode: validMode,
-        }));
-        return mcpResponse({
-          ok: true,
-          message: warning
-            ? `Task mode set to ${validMode} for project "${project}". WARNING: ${warning}`
-            : `Task mode set to ${validMode} for project "${project}".`,
-          data: { project, taskMode: validMode, ...(warning ? { warning } : {}) },
-        });
-      }
-
-      const result = updateWorkflowPolicy(phrenPath, { taskMode: validMode });
-      if (!result.ok) {
-        return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
-      }
-      return mcpResponse({
-        ok: true,
-        message: `Task mode set to ${validMode}.`,
-        data: { taskMode: validMode },
       });
     }
 
@@ -480,11 +423,10 @@ async function handleSetConfig(
 
     // ── workflow ──────────────────────────────────────────────────
     case "workflow": {
-      const { lowConfidenceThreshold, riskySections, taskMode, findingSensitivity } =
+      const { lowConfidenceThreshold, riskySections, findingSensitivity } =
         settings as {
           lowConfidenceThreshold?: number;
           riskySections?: string[];
-          taskMode?: string;
           findingSensitivity?: string;
         };
 
@@ -493,9 +435,6 @@ async function handleSetConfig(
         if (err) return mcpResponse({ ok: false, error: err });
 
         // Validate enums before entering the callback
-        if (taskMode !== undefined && !(VALID_TASK_MODES as readonly string[]).includes(taskMode)) {
-          return mcpResponse({ ok: false, error: `Invalid task mode. Must be one of: ${VALID_TASK_MODES.join(", ")}.` });
-        }
         if (findingSensitivity !== undefined && !(VALID_FINDING_SENSITIVITY as readonly string[]).includes(findingSensitivity)) {
           return mcpResponse({ ok: false, error: `Invalid finding sensitivity. Must be one of: ${VALID_FINDING_SENSITIVITY.join(", ")}.` });
         }
@@ -516,7 +455,6 @@ async function handleSetConfig(
               ...(riskySections !== undefined ? { riskySections: riskySections as ("Review" | "Stale" | "Conflicts")[] } : {}),
             };
           }
-          if (taskMode !== undefined) nextConfig.taskMode = taskMode as (typeof VALID_TASK_MODES)[number];
           if (findingSensitivity !== undefined) nextConfig.findingSensitivity = findingSensitivity as (typeof VALID_FINDING_SENSITIVITY)[number];
           return nextConfig;
         });
@@ -532,10 +470,6 @@ async function handleSetConfig(
       const patch: Parameters<typeof updateWorkflowPolicy>[1] = {};
       if (lowConfidenceThreshold !== undefined) patch.lowConfidenceThreshold = lowConfidenceThreshold;
       if (riskySections !== undefined) patch.riskySections = riskySections as ("Review" | "Stale" | "Conflicts")[];
-      if (taskMode !== undefined) {
-        if (!(VALID_TASK_MODES as readonly string[]).includes(taskMode)) return mcpResponse({ ok: false, error: `Invalid task mode. Must be one of: ${VALID_TASK_MODES.join(", ")}.` });
-        patch.taskMode = taskMode as (typeof VALID_TASK_MODES)[number];
-      }
       if (findingSensitivity !== undefined) {
         if (!(VALID_FINDING_SENSITIVITY as readonly string[]).includes(findingSensitivity)) return mcpResponse({ ok: false, error: `Invalid finding sensitivity. Must be one of: ${VALID_FINDING_SENSITIVITY.join(", ")}.` });
         patch.findingSensitivity = findingSensitivity as (typeof VALID_FINDING_SENSITIVITY)[number];
@@ -740,13 +674,13 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ phren · get config",
       description:
-        "Read current configuration for one or all config domains: proactivity, taskMode, " +
+        "Read current configuration for one or all config domains: proactivity, " +
         "findingSensitivity, retention (policy), workflow, access, index, topic, dreaming. " +
         "Returns both configured and effective values. When project is provided, returns " +
         "the merged view with project overrides applied and _source annotations.",
       inputSchema: z.object({
         domain: z
-          .enum(["proactivity", "taskMode", "findingSensitivity", "retention", "workflow", "access", "index", "topic", "dreaming", "all"])
+          .enum(["proactivity", "findingSensitivity", "retention", "workflow", "access", "index", "topic", "dreaming", "all"])
           .optional()
           .describe("Config domain to read. Defaults to 'all'."),
         project: projectParam,
@@ -760,17 +694,17 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ phren · set config",
       description:
-        "Update configuration for a specific domain. Replaces set_proactivity, set_task_mode, " +
+        "Update configuration for a specific domain. Replaces set_proactivity, " +
         "set_finding_sensitivity, set_retention_policy, set_workflow_policy, set_index_policy, " +
         "and set_topic_config. When project is provided, writes to that project's phren.project.yaml " +
         "instead of global .config/.",
       inputSchema: z.object({
-        domain: z.enum(["proactivity", "taskMode", "findingSensitivity", "retention", "workflow", "access", "index", "topic", "dreaming"]),
+        domain: z.enum(["proactivity", "findingSensitivity", "retention", "workflow", "access", "index", "topic", "dreaming"]),
         settings: z.record(z.string(), z.unknown()).describe(
-          "Domain-specific settings. proactivity: { level, scope? } | taskMode: { mode } | " +
+          "Domain-specific settings. proactivity: { level, scope? } | " +
           "findingSensitivity: { level } | retention: { ttlDays?, retentionDays?, autoAcceptThreshold?, " +
-          "minInjectConfidence?, decay?, budgets?: { openTasks?, reviewEntries?, runtimeMB?, fanoutArchiveMB?, runtimeAgeOut?, " +
-          "runtimeAgeOutDays? } } | workflow: { lowConfidenceThreshold?, riskySections?, taskMode?, " +
+          "minInjectConfidence?, decay?, budgets?: { reviewEntries?, runtimeMB?, fanoutArchiveMB?, runtimeAgeOut?, " +
+          "runtimeAgeOutDays? } } | workflow: { lowConfidenceThreshold?, riskySections?, " +
           "findingSensitivity? } | access: { admins?, contributors?, readers? } (each an array of actor names) | " +
           "index: { includeGlobs?, excludeGlobs?, includeHidden? } | " +
           "topic: { topics, domain? } | " +

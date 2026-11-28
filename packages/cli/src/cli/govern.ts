@@ -30,7 +30,6 @@ import { compactFindingJournals } from "../finding/journal.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { summarizeProject } from "../content/summarize.js";
 import { claimMaintenanceWriter } from "../sync/maintenance-writer.js";
-import { tidyDoneTasks } from "../data/tasks.js";
 import { recordStoreHealth } from "../governance/store-health.js";
 import { citationStateKey, sweepCitationStates } from "../content/citation-states.js";
 
@@ -511,19 +510,11 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
       compacted.failed += result.failed;
     }
     const governance = await governTargets(projects, true);
-    // Done tasks past thirty move to .config/task-archive, and topic files get
-    // their "## Now" block refreshed when they changed. Both structural and
-    // cheap; a model is only consulted from `phren maintain summarize --llm`.
-    let tidied = 0;
     let summarized = 0;
     // Attached targets already hold their store lease; the primary keeps its existing journal and governance behavior.
     const lease = claimMaintenanceWriter(getPhrenPath());
     for (const { storePath, project } of projects) {
       if (storePath === getPhrenPath() && !lease.writer) continue;
-      try {
-        const tidy = tidyDoneTasks(storePath, project, 30);
-        if (tidy.ok && tidy.data.startsWith("Tidied")) tidied++;
-      } catch (err: unknown) { logger.debug("maintenance", `tidy ${project}: ${errorMessage(err)}`); }
       try {
         const summary = await summarizeProject(storePath, project, {});
         if (summary.topics.some((t) => t.updated) || summary.summaryUpdated) summarized++;
@@ -564,7 +555,7 @@ export async function handleBackgroundMaintenance(projectArg?: string) {
     appendAuditLog(
       getPhrenPath(),
       "background_maintenance",
-      `status=ok journal_added=${compacted.added} journal_skipped=${compacted.skipped} journal_failed=${compacted.failed} projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount} tasks_tidied=${tidied} summarized=${summarized}`
+      `status=ok journal_added=${compacted.added} journal_skipped=${compacted.skipped} journal_failed=${compacted.failed} projects=${governance.projects} stale=${governance.staleCount} conflicts=${governance.conflictCount} review=${governance.reviewCount} summarized=${summarized}`
     );
   } catch (err: unknown) {
     const errMsg = errorMessage(err);

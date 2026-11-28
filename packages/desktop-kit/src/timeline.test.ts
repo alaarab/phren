@@ -96,7 +96,7 @@ describe("ChatTimelineTests", () => {
       call("a", "mcp__phren__search_knowledge", json({ query: "navigation" })),
       { type: "message", role: "assistant", content: "Looking up the project" },
       output("a", json({ ok: true, data: { count: 1, results: [{ title: "Swipe back" }] } })),
-      call("b", "mcp__phren__get_tasks", "{}"), output("b", "[]"),
+      call("b", "mcp__phren__list_issues", "{}"), output("b", "[]"),
       call("c", "mcp__phren__get_project_summary", "{}"), output("c", "Summary"),
     );
     const entries = ChatTimelineEntry.group(messages);
@@ -347,7 +347,7 @@ describe("ChatTimelineTests", () => {
   });
 
   it("toolPreviewBoundsManyLinesAndLongUnicodeWithoutLosingSource", () => {
-    expect(ToolPresentation.of("mcp__phren__get_tasks", "{}").title).toBe("Phren · Get Tasks");
+    expect(ToolPresentation.of("mcp__phren__list_issues", "{}").title).toBe("Phren · List Issues");
     const body = Array.from({ length: 2_000 }, (_, index) => "Line " + index).join("\n");
     const display = ToolPresentation.of("Tool result", body);
     expect(new ToolOutputPreview(display.body).text).toBe("Line 0\nLine 1\nLine 2\nLine 3\nLine 4\nLine 5…");
@@ -486,7 +486,7 @@ describe("ChatTimelineParityWave2Test", () => {
       { type: "function_call", call_id: "a", name: "mcp__phren__search_knowledge", arguments: json({ query: "navigation" }) },
       { type: "message", role: "assistant", content: "Looking up the project" },
       { type: "function_call_output", call_id: "a", output: json({ ok: true, data: { count: 1, results: [{ title: "Swipe back" }] } }) },
-      { type: "function_call", call_id: "b", name: "mcp__phren__get_tasks", arguments: "{}" },
+      { type: "function_call", call_id: "b", name: "mcp__phren__list_issues", arguments: "{}" },
       { type: "function_call_output", call_id: "b", output: "[]" },
       { type: "function_call", call_id: "c", name: "mcp__phren__get_project_summary", arguments: "{}" },
       { type: "function_call_output", call_id: "c", output: "Summary" },
@@ -698,7 +698,7 @@ describe("ToolCardTimelineTests", () => {
       raws.push(tcCall(`m${index}`, name, json({ owner: "alaarab", repo: "phren", labels: ["ios"] })));
       raws.push(tcOutput(`m${index}`, index === 2 ? json({ isError: true, content: [{ type: "text", text: "Not mergeable" }] }) : json({ content: [{ type: "text", text: json({ title: "Cards", state: "open" }) }] })));
     });
-    raws.push(tcCall("p", "mcp__phren__add_task", json({ task: "Verify" })));
+    raws.push(tcCall("p", "mcp__phren__add_finding", json({ finding: "Verify" })));
     raws.push(tcOutput("p", json({ ok: true })));
     const entries = ChatTimelineEntry.group(tcRead(raws));
     expect(entries.some((entry) => entry.isReadRun)).toBe(false);

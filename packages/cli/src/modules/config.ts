@@ -11,7 +11,7 @@ export function setModuleEnabled(store: string, name: string, value: boolean, pr
   if (!BUILTIN_MODULES.some(module => module.name === name)) throw new Error(`Unknown module "${name}".`);
   const file = path.join(store, ".config", "modules.yaml");
   withFileLock(file, () => {
-    const config: ModulesConfig = readConfig(store) ?? { version: 1, enabled: { tasks: false } };
+    const config: ModulesConfig = readConfig(store) ?? { version: 1 };
     if (profile !== undefined) {
       if (!profile.trim() || ["__proto__", "constructor", "prototype"].includes(profile)) throw new Error("Invalid module profile.");
       config.profiles ??= {};
@@ -29,25 +29,16 @@ export function migrateModules(store: string, hookInstalled = false): void {
   if (inProgressGitOperation(store)) return;
   const file = path.join(store, ".config", "modules.yaml");
   const existing = readConfig(store);
-  if (existing?.enabled?.tasks !== undefined) return;
+  if (existing) return;
   const legacy = fs.existsSync(path.join(store, "phren.root.yaml")) || fs.existsSync(installPreferencesFile(store));
   if (!existing && !legacy && !hookInstalled) return;
   withFileLock(file, () => {
-    const current = readConfig(store);
-    if (current?.enabled?.tasks !== undefined) return;
-    if (current) {
-      // Before memory-only defaults, an omitted tasks override meant enabled.
-      current.enabled = { tasks: true, ...current.enabled };
-      const text = yaml.dump(current, { noRefs: true });
-      atomicWriteText(runtimeFile(store, "modules.yaml.migration-backup"), fs.readFileSync(file, "utf8"));
-      atomicWriteText(file, text);
-      return;
-    }
+    if (readConfig(store)) return;
     const conductor = fs.existsSync(path.join(store, "global", "skills", "conductor"));
     const schedules = fs.existsSync(store) && fs.readdirSync(store, { withFileTypes: true })
       .some(entry => entry.isDirectory() && fs.existsSync(path.join(store, entry.name, "schedules.yaml")));
     const config: ModulesConfig = { version: 1, enabled: Object.fromEntries(BUILTIN_MODULES.map(module => [module.name,
-      ["memory", "tasks", "git"].includes(module.name) || (hookInstalled && ["hook", "schedules", "conductor"].includes(module.name))
+      ["memory", "git"].includes(module.name) || (hookInstalled && ["hook", "schedules", "conductor"].includes(module.name))
       || (conductor && ["hook", "conductor"].includes(module.name)) || (schedules && module.name === "schedules"),
     ])) };
     const text = yaml.dump(config, { noRefs: true });

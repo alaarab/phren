@@ -17,7 +17,7 @@ const STORE = { id: "ab12cd34", name: "Personal", primary: true, role: "primary"
 /** A Hook whose store head moves once its pull has been requested (when `moves`). */
 function storeRoutes(pull: FakeHookHandler, state: { pulled: boolean; headFailures?: number }, stores: unknown[] = [STORE]): Record<string, FakeHookHandler> {
   return {
-    "GET /v1/tasks/stores": () => ({ json: { stores } }),
+    "GET /v1/store/directory": () => ({ json: { stores } }),
     "GET /v1/store/head": () => {
       if (state.pulled && state.headFailures) { state.headFailures -= 1; return { status: 500, json: { error: "boom" } }; }
       return { json: { sha: state.pulled ? NEW : OLD } };

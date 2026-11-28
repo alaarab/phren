@@ -20,7 +20,6 @@ import { DEFAULT_DREAMING_CONFIG, DREAMING_RANGES } from "./dreaming.js";
 /** The nine configurable domains, named to match the `get_config`/`set_config` MCP tools. */
 export type ConfigDomainId =
   | "proactivity"
-  | "taskMode"
   | "findingSensitivity"
   | "retention"
   | "workflow"
@@ -116,10 +115,10 @@ export const CONFIG_DOMAINS: ConfigDomainDescriptor[] = [
         key: "proactivity.base",
         domain: "proactivity",
         label: "Base proactivity",
-        summary: "Master auto-capture level for both findings and tasks.",
+        summary: "Master auto-capture level for findings.",
         help:
           "Sets the default eagerness for everything the agent captures without being asked. "
-          + "Findings and tasks each inherit this unless you override them below.",
+          + "Finding capture inherits this unless you override them below.",
         control: "enum",
         options: PROACTIVITY_OPTIONS,
         default: "high",
@@ -141,66 +140,6 @@ export const CONFIG_DOMAINS: ConfigDomainDescriptor[] = [
         scope: "global+project",
         impact: "Controls how often the agent writes to FINDINGS.md on its own.",
         risk: "safe",
-      },
-      {
-        key: "proactivity.tasks",
-        domain: "proactivity",
-        label: "Tasks proactivity",
-        summary: "Auto-capture level for tasks specifically.",
-        help:
-          "Overrides the base level just for tasks. Leave unset to inherit the base level.",
-        control: "enum",
-        options: PROACTIVITY_OPTIONS,
-        default: "high",
-        scope: "global+project",
-        impact: "Controls how often the agent adds items to tasks.md on its own.",
-        risk: "safe",
-      },
-    ],
-  },
-  {
-    id: "taskMode",
-    label: "Task mode",
-    icon: "checklist",
-    summary: "How much authority the agent has over your task list.",
-    scope: "global+project",
-    fields: [
-      {
-        key: "taskMode",
-        domain: "taskMode",
-        label: "Task mode",
-        summary: "What the agent is allowed to do with tasks.",
-        help:
-          "Governs whether the agent may create, complete, and reorder tasks for you, "
-          + "or whether task management stays entirely in your hands.",
-        control: "enum",
-        options: [
-          {
-            value: "auto",
-            label: "Auto",
-            blurb: "The agent freely creates, updates, and completes tasks as work progresses.",
-            recommended: true,
-          },
-          {
-            value: "suggest",
-            label: "Suggest",
-            blurb: "The agent proposes task changes but waits for you to confirm.",
-          },
-          {
-            value: "manual",
-            label: "Manual",
-            blurb: "Only you create and change tasks; the agent never touches them.",
-          },
-          {
-            value: "off",
-            label: "Off",
-            blurb: "Task tracking is disabled entirely.",
-          },
-        ],
-        default: DEFAULT_WORKFLOW_POLICY.taskMode,
-        scope: "global+project",
-        impact: "`off` hides the task system completely; `auto` lets the agent run it.",
-        risk: "caution",
       },
     ],
   },
@@ -367,21 +306,6 @@ export const CONFIG_DOMAINS: ConfigDomainDescriptor[] = [
         default: DEFAULT_POLICY.decay.d120,
         scope: "global+project",
         impact: "Lower values make stale memory fade faster.",
-        risk: "safe",
-      },
-      {
-        key: "retention.budgets.openTasks",
-        domain: "retention",
-        label: "Open-task budget",
-        summary: "Open tasks a project can hold before the prompt hook stops filing new ones.",
-        help:
-          "Past this many Active and Queue tasks, the prompt hook files no new task for the project "
-          + "and its trace line says so. Tasks you or an agent add still go in. 0 turns it off.",
-        control: "number",
-        range: { min: 0, max: 10000, step: 1 },
-        default: DEFAULT_POLICY.budgets.openTasks,
-        scope: "global+project",
-        impact: "Lower = auto-capture pauses sooner; nothing is ever removed.",
         risk: "safe",
       },
       {
@@ -609,15 +533,15 @@ export const CONFIG_DOMAINS: ConfigDomainDescriptor[] = [
         control: "string-list",
         default: [],
         scope: "global+project",
-        impact: "Admins can change config and manage findings, tasks, and access itself.",
+        impact: "Admins can change config and manage findings and access itself.",
         risk: "caution",
       },
       {
         key: "access.contributors",
         domain: "access",
         label: "Contributors",
-        summary: "Actors allowed to add and edit findings and tasks.",
-        help: "Actor names with read-write access to findings and tasks but not config.",
+        summary: "Actors allowed to add and edit findings.",
+        help: "Actor names with read-write access to findings but not config.",
         control: "string-list",
         default: [],
         scope: "global+project",
@@ -829,8 +753,6 @@ export function allConfigFields(): ConfigFieldDescriptor[] {
  */
 export const CONFIG_DOMAIN_ALIASES: Record<string, ConfigDomainId> = {
   proactivity: "proactivity",
-  "task-mode": "taskMode",
-  taskmode: "taskMode",
   "finding-sensitivity": "findingSensitivity",
   findingsensitivity: "findingSensitivity",
   policy: "retention",

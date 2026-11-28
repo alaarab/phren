@@ -14,7 +14,6 @@ import {
   searchDocumentsAsync,
   selectSnippets,
   tokenizeForOverlap,
-  wantsTasks,
 } from "../shared/retrieval.js";
 import { debugLog } from "../shared.js";
 import { buildRobustFtsQuery, clampFloat, clampInt, extractKeywordEntries, extractKeywordWords } from "../utils.js";
@@ -94,7 +93,6 @@ export async function runPromptPipeline(input: RecallPipelineInput): Promise<Rec
   // context and should never be injected into an agent prompt automatically.
   rows = rows.filter((row) => row.type !== "notes");
   // Tasks are a backlog, not memory: only when the prompt is about the work.
-  if (!wantsTasks(prompt, intent)) rows = rows.filter((row) => row.type !== "task");
   result.stageMs.trustMs = Date.now() - tTrust0;
   result.trustSurvivors = rows.length;
   if (!rows.length) return abstain("trust-filtered");

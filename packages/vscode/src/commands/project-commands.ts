@@ -11,7 +11,7 @@ import { showSettingsWebview } from "../settingsWebview";
 import { showSetupWizard } from "../setupWizard";
 
 export function registerProjectCommands(ctx: ExtensionContext): vscode.Disposable[] {
-  const { phrenClient, outputChannel, hooksOutputChannel, statusBar, treeDataProvider, runtimeConfig } = ctx;
+  const { phrenClient, outputChannel, hooksOutputChannel, statusBar, treeDataProvider } = ctx;
 
   const setActiveProject = vscode.commands.registerCommand("phren.setActiveProject", async () => {
     try {
@@ -357,7 +357,7 @@ export function registerProjectCommands(ctx: ExtensionContext): vscode.Disposabl
 
       const ownershipPick = await vscode.window.showQuickPick(
         [
-          { label: "detached", description: "Phren stores findings & tasks; your repo keeps its own AGENTS.md (recommended)" },
+          { label: "detached", description: "Phren stores findings; your repo keeps its own AGENTS.md (recommended)" },
           { label: "phren-managed", description: "Phren creates and manages AGENTS.md, skills, and agents in ~/.phren" },
           { label: "repo-managed", description: "Phren reads AGENTS.md from your repo instead of creating its own copy" },
         ],

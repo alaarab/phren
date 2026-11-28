@@ -12,13 +12,6 @@ export const webUiManifest: CapabilityManifest = {
     "finding.pin": { implemented: false, reason: "Pinning to truths.md is CLI/MCP-only" },
 
     // Task management
-    "task.add": { implemented: true, handler: "ui/server.ts:POST /api/tasks/add" },
-    "task.complete": { implemented: true, handler: "ui/server.ts:POST /api/tasks/complete" },
-    "task.remove": { implemented: true, handler: "ui/server.ts:POST /api/tasks/remove" },
-    "task.update": { implemented: true, handler: "ui/server.ts:POST /api/tasks/update" },
-    "task.list": { implemented: true, handler: "ui/server.ts:/api/tasks" },
-    "task.pin": { implemented: false, reason: "No task pinning in web UI (pinned flag is displayed read-only)" },
-    "task.github_link": { implemented: false, reason: "Issue links display in the task list; creating them is MCP/VS Code-only" },
 
     // Hook management
     "hook.list": { implemented: true, handler: "ui/server.ts:/api/hooks" },
@@ -40,7 +33,7 @@ export const webUiManifest: CapabilityManifest = {
 
     // Config
     "config.get": { implemented: true, handler: "ui/server.ts:/api/settings + /api/config" },
-    "config.set": { implemented: true, handler: "ui/server.ts:POST /api/settings/* (workflow policy, task mode, proactivity, finding sensitivity, index policy, auto-capture, mcp-enabled, project overrides, RBAC via /api/settings/access)" },
+    "config.set": { implemented: true, handler: "ui/server.ts:POST /api/settings/* (workflow policy, proactivity, finding sensitivity, index policy, auto-capture, mcp-enabled, project overrides, RBAC via /api/settings/access)" },
 
     // Health / Sync / Session
     "health.check": { implemented: true, handler: "ui/server.ts:/api/runtime-health" },

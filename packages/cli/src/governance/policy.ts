@@ -20,7 +20,6 @@ import { findingAgeLimitDays } from "../content/citation.js";
 import {
   VALID_FINDING_SENSITIVITY,
   VALID_PROACTIVITY_LEVELS,
-  VALID_TASK_MODES,
   VALID_RISKY_SECTIONS,
 } from "./policy-constants.js";
 
@@ -29,8 +28,6 @@ export const MAX_QUEUE_ENTRY_LENGTH = 500;
 
 /** Size budgets. A budget of 0 is off. Nothing a person or agent wrote is ever removed for one. */
 export interface StoreBudgets {
-  /** Open (Active + Queue) tasks per project; past it the prompt hook files no new task there. */
-  openTasks: number;
   /** Review queue entries per project; past it machine-generated entries are not queued there. */
   reviewEntries: number;
   /** This computer's primary `.runtime`, in MB (1,048,576 bytes); reported only. */
@@ -62,7 +59,6 @@ export interface WorkflowPolicy {
   schemaVersion?: number;
   lowConfidenceThreshold: number;
   riskySections: Array<"Review" | "Stale" | "Conflicts">;
-  taskMode: "off" | "manual" | "suggest" | "auto";
   findingSensitivity: "minimal" | "conservative" | "balanced" | "aggressive";
 }
 
@@ -258,10 +254,8 @@ export const DEFAULT_POLICY: RetentionPolicy = {
     d90: 0.65,
     d120: 0.45,
   },
-  // Picked from a long-used store on 2026-11-25: open tasks per project ran 0 to 239 (4 of 32 projects past 150),
   // review entries 0 to 231 (2 past 150), `.runtime` 1.1 GB and the fanout archive 332 MB.
   budgets: {
-    openTasks: 150,
     reviewEntries: 150,
     runtimeMB: 1024,
     fanoutArchiveMB: 512,
@@ -270,9 +264,9 @@ export const DEFAULT_POLICY: RetentionPolicy = {
   },
 };
 
-const BUDGET_NUMBERS = ["openTasks", "reviewEntries", "runtimeMB", "fanoutArchiveMB", "runtimeAgeOutDays"] as const;
-const PROJECT_BUDGETS = new Set(["openTasks", "reviewEntries"]);
-const WHOLE_BUDGETS = new Set(["openTasks", "reviewEntries", "runtimeAgeOutDays"]);
+const BUDGET_NUMBERS = ["reviewEntries", "runtimeMB", "fanoutArchiveMB", "runtimeAgeOutDays"] as const;
+const PROJECT_BUDGETS = new Set(["reviewEntries"]);
+const WHOLE_BUDGETS = new Set(["reviewEntries", "runtimeAgeOutDays"]);
 /** Age-out never removes a file unused for less than a week. */
 export const MIN_RUNTIME_AGE_OUT_DAYS = 7;
 
@@ -289,7 +283,7 @@ export function normalizeBudgets(raw: unknown): StoreBudgets {
   return budgets;
 }
 
-/** Why a budgets patch from the CLI or set_config is refused, or null. A project sets only its task and review budgets. */
+/** Why a budgets patch from the CLI or set_config is refused, or null. A project sets only its review budget. */
 export function budgetsPatchError(patch: unknown, scope: "global" | "project"): string | null {
   if (!isRecord(patch)) return "budgets must be an object of budget names and values";
   for (const [key, value] of Object.entries(patch)) {
@@ -344,7 +338,6 @@ export const DEFAULT_WORKFLOW_POLICY: WorkflowPolicy = {
   schemaVersion: GOVERNANCE_SCHEMA_VERSION,
   lowConfidenceThreshold: 0.7,
   riskySections: ["Stale", "Conflicts"],
-  taskMode: "auto",
   findingSensitivity: "balanced",
 };
 
@@ -410,8 +403,7 @@ const GOVERNANCE_VALIDATORS: Record<GovernanceSchema, (data: Record<string, unkn
   "workflow-policy": (data) =>
     hasValidSchemaVersion(data)
     && (!("lowConfidenceThreshold" in data) || isFiniteNumber(data.lowConfidenceThreshold))
-    && (!("riskySections" in data) || isStringArray(data.riskySections))
-    && (!("taskMode" in data) || ["off", "manual", "suggest", "auto"].includes(String(data.taskMode))),
+    && (!("riskySections" in data) || isStringArray(data.riskySections)),
   "index-policy": (data) =>
     hasValidSchemaVersion(data)
     && ["includeGlobs", "excludeGlobs"].every((key) => !(key in data) || isStringArray(data[key]))
@@ -533,9 +525,6 @@ function normalizeRetentionPolicy(data: Record<string, unknown>): RetentionPolic
 
 function normalizeWorkflowPolicy(data: Record<string, unknown>): WorkflowPolicy {
   const validSections = new Set(["Review", "Stale", "Conflicts"]);
-  const taskMode = ["off", "manual", "suggest", "auto"].includes(String(data.taskMode))
-    ? String(data.taskMode) as WorkflowPolicy["taskMode"]
-    : DEFAULT_WORKFLOW_POLICY.taskMode;
   const riskySections = Array.isArray(data.riskySections)
     ? data.riskySections.filter((section): section is "Review" | "Stale" | "Conflicts" => validSections.has(String(section)))
     : [];
@@ -546,7 +535,6 @@ function normalizeWorkflowPolicy(data: Record<string, unknown>): WorkflowPolicy 
     schemaVersion: GOVERNANCE_SCHEMA_VERSION,
     lowConfidenceThreshold: pickNumber(data.lowConfidenceThreshold, DEFAULT_WORKFLOW_POLICY.lowConfidenceThreshold),
     riskySections: riskySections.length ? riskySections : [...DEFAULT_WORKFLOW_POLICY.riskySections],
-    taskMode,
     findingSensitivity,
   };
 }
@@ -567,17 +555,13 @@ export interface ResolvedConfig {
   proactivity: {
     base?: "high" | "medium" | "low";
     findings?: "high" | "medium" | "low";
-    tasks?: "high" | "medium" | "low";
   };
-  taskMode: WorkflowPolicy["taskMode"];
   retentionPolicy: RetentionPolicy;
   workflowPolicy: WorkflowPolicy;
 }
 
 export {
   VALID_PROACTIVITY_LEVELS,
-  VALID_TASK_MODES,
-  type TaskMode,
   VALID_FINDING_SENSITIVITY,
   type FindingSensitivityLevel,
   VALID_RISKY_SECTIONS,
@@ -623,10 +607,9 @@ function normalizeProjectConfigOverrides(raw: unknown): ProjectConfigOverrides |
   if (retentionPolicy && retentionPolicy.decay && Object.values(retentionPolicy.decay).every((value) => value === undefined)) {
     delete retentionPolicy.decay;
   }
-  // A project can set its own task and review budgets; the computer-wide ones stay global.
+  // A project can set its own review budget; the computer-wide ones stay global.
   const budgetsRaw = retentionRaw && isRecord(retentionRaw.budgets) ? retentionRaw.budgets : undefined;
   const budgets = {
-    openTasks: pickNonNegativeInt(budgetsRaw?.openTasks),
     reviewEntries: pickNonNegativeInt(budgetsRaw?.reviewEntries),
   };
   if (retentionPolicy && Object.values(budgets).some((value) => value !== undefined)) retentionPolicy.budgets = budgets;
@@ -649,8 +632,6 @@ function normalizeProjectConfigOverrides(raw: unknown): ProjectConfigOverrides |
     findingSensitivity: pickEnum(raw.findingSensitivity, VALID_FINDING_SENSITIVITY),
     proactivity: pickEnum(raw.proactivity, VALID_PROACTIVITY_LEVELS),
     proactivityFindings: pickEnum(raw.proactivityFindings, VALID_PROACTIVITY_LEVELS),
-    proactivityTask: pickEnum(raw.proactivityTask, VALID_PROACTIVITY_LEVELS),
-    taskMode: pickEnum(raw.taskMode, VALID_TASK_MODES),
     retentionPolicy: retentionPolicy && Object.values(retentionPolicy).some((value) => value !== undefined)
       ? retentionPolicy
       : undefined,
@@ -716,7 +697,6 @@ export function mergeConfig(phrenPath: string, projectName?: string, profile?: s
       riskySections: profileDefaults.workflowPolicy?.riskySections?.length
         ? profileDefaults.workflowPolicy.riskySections
         : globalWorkflow.riskySections,
-      taskMode: profileDefaults.taskMode ?? globalWorkflow.taskMode,
       findingSensitivity: profileDefaults.findingSensitivity ?? globalWorkflow.findingSensitivity,
     }
     : globalWorkflow;
@@ -727,9 +707,7 @@ export function mergeConfig(phrenPath: string, projectName?: string, profile?: s
       proactivity: {
         base: profileDefaults?.proactivity,
         findings: profileDefaults?.proactivityFindings,
-        tasks: profileDefaults?.proactivityTask,
       },
-      taskMode: profileWorkflow.taskMode,
       retentionPolicy: profileRetention,
       workflowPolicy: profileWorkflow,
     };
@@ -742,9 +720,7 @@ export function mergeConfig(phrenPath: string, projectName?: string, profile?: s
       proactivity: {
         base: profileDefaults?.proactivity,
         findings: profileDefaults?.proactivityFindings,
-        tasks: profileDefaults?.proactivityTask,
       },
-      taskMode: profileWorkflow.taskMode,
       retentionPolicy: profileRetention,
       workflowPolicy: profileWorkflow,
     };
@@ -767,7 +743,6 @@ export function mergeConfig(phrenPath: string, projectName?: string, profile?: s
       },
       budgets: {
         ...profileRetention.budgets,
-        openTasks: retentionOverride.budgets?.openTasks ?? profileRetention.budgets.openTasks,
         reviewEntries: retentionOverride.budgets?.reviewEntries ?? profileRetention.budgets.reviewEntries,
       },
     }
@@ -781,7 +756,6 @@ export function mergeConfig(phrenPath: string, projectName?: string, profile?: s
     riskySections: workflowOverride?.riskySections?.length
       ? workflowOverride.riskySections
       : profileWorkflow.riskySections,
-    taskMode: overrides.taskMode ?? profileWorkflow.taskMode,
     findingSensitivity: overrides.findingSensitivity ?? profileWorkflow.findingSensitivity,
   };
 
@@ -790,9 +764,7 @@ export function mergeConfig(phrenPath: string, projectName?: string, profile?: s
     proactivity: {
       base: overrides.proactivity ?? profileDefaults?.proactivity,
       findings: overrides.proactivityFindings ?? profileDefaults?.proactivityFindings,
-      tasks: overrides.proactivityTask ?? profileDefaults?.proactivityTask,
     },
-    taskMode: mergedWorkflow.taskMode,
     retentionPolicy: mergedRetention,
     workflowPolicy: mergedWorkflow,
   };
@@ -862,13 +834,12 @@ export function updateRetentionPolicy(phrenPath: string, patch: RetentionPolicyP
 
 function getWorkflowPolicyGlobal(phrenPath: string): WorkflowPolicy {
   const parsed = readJsonFile<Partial<WorkflowPolicy>>(govFile(phrenPath, "workflow-policy"), {});
-  const merged = withDefaults(parsed, DEFAULT_WORKFLOW_POLICY);
+  const keys = Object.keys(DEFAULT_WORKFLOW_POLICY) as (keyof WorkflowPolicy)[];
+  const values = Object.fromEntries(keys.filter(key => Object.hasOwn(parsed, key)).map(key => [key, parsed[key]]));
+  const merged = withDefaults(values, DEFAULT_WORKFLOW_POLICY);
   const validSections = new Set(["Review", "Stale", "Conflicts"]);
   merged.riskySections = merged.riskySections.filter((section) => validSections.has(section));
   if (!merged.riskySections.length) merged.riskySections = DEFAULT_WORKFLOW_POLICY.riskySections;
-  if (!["off", "manual", "suggest", "auto"].includes(merged.taskMode)) {
-    merged.taskMode = DEFAULT_WORKFLOW_POLICY.taskMode;
-  }
   if (!["minimal", "conservative", "balanced", "aggressive"].includes(merged.findingSensitivity)) {
     merged.findingSensitivity = DEFAULT_WORKFLOW_POLICY.findingSensitivity;
   }
@@ -895,9 +866,6 @@ function patchedWorkflowPolicy(current: WorkflowPolicy, patch: Partial<WorkflowP
   const riskySections = Array.isArray(patch.riskySections)
     ? patch.riskySections.filter((section): section is "Review" | "Stale" | "Conflicts" => ["Review", "Stale", "Conflicts"].includes(String(section)))
     : current.riskySections;
-  const taskMode = patch.taskMode && ["off", "manual", "suggest", "auto"].includes(String(patch.taskMode))
-    ? patch.taskMode
-    : current.taskMode;
   const findingSensitivity = patch.findingSensitivity && ["minimal", "conservative", "balanced", "aggressive"].includes(String(patch.findingSensitivity))
     ? patch.findingSensitivity
     : current.findingSensitivity;
@@ -905,7 +873,6 @@ function patchedWorkflowPolicy(current: WorkflowPolicy, patch: Partial<WorkflowP
     schemaVersion: current.schemaVersion ?? GOVERNANCE_SCHEMA_VERSION,
     lowConfidenceThreshold: patch.lowConfidenceThreshold ?? current.lowConfidenceThreshold,
     riskySections: riskySections.length ? riskySections : current.riskySections,
-    taskMode,
     findingSensitivity,
   };
   return next;

@@ -4,7 +4,6 @@ import { runtimeFile, getPhrenPath, getProjectDirs } from "../shared.js";
 import {
   recordFeedback,
   flushEntryScores,
-  getWorkflowPolicy,
 } from "../shared/governance.js";
 import { upsertCanonical } from "../shared/content.js";
 import { errorMessage, isValidProjectName } from "../utils.js";
@@ -172,7 +171,6 @@ export async function handleDoctor(args: string[]) {
   console.log(`phren doctor: ${result.ok ? "ok" : "issues found"}`);
   if (result.machine) console.log(`machine: ${result.machine}`);
   if (result.profile) console.log(`profile: ${result.profile}`);
-  console.log(`tasks: ${getWorkflowPolicy(getPhrenPath()).taskMode} mode`);
   const renderCheckState = (check: { name: string; ok: boolean; detail: string }): "ok" | "fail" | "info" | "warn" => {
     if (
       check.name === "git-remote" &&
@@ -460,6 +458,5 @@ export function handleSessionContext() {
   console.log(`Started:         ${active.startedAt.slice(0, 16).replace("T", " ")}`);
   console.log(`Duration:        ~${active.durationMins ?? 0} min`);
   console.log(`Findings added:  ${active.findingsAdded}`);
-  console.log(`Tasks completed: ${active.tasksCompleted}`);
   if (active.summary) console.log(`Prior summary:   ${active.summary}`);
 }

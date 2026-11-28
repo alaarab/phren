@@ -1,4 +1,3 @@
-import { filterTaskDoc } from "../data/task-contract.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 /**
  * Command palette and input handling for the phren interactive shell.
@@ -9,14 +8,9 @@ import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import {
-  addTask,
   addFinding,
   addProjectToProfile,
-  TaskItem,
-  completeTask,
   listProjectCards,
-  pinTask,
-  readTasks,
   readFindings,
   readReviewQueue,
   removeFinding,
@@ -25,13 +19,7 @@ import {
   saveShellState,
   setMachineProfile,
   ShellState,
-  tidyDoneTasks,
-  canonicalTaskFilePath,
-  unpinTask,
-  updateTask,
-  workNextTask,
   loadShellState,
-  resolveTaskFilePath,
   FINDINGS_FILENAME,
 } from "../data/access.js";
 import { runtimeFile } from "../shared.js";
@@ -48,16 +36,12 @@ import {
   resultMsg,
   editDistance,
   splitCommandLine,
-  expandIds,
-  normalizeSection,
-  tasksByFilter,
   queueByFilter,
 } from "./palette.js";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
 import type { GraphController } from "./graph/controller.js";
 
-/** Interface for the shell methods that executePalette needs */
 interface PaletteHost {
   phrenPath: string;
   profile: string;
@@ -70,7 +54,6 @@ interface PaletteHost {
   confirmThen(label: string, action: () => void): void;
   snapshotForUndo(label: string, file: string): void;
   ensureProjectSelected(): string | null;
-  invalidateSubsectionsCache(): void;
   popUndo(): string;
 }
 
@@ -115,11 +98,6 @@ export function editTargetFor(
   return null;
 }
 
-function taskFileForProject(phrenPath: string, project: string): string {
-  return resolveTaskFilePath(phrenPath, project)
-    ?? canonicalTaskFilePath(phrenPath, project)
-    ?? path.join(phrenPath, project, "tasks.md");
-}
 
 export async function executePalette(host: PaletteHost, input: string): Promise<void> {
   const trimmed = input.trim();
@@ -134,7 +112,6 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
   }
 
   if (command === "projects") { host.setView("Projects"); host.setMessage(`  ${TAB_ICONS.Projects} Projects`); return; }
-  if (command === "tasks" || command === "task") { host.setView("Tasks"); host.setMessage(`  ${TAB_ICONS.Tasks} Tasks`); return; }
   if (command === "learnings" || command === "findings" || command === "fragments") { host.setView("Findings"); host.setMessage(`  ${TAB_ICONS.Findings} Fragments`); return; }
   if (command === "memory") { host.setView("Review Queue"); host.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return; }
   if (command === "machines") { host.setView("Machines/Profiles"); host.setMessage("  Machines/Profiles"); return; }
@@ -184,138 +161,6 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     host.state.introMode = mode as ShellState["introMode"];
     saveShellState(host.phrenPath, host.state);
     host.setMessage(`  Intro mode: ${style.boldCyan(mode)}`);
-    return;
-  }
-
-  if (command === "add") {
-    const project = host.ensureProjectSelected();
-    if (!project) return;
-    const text = trimmed.slice("add".length).trim();
-    if (!text) { host.setMessage("  Usage: :add <task>"); return; }
-    host.setMessage(`  ${resultMsg(addTask(host.phrenPath, project, text))}`);
-    return;
-  }
-
-  if (command === "lane") {
-    const value = (parts[1] ?? "").toLowerCase();
-    if (!["human", "agent", "all"].includes(value)) { host.setMessage("  Usage: :lane human|agent|all"); return; }
-    host.state.taskResponsibility = value === "all" ? undefined : value as "human" | "agent";
-    saveShellState(host.phrenPath, host.state);
-    host.setView("Tasks");
-    host.setMessage(`  Task responsibility: ${value}`);
-    return;
-  }
-
-  if (command === "responsibility" || command === "depends") {
-    const project = host.ensureProjectSelected();
-    if (!project) return;
-    const match = parts[1];
-    if (!match) { host.setMessage("  Usage: :responsibility <id> human|agent or :depends <id> <JSON array>"); return; }
-    const value = parts.slice(2).join(" ");
-    let updates: Parameters<typeof updateTask>[3];
-  if (command === "responsibility") {
-      if (value !== "human" && value !== "agent") { host.setMessage("  Responsibility must be human or agent."); return; }
-      updates = { responsibility: value };
-    } else {
-      try { updates = { dependencies: JSON.parse(value) }; } catch { host.setMessage("  Dependencies must be a JSON array."); return; }
-    }
-    host.snapshotForUndo(command, taskFileForProject(host.phrenPath, project));
-    host.setMessage(`  ${resultMsg(updateTask(host.phrenPath, project, match, updates))}`);
-    return;
-  }
-
-  if (command === "complete") {
-    const project = host.ensureProjectSelected();
-    if (!project) return;
-    const match = parts.slice(1).join(" ").trim();
-    if (!match) { host.setMessage("  Usage: :complete <id|match>"); return; }
-    const ids = expandIds(match);
-    if (ids.length > 1) {
-      host.confirmThen(`Complete ${ids.length} items (${ids.join(", ")})?`, () => {
-        const file = taskFileForProject(host.phrenPath, project);
-        host.snapshotForUndo(`complete ${ids.length} items`, file);
-        host.setMessage(ids.map((id) => resultMsg(completeTask(host.phrenPath, project, id))).join("; "));
-      });
-    } else {
-      host.confirmThen(`Complete "${match}"?`, () => {
-        const file = taskFileForProject(host.phrenPath, project);
-        host.snapshotForUndo(`complete "${match}"`, file);
-        host.setMessage(`  ${resultMsg(completeTask(host.phrenPath, project, match))}`);
-      });
-    }
-    return;
-  }
-
-  if (command === "move") {
-    const project = host.ensureProjectSelected();
-    if (!project) return;
-    if (parts.length < 3) { host.setMessage("  Usage: :move <id|match> <active|queue|done>"); return; }
-    const section = normalizeSection(parts[parts.length - 1]);
-    if (!section) { host.setMessage("  Target section must be active|queue|done"); return; }
-    const match = parts.slice(1, -1).join(" ");
-    const ids = expandIds(match);
-    if (ids.length > 1) {
-      const file = taskFileForProject(host.phrenPath, project);
-      host.snapshotForUndo(`move ${ids.length} items to ${section}`, file);
-      host.setMessage(ids.map((id) => resultMsg(updateTask(host.phrenPath, project, id, { section }))).join("; "));
-    } else {
-      host.setMessage(`  ${resultMsg(updateTask(host.phrenPath, project, match, { section }))}`);
-    }
-    return;
-  }
-
-  if (command === "reprioritize") {
-    const project = host.ensureProjectSelected();
-    if (!project) return;
-    if (parts.length < 3) { host.setMessage("  Usage: :reprioritize <id|match> <high|medium|low>"); return; }
-    const priorityRaw = parts[parts.length - 1].toLowerCase();
-    if (!["high", "medium", "low"].includes(priorityRaw)) { host.setMessage("  Priority must be high|medium|low"); return; }
-    const priority = priorityRaw as "high" | "medium" | "low";
-    const match = parts.slice(1, -1).join(" ");
-    host.setMessage(`  ${resultMsg(updateTask(host.phrenPath, project, match, { priority }))}`);
-    return;
-  }
-
-  if (command === "context") {
-    const project = host.ensureProjectSelected();
-    if (!project) return;
-    if (parts.length < 3) { host.setMessage("  Usage: :context <id|match> <text>"); return; }
-    const match = parts[1];
-    const context = parts.slice(2).join(" ");
-    host.setMessage(`  ${resultMsg(updateTask(host.phrenPath, project, match, { context }))}`);
-    return;
-  }
-
-  if (command === "pin") {
-    const project = host.ensureProjectSelected();
-    if (!project) return;
-    if (parts.length < 2) { host.setMessage("  Usage: :pin <id|match>"); return; }
-    host.setMessage(`  ${resultMsg(pinTask(host.phrenPath, project, parts.slice(1).join(" ")))}`);
-    return;
-  }
-
-  if (command === "unpin") {
-    const project = host.ensureProjectSelected();
-    if (!project) return;
-    if (parts.length < 2) { host.setMessage("  Usage: :unpin <id|match>"); return; }
-    host.setMessage(`  ${resultMsg(unpinTask(host.phrenPath, project, parts.slice(1).join(" ")))}`);
-    return;
-  }
-
-  if (command === "work" && parts[1]?.toLowerCase() === "next") {
-    const project = host.ensureProjectSelected();
-    if (!project) return;
-    host.setMessage(`  ${resultMsg(workNextTask(host.phrenPath, project))}`);
-    return;
-  }
-
-  if (command === "tidy") {
-    const project = host.ensureProjectSelected();
-    if (!project) return;
-    const keep = parts[1] ? Number.parseInt(parts[1], 10) : 30;
-    const file = taskFileForProject(host.phrenPath, project);
-    host.snapshotForUndo("tidy", file);
-    host.setMessage(`  ${resultMsg(tidyDoneTasks(host.phrenPath, project, Number.isNaN(keep) ? 30 : keep))}`);
     return;
   }
 
@@ -534,9 +379,9 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
 
 function suggestCommand(input: string): string | undefined {
   const known = [
-    "help", "projects", "tasks", "task", "findings", "review queue", "machines", "health", "graph",
-    "open", "search", "add", "complete", "move", "reprioritize", "pin", "unpin", "context",
-    "work next", "tidy", "find add", "find remove", "machine map", "profile add-project", "profile remove-project",
+    "help", "projects", "findings", "review queue", "machines", "health", "graph",
+    "open", "search",
+    "find add", "find remove", "machine map", "profile add-project", "profile remove-project",
     "run fix", "relink", "rerun hooks", "update", "govern", "consolidate",
     "undo", "diff", "conflicts", "reset",
   ];
@@ -551,10 +396,8 @@ function suggestCommand(input: string): string | undefined {
 
 export function completeInput(line: string, phrenPath: string, profile: string, state: ShellState): string[] {
   const commands = [
-    ":projects", ":tasks", ":task", ":lane", ":responsibility", ":depends", ":findings", ":review queue", ":machines", ":health", ":graph",
-    ":open", ":search", ":add", ":complete", ":move", ":reprioritize", ":pin",
-    ":unpin", ":context", ":work next", ":tidy", ":find add", ":find remove",
-    ":machine map",
+    ":projects", ":findings", ":review queue", ":machines", ":health", ":graph",
+    ":open", ":search", ":find add", ":find remove", ":machine map",
     ":profile add-project", ":profile remove-project",
     ":run fix", ":relink", ":rerun hooks", ":update", ":govern", ":consolidate",
     ":undo", ":diff", ":conflicts", ":reset", ":help",
@@ -575,18 +418,6 @@ export function completeInput(line: string, phrenPath: string, profile: string, 
   const cmd = parts[0].toLowerCase();
   if (cmd === "open") {
     return listProjectCards(phrenPath, profile).map((c) => `:open ${c.name}`);
-  }
-
-  if (["complete", "move", "reprioritize", "context", "pin", "unpin", "responsibility", "depends"].includes(cmd)) {
-    const project = state.project;
-    if (!project) return [];
-    const result = readTasks(phrenPath, project);
-    if (!result.ok) return [];
-    return [
-      ...result.data.items.Active,
-      ...result.data.items.Queue,
-      ...result.data.items.Done,
-    ].map((item) => `:${cmd} ${item.id}`);
   }
 
   if (cmd === "find" && (parts[1] || "").toLowerCase() === "remove") {
@@ -611,15 +442,6 @@ export function getListItems(
       return state.filter
         ? cards.filter((c) => `${c.name} ${c.summary} ${c.docs.join(" ")}`.toLowerCase().includes(state.filter!.toLowerCase()))
         : cards;
-    }
-    case "Tasks": {
-      if (!state.project) return [];
-      const result = readTasks(phrenPath, state.project);
-      if (!result.ok) return [];
-      const filtered = filterTaskDoc(phrenPath, result.data, { responsibility: state.taskResponsibility });
-      const active = state.filter ? tasksByFilter(filtered.items.Active, state.filter) : filtered.items.Active;
-      const queue = state.filter ? tasksByFilter(filtered.items.Queue, state.filter) : filtered.items.Queue;
-      return [...active, ...queue];
     }
     case "Findings": {
       if (!state.project) return [];
@@ -671,21 +493,7 @@ async function activateSelected(host: NavigationHost): Promise<void> {
 
   switch (host.state.view) {
     case "Projects":
-      if (item.name) { host.state.project = item.name; saveShellState(host.phrenPath, host.state); host.setView("Tasks"); host.setMessage(`  ${style.green("●")} ${style.boldCyan(item.name)}`); }
-      break;
-    case "Tasks":
-      if (item.id) {
-        const project = host.ensureProjectSelected();
-        if (!project) return;
-        const file = taskFileForProject(host.phrenPath, project);
-        host.confirmThen(`Complete ${style.dim(item.id)} "${item.line}"?`, () => {
-          host.snapshotForUndo(`complete ${item.id}`, file);
-          const r = completeTask(host.phrenPath, project, item.id!);
-          host.invalidateSubsectionsCache();
-          host.setMessage(`  ${resultMsg(r)}`);
-          host.setCursor(Math.max(0, cursor - 1));
-        });
-      }
+      if (item.name) { host.state.project = item.name; saveShellState(host.phrenPath, host.state); host.setView("Findings"); host.setMessage(`  ${style.green("●")} ${style.boldCyan(item.name)}`); }
       break;
     case "Findings":
       if (item.text) { host.setMessage(`  ${style.dim(item.id ?? "")}  ${item.text}`); }
@@ -720,26 +528,11 @@ async function doViewAction(host: NavigationHost, key: string): Promise<void> {
         : `  Editor "${result.command}" failed — ${result.error ?? "could not start"}. Set $EDITOR.`);
     });
     if (!handed) host.setMessage(`  ${style.dim("edit it at")} ${target.path}`);
-    host.invalidateSubsectionsCache();
     return;
   }
   const project = host.state.project;
 
   switch (host.state.view) {
-    case "Tasks":
-      if (key === "a") { host.startInput("add", ""); }
-      else if (key === "d" && item?.id) {
-        if (!project) { host.setMessage("Select a project first."); return; }
-        const file = taskFileForProject(host.phrenPath, project);
-        const taskResult = readTasks(host.phrenPath, project);
-        const isActive = taskResult.ok && taskResult.data.items.Active.some((i: TaskItem) => i.id === item.id);
-        const targetSection = isActive ? "Queue" : "Active";
-        host.snapshotForUndo(`move ${item.id} → ${targetSection.toLowerCase()}`, file);
-        const r = updateTask(host.phrenPath, project, item.id, { section: targetSection });
-        host.invalidateSubsectionsCache();
-        host.setMessage(`  ${resultMsg(r)}`);
-      }
-      break;
     case "Findings":
       if (key === "a") { host.startInput("learn-add", ""); }
       else if ((key === "d" || key === "\x7f") && item?.text) {
@@ -813,7 +606,6 @@ function showCursorPosition(host: NavigationHost): void {
  */
 export function applyViewShortcut(host: NavigationHost, key: string): boolean {
   if (key === "p") { host.setView("Projects"); host.setMessage(`  ${TAB_ICONS.Projects} Projects`); return true; }
-  if (key === "b") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Tasks"); host.setMessage(`  ${TAB_ICONS.Tasks} Tasks`); return true; }
   if (key === "l") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Findings"); host.setMessage(`  ${TAB_ICONS.Findings} Findings`); return true; }
   if (key === "m") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Review Queue"); host.setMessage(`  ${TAB_ICONS["Review Queue"]} Review Queue`); return true; }
   if (key === "s") { if (!host.state.project) { host.setMessage(style.dim("  Select a project first (↵)")); return true; } host.setView("Skills"); host.setMessage(`  ${TAB_ICONS.Skills} Skills`); return true; }
@@ -840,7 +632,7 @@ export async function handleNavigateKey(host: NavigationHost, rawKey: string): P
   if (key === "\x1b[A") { host.moveCursor(-1); showCursorPosition(host); return true; }
   if (key === "\x1b[B") { host.moveCursor(1); showCursorPosition(host); return true; }
   if (key === "\x1b[D") { if (host.state.view === "Projects") { host.setMessage(`  ${style.dim("Projects is the dashboard landing screen")}`); } else { prevTab(host); } return true; }
-  if (key === "\x1b[C") { if (host.state.view === "Projects") { host.setMessage(`  ${style.dim("Press ↵ to enter the selected project's tasks")}`); } else { nextTab(host); } return true; }
+  if (key === "\x1b[C") { if (host.state.view === "Projects") { host.setMessage(`  ${style.dim("Press ↵ to enter the selected project's findings")}`); } else { nextTab(host); } return true; }
   if (key === "\x1b[5~") { host.moveCursor(-10); showCursorPosition(host); return true; }
   if (key === "\x1b[6~") { host.moveCursor(10); showCursorPosition(host); return true; }
   if (key === "\x1b[H" || key === "\x1b[1~") { host.setCursor(0); showCursorPosition(host); return true; }

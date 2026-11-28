@@ -2,7 +2,7 @@ import { el } from "../dom.js";
 import { shortDate } from "../time.js";
 // The "Phren knows" drawer for a session's project and "Remember this" for a
 // selected line of text. Plain browser ES module. Reads the project's summary,
-// findings, tasks and topics; saves a finding with or without a code location.
+// findings and topics; saves a finding with or without a code location.
 
 import { hookGet, hookPost } from "../api.js";
 import { renderMarkdownInto } from "./markdown.js";
@@ -60,12 +60,6 @@ function topicLabel(item) {
   const slug = String(item?.slug ?? item?.topic ?? item?.id ?? "").trim();
   return slug ? slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "Topic";
 }
-function stripTags(line) {
-  return String(line ?? "")
-    .replace(/\s*\[pinned\]/gi, "")
-    .replace(/(\s*\[(high|medium|low)\])+\s*$/gi, "")
-    .trim();
-}
 
 // ---- toast ---------------------------------------------------------------
 let toastHost = null;
@@ -83,18 +77,6 @@ function copyText(text) {
   if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).catch(() => {});
 }
 
-// ---- tasks ---------------------------------------------------------------
-/** Active (all) and Queue (top 5) for a project, through its task store. */
-async function loadTasks(computer, project) {
-  const directory = await hookGet(computer, "/v1/tasks/stores");
-  const stores = Array.isArray(directory.stores) ? directory.stores : [];
-  const has = (s) => s.available !== false && Array.isArray(s.projects) && s.projects.includes(project);
-  const store = stores.find((s) => has(s) && !s.readonly) || stores.find(has);
-  if (!store || !store.id) return { active: [], queue: [] };
-  const doc = await hookGet(computer, "/v1/tasks", { storeId: store.id, project });
-  const items = doc.items || {};
-  return { active: items.Active || [], queue: (items.Queue || []).slice(0, 5) };
-}
 
 /** The prose inside a store's marked "What phren knows" block, or "". */
 export function extractKnowsBlock(content) {
@@ -182,10 +164,9 @@ function section(parent, label, count) {
 }
 
 async function fill(body, computer, project) {
-  const [findingsR, topicsR, tasksR, summaryR] = await Promise.allSettled([
+  const [findingsR, topicsR, summaryR] = await Promise.allSettled([
     memoryGet(computer, "/findings", { project }),
     memoryGet(computer, "/topics", { project }),
-    loadTasks(computer, project),
     loadKnowsSummary(computer, project),
   ]);
   if (!body.isConnected) return;
@@ -204,13 +185,6 @@ async function fill(body, computer, project) {
   findings.sort((a, b) => (String(b.date ?? "") < String(a.date ?? "") ? -1 : String(b.date ?? "") > String(a.date ?? "") ? 1 : 0));
   renderFindings(section(body, "Recent findings", findings.length || undefined), findings.slice(0, 8));
 
-  const tasks = tasksR.status === "fulfilled" ? tasksR.value : { active: [], queue: [] };
-  const open = section(body, "Open tasks", tasks.active.length + tasks.queue.length || undefined);
-  if (!tasks.active.length && !tasks.queue.length) open.append(el("div", "knows-empty", "No open tasks."));
-  else {
-    for (const item of tasks.active) open.append(taskRow(item, false));
-    for (const item of tasks.queue) open.append(taskRow(item, true));
-  }
 
   const topics = topicsR.status === "fulfilled" && Array.isArray(topicsR.value.topics) ? topicsR.value.topics.slice() : [];
   topics.sort((a, b) => topicCount(b) - topicCount(a));
@@ -225,12 +199,6 @@ function topicCount(item) {
   return 0;
 }
 
-function taskRow(item, queued) {
-  const row = el("div", `knows-task${queued ? " queued" : ""}`);
-  row.append(el("span", "knows-task-dot"));
-  row.append(el("div", "knows-task-text", stripTags(item?.line ?? item?.text ?? "")));
-  return row;
-}
 
 function topicRow(item) {
   const row = el("div", "knows-topic");

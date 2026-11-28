@@ -82,7 +82,7 @@ export PHREN_FEATURE_DAILY_MAINTENANCE=0
 
 ## PHREN_FEATURE_PROGRESSIVE_DISCLOSURE
 
-Replaced by clanker mode (`phren config clanker on|off`, or `PHREN_CLANKER`), which covers the prompt hook, `search_knowledge`, `get_tasks` and `get_findings`; see [Clanker mode](api-reference.md#clanker-mode). The old variable still works as an alias when `PHREN_CLANKER` is unset.
+Replaced by clanker mode (`phren config clanker on|off`, or `PHREN_CLANKER`), which covers the prompt hook, `search_knowledge` and `get_findings`; see [Clanker mode](api-reference.md#clanker-mode). The old variable still works as an alias when `PHREN_CLANKER` is unset.
 
 ## PHREN_FEATURE_GIT_CONTEXT_FILTER
 

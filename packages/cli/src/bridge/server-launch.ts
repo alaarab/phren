@@ -14,6 +14,7 @@ import { intervalFromEnv } from "./limits.js";
 import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from "./launch-worktree.js";
 import { askpassEnv } from "./sudo.js";
 import { briefArgs, DISPATCH_ID_ENV, launchBriefSchema, launchesWithBrief, recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
+import { dispatchIssueSchema, writeDispatchIssue } from "./dispatch-issue.js";
 import { prepareServedLaunch, registerServedPane, sendServedBrief } from "./opencode-panes.js";
 import { bindServicePane, createServiceSession, ensureOpencodeService, opencodeMajor, serviceLaunchArgs } from "./opencode-service.js";
 import { conductorBrief, ensureConductorBrief } from "./conductor-context.js";
@@ -431,6 +432,8 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // A dispatched worker's or scheduled run's first prompt. It rides on the
   // launch where the harness takes one; elsewhere the caller types it.
   const brief = data.brief === undefined || data.brief === null ? undefined : launchBriefSchema.parse(data.brief);
+  // Keep launch metadata outside the strict brief object understood by older Hooks.
+  const issue = brief ? dispatchIssueSchema.optional().parse(data.issue) : undefined;
   if (brief && role === "conductor") throw new BridgeError(400, "A conductor starts with its own brief.");
   // A launch's own token, so an ambiguous outcome can later be resolved by
   // looking for the pane that carries it.
@@ -492,7 +495,8 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   if (viaService) args.splice(0, args.length, ...viaService.args);
   const served = kind === "opencode" && !viaService ? await prepareServedLaunch() : undefined;
   if (served) args.push(...served.args);
-  const briefFile = brief && (launchesWithBrief(kind) || structured || served || viaService) ? await writeLaunchBrief(brief, Date.now(), label) : undefined;
+  const briefFile = brief && (issue || launchesWithBrief(kind) || structured || served || viaService) ? await writeLaunchBrief(brief, Date.now(), label) : undefined;
+  if (brief && issue) await writeDispatchIssue(brief.id, issue);
   const briefLaunch = brief && briefFile && launchesWithBrief(kind) ? briefArgs(kind, briefFile) : undefined;
   // sudo -A in the new agent asks the phone for the password (sudo.ts).
   const dispatchId = options.dispatchId ?? brief?.id;

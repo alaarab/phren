@@ -7,7 +7,7 @@
  * opens. All jitter is derived from node ids via `seeded()`; nothing here
  * calls Math.random.
  *
- * The store's topology is a star (project → findings/tasks/fragments/refs),
+ * The store's topology is a star (project → findings/fragments/refs),
  * so the simulation adds a gentle pull toward each node's home project. That
  * keeps clusters readable instead of letting repulsion smear everything into
  * one ring.

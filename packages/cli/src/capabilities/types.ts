@@ -7,13 +7,6 @@ export const ACTION_KEYS = [
   "finding.pin",
 
   // Task management
-  "task.add",
-  "task.complete",
-  "task.remove",
-  "task.update",
-  "task.list",
-  "task.pin",
-  "task.github_link",
 
   // Hook management
   "hook.list",

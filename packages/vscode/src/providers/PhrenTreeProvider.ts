@@ -96,13 +96,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
       return { kind: "noteDateGroup", projectName: element.projectName, date: element.date, count: 0 };
     }
 
-    if (element.kind === "taskSectionGroup") {
-      return { kind: "category", projectName: element.projectName, category: "task" };
-    }
 
-    if (element.kind === "task") {
-      return { kind: "taskSectionGroup", projectName: element.projectName, section: element.section, count: 0 };
-    }
 
     return undefined;
   }
@@ -124,9 +118,6 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
     if (element.kind === "rootSection") {
       if (element.section === "projects") {
         return this.data.getProjectNodes();
-      }
-      if (element.section === "tasks") {
-        return this.data.getGlobalTaskBoard();
       }
       if (element.section === "machines") {
         return this.data.getMachineNodes();
@@ -161,7 +152,6 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
         { kind: "category", projectName: element.projectName, category: "notes" },
         { kind: "category", projectName: element.projectName, category: "truths", count: truthCount },
         { kind: "category", projectName: element.projectName, category: "sessions" },
-        { kind: "category", projectName: element.projectName, category: "task" },
         { kind: "category", projectName: element.projectName, category: "queue" },
         { kind: "category", projectName: element.projectName, category: "hooks" },
         { kind: "category", projectName: element.projectName, category: "reference" },
@@ -180,9 +170,6 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
       }
       if (element.category === "sessions") {
         return this.data.getSessionDateGroups(element.projectName);
-      }
-      if (element.category === "task") {
-        return this.data.getTaskSectionGroups(element.projectName);
       }
       if (element.category === "queue") {
         return this.data.getQueueSectionGroups(element.projectName);
@@ -228,13 +215,7 @@ export class PhrenTreeProvider implements vscode.TreeDataProvider<PhrenNode>, vs
       return this.data.getNotesForDate(element.projectName, element.date);
     }
 
-    if (element.kind === "globalTaskSectionGroup") {
-      return this.data.getGlobalTasksForSection(element.section);
-    }
 
-    if (element.kind === "taskSectionGroup") {
-      return this.data.getTasksForSection(element.projectName, element.section);
-    }
 
     if (element.kind === "skillGroup") {
       return this.data.getSkillsForGroup(element.source);

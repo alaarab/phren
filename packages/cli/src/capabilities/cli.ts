@@ -12,13 +12,6 @@ export const cliManifest: CapabilityManifest = {
     "finding.pin": { implemented: true, handler: "cli-actions.ts:handlePin" },
 
     // Task management
-    "task.add": { implemented: true, handler: "cli-namespaces.ts:handleTaskNamespace add" },
-    "task.complete": { implemented: true, handler: "cli-namespaces.ts:handleTaskNamespace complete" },
-    "task.remove": { implemented: false, reason: "No dedicated CLI task remove command" },
-    "task.update": { implemented: true, handler: "cli-namespaces.ts:handleTaskNamespace update" },
-    "task.list": { implemented: true, handler: "cli-actions.ts:handleTasks" },
-    "task.pin": { implemented: false, reason: "Pin task is MCP-only" },
-    "task.github_link": { implemented: false, reason: "GitHub link/promote is MCP-only" },
 
     // Hook management
     "hook.list": { implemented: true, handler: "cli-actions.ts:handleHooks list" },
@@ -40,7 +33,7 @@ export const cliManifest: CapabilityManifest = {
 
     // Config
     "config.get": { implemented: true, handler: "cli-config.ts:handleConfigGet (per-domain)" },
-    "config.set": { implemented: true, handler: "cli-config.ts:handleConfigSet (proactivity, taskMode, findingSensitivity, retention, workflow, index)" },
+    "config.set": { implemented: true, handler: "cli-config.ts:handleConfigSet (proactivity, findingSensitivity, retention, workflow, index)" },
 
     // Health / Sync / Session
     "health.check": { implemented: true, handler: "cli-actions.ts:handleDoctor" },

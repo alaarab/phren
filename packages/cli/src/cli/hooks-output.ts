@@ -22,7 +22,7 @@ import { logger } from "../logger.js";
 
 // ── Clanker mode: compact index ──────────────────────────────────────────────
 
-// The finding or task a one-bullet snippet is, matched by its start since the budget often cuts the id comment.
+// The finding a one-bullet snippet is, matched by its start since the budget often cuts the id comment.
 function compactEntry({ doc, snippet }: SelectedSnippet): DocEntry | undefined {
   const bullets = snippet.split("\n").filter((l) => /^-\s/.test(l));
   const prefix = bullets.length === 1 ? bullets[0].replace(/ \[may be out of date:[\s\S]*$/, "").replace(/…$/, "").slice(0, 120) : "";
@@ -32,7 +32,7 @@ function compactEntry({ doc, snippet }: SelectedSnippet): DocEntry | undefined {
 /** Rows the clanker index prints at most. */
 export const COMPACT_INDEX_ROWS = 8;
 
-/** The id a compact index row prints: the entry's `fid:`/`bid:`, else the doc's `mem:` key. */
+/** The id a compact index row prints: the entry's `fid:`, else the doc's `mem:` key. */
 export function compactRowId(selected: SelectedSnippet, phrenPathLocal: string, entry = compactEntry(selected)): string {
   return entry ? entry.id : `mem:${getDocSourceKey(selected.doc, phrenPathLocal)}`;
 }

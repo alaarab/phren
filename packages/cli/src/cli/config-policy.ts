@@ -7,7 +7,6 @@ import {
   getWorkflowPolicy,
   updateWorkflowPolicy,
   mergeConfig,
-  VALID_TASK_MODES,
   VALID_FINDING_SENSITIVITY,
   type FindingSensitivityLevel,
   type RetentionPolicyPatch,
@@ -142,18 +141,6 @@ function normalizeFromList<T extends string>(raw: string | undefined, validValue
   return validValues.includes(lower as T) ? lower as T : null;
 }
 
-export function handleConfigTaskMode(args: string[]) {
-  handleWorkflowField(args, {
-    fieldName: "task-mode",
-    validValues: VALID_TASK_MODES,
-    normalize: (raw) => normalizeFromList(raw, VALID_TASK_MODES),
-    getSnapshot: (phrenPath) => ({ taskMode: getWorkflowPolicy(phrenPath).taskMode }),
-    getProjectValue: (resolved) => resolved.taskMode,
-    formatProjectOutput: (proj, value) => ({ _project: proj, taskMode: value }),
-    workflowPatchKey: "taskMode",
-    projectOverrideKey: "taskMode",
-  });
-}
 
 export function handleConfigFindingSensitivity(args: string[]) {
   handleWorkflowField(args, {
@@ -309,7 +296,7 @@ export async function handleRetentionPolicy(args: string[]) {
     console.log(JSON.stringify(result.data, null, 2));
     return;
   }
-  console.error("Usage: phren config policy [--project <name>] [get|set --ttlDays=120 --retentionDays=365 --autoAcceptThreshold=0.75 --minInjectConfidence=0.35 --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65 --decay.d120=0.45 --budgets.openTasks=150 --budgets.reviewEntries=150 --budgets.runtimeMB=1024 --budgets.fanoutArchiveMB=512 --budgets.runtimeAgeOut=false --budgets.runtimeAgeOutDays=30]");
+  console.error("Usage: phren config policy [--project <name>] [get|set --ttlDays=120 --retentionDays=365 --autoAcceptThreshold=0.75 --minInjectConfidence=0.35 --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65 --decay.d120=0.45 --budgets.reviewEntries=150 --budgets.runtimeMB=1024 --budgets.fanoutArchiveMB=512 --budgets.runtimeAgeOut=false --budgets.runtimeAgeOutDays=30]");
   process.exit(1);
 }
 
@@ -350,8 +337,6 @@ export async function handleWorkflowPolicy(args: string[]) {
           if (!k || v === undefined) continue;
           if (k === "riskySections") {
             workflowPatch.riskySections = v.split(",").map((s) => s.trim()).filter(Boolean);
-          } else if (k === "taskMode") {
-            nextConfig.taskMode = v as typeof nextConfig.taskMode;
           } else if (k === "findingSensitivity") {
             nextConfig.findingSensitivity = v as typeof nextConfig.findingSensitivity;
           } else {
@@ -390,6 +375,6 @@ export async function handleWorkflowPolicy(args: string[]) {
     console.log(JSON.stringify(result.data, null, 2));
     return;
   }
-  console.error("Usage: phren config workflow [--project <name>] [get|set --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts --taskMode=manual]");
+  console.error("Usage: phren config workflow [--project <name>] [get|set --lowConfidenceThreshold=0.7 --riskySections=Stale,Conflicts]");
   process.exit(1);
 }

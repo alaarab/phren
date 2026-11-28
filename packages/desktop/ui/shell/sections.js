@@ -123,7 +123,7 @@ export function sectionIds() {
   return [...sections.values()].sort((a, b) => a.order - b.order).map((s) => s.id);
 }
 
-/** A section's own label ("Tasks"), for the palette. */
+/** A section's own label , for the palette. */
 export function sectionLabel(id) { return sections.get(id)?.label ?? id; }
 
 /** Groups in titlebar order: [{ key, label, ids }]. */

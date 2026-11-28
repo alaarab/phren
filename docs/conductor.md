@@ -94,7 +94,7 @@ delegation and release restrictions apply at every level.
 
 An agent (not a conductor) can start in a new worktree. The sheet's Work in a
 new worktree switch is off by default; turned on, it takes a branch name,
-suggested from the task's first line or `phren/<short-id>`. The Hook sends
+suggested from the brief's first line or `phren/<short-id>`. The Hook sends
 `worktree: { branch }` to `git worktree add`, from the project's current HEAD
 into `<repo>/.claude/worktrees/<name>`, and starts the agent there. It refuses
 a folder that is not a Git repository and a branch that already exists, with a
@@ -137,23 +137,7 @@ A conductor dispatches only within its set: a peer that does not link back is
 refused by name and skipped by `anywhere`. Design and routes are in
 [Conductor sets](conductor-sets.md).
 
-Computers that are not linked can each run their own conductor. They
-coordinate through the synced store by claiming tasks: `claim_task` (or
-`manage_task` with `action: "claim"`) pulls the store, moves the task to Active
-with a line under it in `tasks.md`,
-
-```md
-- [ ] Port the parser <!-- bid:aaaa1111 rank:1 -->
-  Claimed: Mini 2026-09-25T04:30:00Z session:w22-p1
-```
-
-then commits and pushes. A task another computer holds is refused. When two
-claims race, the store merge keeps the one that reached the remote first, and
-the other call reports it as `heldBy`. `get_tasks` summaries show
-`[claimed: <computer>]`; conductors skip tasks claimed elsewhere. Completing a
-task clears its claim, `release: true` returns it to the Queue, and `force`
-takes over a claim more than a day old. Phren versions older than claims drop
-the `Claimed:` line when they rewrite `tasks.md`, so update every computer.
+Conductors coordinate through forge claims. Use `claim_issue` or `phren issue claim` to assign an issue and record the computer working on it.
 
 On the phone, hold a project or computer for 0.4 seconds to open the computer
 chooser. It lists names, colors, reachability and project session counts, puts
@@ -249,7 +233,7 @@ that fits, and the receipt's `skipped` says why.
 ## Dispatch new work
 
 ```sh
-phren dispatch Desk demo --harness codex --label Checks --prompt 'Run the assigned checks'
+phren dispatch Desk demo --harness codex --label Checks --prompt 'Run the assigned checks' --issue 'github.com/example/widgets#42'
 phren dispatch status
 ```
 
@@ -267,10 +251,24 @@ server. Peers that fail it sit out and are named with their reason in the
 receipt's `skipped` list (and in the error when none is left). Placement
 currently requires Herdr.
 
+Pass `issue` to the MCP tool or `POST /v1/dispatch` as `"domain/owner/name#N"`
+or `{"repo":"domain/owner/name","number":N}`. The brief includes the issue
+reference and URL and asks the worker to post one summary comment when it
+finishes, using `comment_issue` or `phren issue comment`. It also gives the
+forge's closing syntax for a PR in that forge. GitHub uses
+`Closes owner/name#N`. A gitboy PR against the issue's repository uses
+`Closes #N`. Leave room for these instructions within the 32768-character
+brief limit.
+
 Each placement writes a private receipt in `<bridge>/dispatches/<id>.json`
 without retaining the prompt. States are `launching`, `sending`, `accepted`,
 `uncertain` and `failed`. `accepted` confirms first-prompt delivery, not worker
 completion; completion arrives as a return (see [Returns](#returns)).
+
+Issue bindings live in `<bridge>/dispatch-issues/<id>.json` on the placing and
+receiving Hooks. A separate directory keeps the receipt and worker observation
+formats compatible with older Hooks. Older worker Hooks receive the brief text.
+Automatic PR comments require an updated worker Hook.
 
 Before a Claude, Codex or Copilot worker starts, the receiving Hook marks the project's
 resolved folder trusted for that harness (`PHREN_PRETRUST=off` turns this off;
@@ -1318,6 +1316,14 @@ submitted turn and terminal. If the Hook lost the turn record (a nested
 in that pane still reports, and the report belongs to its current turn. It is evidence supplied by the worker, not a
 verification by the Hook.
 
+The worker's Hook posts a separate `PR <url>` comment for each reported PR on
+the dispatch's issue. A report can supply `issue` (CLI `--issue`) when a launch
+has no binding. Each Hook keeps a local ledger that deduplicates issue and PR
+pairs across retries and restarts. The report's `issueLinks` says whether
+linking succeeded. If the forge does not confirm a comment, check the issue
+before posting that link again. Test summaries and notes travel with the
+return. The forge closes issues through the PR's closing line.
+
 Configure the default integrator on the dispatching Hook with
 `phren conductor integrator --session <id> [--computer <name>]`; show it with
 `phren conductor integrator`, or clear with `--clear`. A dispatch can override
@@ -1327,7 +1333,7 @@ through the durable hand-off queue, with one stable delivery id. Receipts carry
 keeps its original integrator target on retries, even if the default changes.
 Queued forwarding is checked until
 delivered; uncertain forwarding stays uncertain. A restarted integrator needs
-its new target configured. Workers need no direct messaging or GitHub comment.
+its new target configured. For issue-bound work the brief asks the worker to post one summary comment when finished.
 
 ## Owner inbox
 
@@ -1338,15 +1344,14 @@ owner-inbox list` show it across the linked computers. The owning Hook persists
 each item. An item's `inboxComputer` tells clients where to resolve it; its
 `computer` can instead name the remote worker. Unreachable inboxes are
 reported. `add` takes `title`, optional `project`, an optional stable UUID `id`
-to keep on retries, and for an owner action a paste-able `command`, the `task`
-(`bid:xxxxxxxx`), the `pr` URL and an optional dedupe `key`. The generated
+to keep on retries, and for an owner action a paste-able `command`, an `issue` reference, a `pr` URL and an optional dedupe `key`. The generated
 `paste` clears the item on its owning Hook after the command succeeds and
 only if its `updatedAt` still matches. Multiline commands run with `sh -e`.
 The same normalized PR or `key` matches an open item. Conflicting identifiers
 are rejected. Posting a resolved item again under its id with changed fields
 reopens it. A manual item resolves itself when its GitHub or gitboy PR merges
-or closes, or when its linked task is Done. GitLab merge requests can be saved
-as links. A closed unmerged PR or Done task needs a fresh read after the item
+or closes. GitLab merge requests can be saved
+as links. A closed unmerged PR needs a fresh read after the item
 is edited or reopened. `resolve` takes `id`, optional `computer` (the
 `inboxComputer`, omitted for local), `resolution` and `--if-updated-at`.
 For remote adds with the new fields and guarded remote resolves, the
@@ -1356,7 +1361,7 @@ For example, run these commands from a shell.
 
 ```sh
 phren owner-inbox add "Restart the router" --project phren
-phren owner-inbox add "Merge phren#940: owner inbox" --command "gh pr merge 940 -R alaarab/phren --squash" --task bid:ac70edca --pr https://github.com/alaarab/phren/pull/940
+phren owner-inbox add "Merge phren#940: owner inbox" --command "gh pr merge 940 -R alaarab/phren --squash" --issue github.com/alaarab/phren#940 --pr https://github.com/alaarab/phren/pull/940
 phren owner-inbox list --all
 phren owner-inbox resolve <id> --computer <name> --resolution "Restarted"
 ```
@@ -1427,25 +1432,3 @@ A security review found same-user self-enrollment, policy rollback, arbitrary co
 behind allowed commands, coverage gaps and erasable audit. Auto-allow is deferred
 until a protected OS user enforces rollback-protected policy and durable audit.
 Tampering can remove restrictions back to today's behavior, never grant beyond it.
-
-### Private task links and merge reconciliation
-
-Dispatch can carry `task:{storeId,project,stableId}` privately with its launch.
-`dispatch_report` uses it to save repository-qualified PR and branch links in
-`tasks.md`; the worker can also supply `task` explicitly. Read `taskLinks` in the
-report response to confirm the link was saved. Keep task identities and context
-out of all commits, PRs and GitHub comments.
-
-A dispatch without `task` is bound to the open task its brief names, strongest
-first: a `bid:<id>` it closes (`fixes bid:…`), the task's quoted line or title
-(`Phren task (project phren): "Fix the sync race"`), the brief's only `bid:`, or a
-bare stable id of the dispatch's project. A task mentioned for context does not
-outrank the quoted one, and two candidates at one level bind none. The task's `Work:` record then shows the worker and follows the dispatch's
-state, and the report's pull request (on GitHub, GitLab or gitboy) becomes the
-task's pull request; the response's `taskWork` says whether it was saved. See
-[task work links](task-responsibility.md#task-work-links).
-
-Use `phren tasks reconcile --dry-run` to preview merge completion, then `--apply`
-to enable subsequent sweeps. Schedule the command nightly if desired. Tasks
-needing acceptance beyond a merge remain open as `merged, verify`; `[needs owner]`
-tasks are skipped. See [task reconciliation](task-responsibility.md#complete-tasks-from-merged-prs).

@@ -48,12 +48,11 @@ export interface FilterPreset {
   health: string;
 }
 
-const ALL_TYPES: Partial<Record<NodeKind, boolean>> = { project: true, finding: true, task: true, entity: true, reference: true };
+const ALL_TYPES: Partial<Record<NodeKind, boolean>> = { project: true, finding: true, entity: true, reference: true };
 
 export const FILTER_PRESETS: FilterPreset[] = [
   { name: "all", types: ALL_TYPES, health: "all" },
   { name: "findings", types: { project: true, finding: true }, health: "all" },
-  { name: "tasks", types: { project: true, task: true }, health: "all" },
   { name: "fragments", types: { project: true, entity: true, reference: true }, health: "all" },
   { name: "aging", types: ALL_TYPES, health: "aging" },
 ];

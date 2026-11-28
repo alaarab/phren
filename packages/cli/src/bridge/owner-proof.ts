@@ -21,12 +21,15 @@ import { ownerRequest } from "./request-origin.js";
  * key that already signs approval rules). Once the Hook has seen one valid
  * signature, unsigned requests to these routes are refused: older apps keep
  * working until the phone starts signing, and after that an agent cannot. The
- * Mac window routes are new, so they require a signature from their first
- * request and never start that migration for the others.
+ * Strict owner routes require a signature from their first request and never
+ * start that migration for the others.
  */
 export const OWNER_PROOF_HEADER = "x-phren-owner-proof";
 const DOMAIN = "phren-owner-request-v1";
 const WINDOW_MS = 300_000;
+const ISSUE_WRITES = [
+  "POST /v1/issues/create", "POST /v1/issues/edit", "POST /v1/issues/comment", "POST /v1/issues/claim", "POST /v1/issues/close",
+];
 const ROUTES = new Set([
   "POST /v1/authority", "POST /v1/authority/confirm", "DELETE /v1/authority",
   "POST /v1/agents/permission-mode",
@@ -34,6 +37,7 @@ const ROUTES = new Set([
   "POST /v1/push/register",
   "POST /v1/sets/link",
   "POST /v1/housekeeping/approve", "POST /v1/housekeeping/dismiss", "POST /v1/housekeeping/restore", "POST /v1/housekeeping/scan",
+  ...ISSUE_WRITES,
   "POST /v1/owner-confirms/answer",
   "POST /v1/owner-inbox/close",
   "GET /v1/mac/windows", "GET /v1/mac/windows/snapshot", "GET /v1/mac/windows/stream",
@@ -41,13 +45,13 @@ const ROUTES = new Set([
 ]);
 /** New owner routes no older phone depends on: they require proof from the first request. */
 const STRICT_ROUTES = new Set([
+  ...ISSUE_WRITES,
   "POST /v1/owner-inbox/close",
   "GET /v1/mac/windows", "GET /v1/mac/windows/snapshot", "GET /v1/mac/windows/stream",
   "POST /v1/mac/windows/action", "POST /v1/mac/windows/permissions",
 ]);
-/** New routes a terminal command must never hold for the phone: a close comes
- * from the phone in the hand that just read the row, not from a waiting shell. */
-const NO_CONFIRM_ROUTES = new Set(["POST /v1/owner-inbox/close"]);
+/** Phone routes that require proof on the action itself. */
+const NO_CONFIRM_ROUTES = new Set([...ISSUE_WRITES, "POST /v1/owner-inbox/close"]);
 
 const payloadSchema = z.object({
   domain: z.literal(DOMAIN), nonce: z.string().uuid(), at: z.string().datetime({ offset: true }),
@@ -129,7 +133,7 @@ export class OwnerProof {
     if (this.seen.has(payload.nonce)) throw refused();
     if (this.seen.size >= 4096) throw new BridgeError(429, "Too many signed owner actions. Try again in a few minutes.");
     this.seen.set(payload.nonce, now + 2 * WINDOW_MS);
-    // A Mac window proof must not flip the migration state for other routes.
+    // A strict route must not flip the migration state for other routes.
     if (!strict && !(await this.isRequired())) {
       await atomic(this.file, JSON.stringify({ since: new Date(now).toISOString(), key: createHash("sha256").update(raw).digest("hex") }));
       this.required = true;

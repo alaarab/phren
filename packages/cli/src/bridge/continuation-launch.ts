@@ -7,11 +7,14 @@ import type { PeerIdentity } from "./request-origin.js";
 import { terminalProvider } from "./terminal.js";
 import { briefArrival, briefId, assertUnusedLaunchId } from "./launch-brief.js";
 import { moveToSchema, projectName } from "./dispatch.js";
+import { dispatchIssueSchema, writeDispatchIssue } from "./dispatch-issue.js";
 
 export const continuationLaunchSchema = z.object({
   workerDispatch: briefId.optional(), worker: z.boolean().default(false), computerId: z.string().uuid(), project: projectName, to: moveToSchema.refine(to => to.computer === undefined, "A receiving launch is local only."), label: z.string().max(200),
   brief: z.object({ id: z.string().uuid(), text: z.string().min(1).max(32768) }).strict(),
-}).strict();
+  issue: dispatchIssueSchema.optional(),
+}).strict().refine(data => !data.issue || data.worker, "An issue binding belongs to a worker.");
+export type ContinuationLaunch = z.infer<typeof continuationLaunchSchema>;
 type Placement = { hash: string; worker?: boolean; workerDispatch?: string; state: "uncertain" | "placed" | "not-placed"; createdAt?: number; server?: string; caller?: PeerIdentity; paneTarget?: Json; result?: Json };
 const queues = new Map<string, Promise<Json>>();
 const creating = new Map<string, Placement>();
@@ -41,7 +44,7 @@ export async function continuationPlacement(id: string, includeCreating = true):
   return saved;
 }
 
-export async function launchContinuation(input: unknown, launch: (data: z.infer<typeof continuationLaunchSchema>, placed: (paneTarget: Json) => Promise<void>) => Promise<Json>, authorization?: { caller?: PeerIdentity; server: string }): Promise<Json> {
+export async function launchContinuation(input: unknown, launch: (data: ContinuationLaunch, placed: (paneTarget: Json) => Promise<void>) => Promise<Json>, authorization?: { caller?: PeerIdentity; server: string }): Promise<Json> {
   const data = continuationLaunchSchema.parse(input);
   const file = fileFor(data.brief.id);
   const hash = createHash("sha256").update(JSON.stringify(data)).digest("hex");
@@ -58,6 +61,7 @@ export async function launchContinuation(input: unknown, launch: (data: z.infer<
       throw new BridgeError(409, "This move's launch is uncertain; inspect its existing pane or wait for its arrival. It will not be launched twice.");
     }
     await assertUnusedLaunchId(data.brief.id);
+    if (data.issue) await writeDispatchIssue(data.brief.id, data.issue);
     await atomicInPrivateDir(file, JSON.stringify({ ...metadata, state: "uncertain" }));
     let paneTarget: Json | undefined;
     const result = await launch(data, async pane => {

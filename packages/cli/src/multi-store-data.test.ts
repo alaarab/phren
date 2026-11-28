@@ -7,32 +7,12 @@ import { storeAwareProjectPath } from "./store-routing.js";
 import { appendReviewQueue } from "./governance/policy.js";
 import { ensureProject } from "./shared/data-utils.js";
 import { PhrenError } from "./shared.js";
-import {
-  addTask,
-  canonicalTaskFilePath,
-  completeTask,
-  readTasks,
-  removeTask,
-} from "./data/tasks.js";
 import { addFinding, readFindings, removeFinding, readReviewQueue } from "./data/access.js";
 import { detectProject } from "./shared/index.js";
 import { teamStoreProjectCheckouts } from "./link/refresh.js";
 import { syncScopeSkillsToDir } from "./skill/files.js";
 import { getSessionStartOnboardingNotice } from "./cli/session-start.js";
 
-const TASKS_FIXTURE = `# team-proj tasks
-
-## Active
-
-- [ ] alpha item
-
-## Queue
-
-- [ ] beta item
-
-## Done
-
-`;
 
 const FINDINGS_FIXTURE = `# team-proj Findings
 
@@ -61,7 +41,6 @@ describe("multi-store data layer", () => {
     fs.writeFileSync(path.join(phrenDir, "personal-proj", "FINDINGS.md"), "# personal-proj Findings\n");
 
     fs.mkdirSync(path.join(teamDir, "team-proj"), { recursive: true });
-    fs.writeFileSync(path.join(teamDir, "team-proj", "tasks.md"), TASKS_FIXTURE);
     fs.writeFileSync(path.join(teamDir, "team-proj", "FINDINGS.md"), FINDINGS_FIXTURE);
 
     const registry: StoreRegistry = {
@@ -134,51 +113,7 @@ describe("multi-store data layer", () => {
     });
   });
 
-  describe("tasks", () => {
-    it("canonicalTaskFilePath points at the secondary store's file", () => {
-      expect(canonicalTaskFilePath(phrenDir, "team-proj")).toBe(
-        path.join(teamDir, "team-proj", "tasks.md"),
-      );
-    });
 
-    it("reads a secondary-store project's tasks", () => {
-      const result = readTasks(phrenDir, "team-proj");
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.data.items.Active.map((i) => i.line)).toEqual(["alpha item"]);
-        expect(result.data.items.Queue.map((i) => i.line)).toEqual(["beta item"]);
-      }
-    });
-
-    it("adds a task to the secondary store without scaffolding a primary-store copy", () => {
-      const result = addTask(phrenDir, "team-proj", "gamma item");
-      expect(result.ok).toBe(true);
-
-      const content = fs.readFileSync(path.join(teamDir, "team-proj", "tasks.md"), "utf8");
-      expect(content).toContain("gamma item");
-      expect(fs.existsSync(path.join(phrenDir, "team-proj"))).toBe(false);
-    });
-
-    it("completes and removes tasks in the secondary store", () => {
-      const completed = completeTask(phrenDir, "team-proj", "alpha item");
-      expect(completed.ok).toBe(true);
-
-      const removed = removeTask(phrenDir, "team-proj", "beta item");
-      expect(removed.ok).toBe(true);
-
-      const content = fs.readFileSync(path.join(teamDir, "team-proj", "tasks.md"), "utf8");
-      expect(content).toContain("- [x] alpha item");
-      expect(content).not.toContain("beta item");
-      expect(fs.existsSync(path.join(phrenDir, "team-proj"))).toBe(false);
-    });
-
-    it("errors on an unknown project without scaffolding a directory", () => {
-      const result = removeTask(phrenDir, "no-such-proj", "anything");
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.code).toBe(PhrenError.PROJECT_NOT_FOUND);
-      expect(fs.existsSync(path.join(phrenDir, "no-such-proj"))).toBe(false);
-    });
-  });
 
   describe("findings", () => {
     it("reads findings from the secondary store", () => {

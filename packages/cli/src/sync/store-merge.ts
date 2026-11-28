@@ -60,8 +60,7 @@ async function abortMerge(cwd: string, git: RunStoreGit): Promise<boolean> {
 
 /**
  * Fetch and integrate a store's configured upstream without rebasing local
- * commits. Conflicts in tasks.md (per task id against the merge base), the
- * generated summary and topic blocks, findings and the task archive resolve
+ * commits. Conflicts in generated summary and topic blocks and findings resolve
  * automatically (see conflict-resolve.ts). Any other conflict aborts the
  * merge and names its files.
  */

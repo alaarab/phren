@@ -5,11 +5,8 @@ export {
   type ConsolidationStatus,
   checkConsolidationNeeded,
   validateFindingsFormat,
-  stripTaskDoneSection,
-  validateTaskFormat,
   extractConflictVersions,
   mergeFindings,
-  mergeTask,
   isAutoMergeableStorePath,
   autoMergeConflicts,
 } from "../content/validate.js";

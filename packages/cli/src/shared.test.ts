@@ -34,12 +34,10 @@ import {
 import {
   addFindingToFile,
   checkConsolidationNeeded,
-  mergeTask,
   isAutoMergeableStorePath,
   autoMergeConflicts,
   filterTrustedFindingsDetailed,
   upsertCanonical,
-  stripTaskDoneSection,
   isDuplicateFinding,
   extractConflictVersions,
 } from "./shared/content.js";
@@ -643,15 +641,7 @@ describe("extractConflictVersions", () => {
 
 // --- mergeTask ---
 
-describe("mergeTask (shared.test)", () => {
-  it("merges items from different sections", () => {
-    const ours = "# task\n\n## Active\n\n- Active task\n\n## Queue\n\n## Done\n";
-    const theirs = "# task\n\n## Active\n\n## Queue\n\n- Queued task\n\n## Done\n";
-    const merged = mergeTask(ours, theirs);
-    expect(merged).toContain("- Active task");
-    expect(merged).toContain("- Queued task");
-  });
-});
+
 
 // --- autoMergeConflicts ---
 
@@ -695,12 +685,9 @@ describe("autoMergeConflicts", () => {
     if (gitCleanup) gitCleanup();
   });
 
-  it("limits union merges to findings, tasks, and root task archives", () => {
+  it("limits union merges to findings", () => {
     expect(isAutoMergeableStorePath("demo/FINDINGS.md")).toBe(true);
-    expect(isAutoMergeableStorePath("demo/tasks.md")).toBe(true);
-    expect(isAutoMergeableStorePath(".config/task-archive/demo.md")).toBe(true);
     expect(isAutoMergeableStorePath("demo/archive.md")).toBe(false);
-    expect(isAutoMergeableStorePath("demo/.config/task-archive/other.md")).toBe(false);
   });
 
   it("returns true when there are no conflicted files", () => {
@@ -759,50 +746,7 @@ describe("autoMergeConflicts", () => {
     expect(content).not.toContain("<<<<<<<");
   });
 
-  it("auto-merges a conflicted tasks.md", () => {
-    const { execFileSync } = require("child_process");
 
-    commitFile(gitDir, "proj/tasks.md", "# tasks\n\n## Active\n\n- Base task\n\n## Queue\n\n## Done\n", "base");
-    const primaryBranch = currentBranch(gitDir);
-
-    execFileSync("git", ["-C", gitDir, "checkout", "-b", "branch-b"], { stdio: "pipe" });
-    fs.writeFileSync(
-      path.join(gitDir, "proj", "tasks.md"),
-      "# tasks\n\n## Active\n\n- Branch task\n\n## Queue\n\n## Done\n"
-    );
-    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/tasks.md"], { stdio: "ignore" });
-    execFileSync("git", ["-C", gitDir, "commit", "-m", "branch change"], { stdio: "ignore" });
-
-    execFileSync("git", ["-C", gitDir, "checkout", primaryBranch], { stdio: "pipe" });
-    fs.writeFileSync(
-      path.join(gitDir, "proj", "tasks.md"),
-      "# tasks\n\n## Active\n\n- Master task\n\n## Queue\n\n## Done\n"
-    );
-    execFileSync("git", ["-C", gitDir, "add", "-f", "proj/tasks.md"], { stdio: "ignore" });
-    execFileSync("git", ["-C", gitDir, "commit", "-m", "master change"], { stdio: "ignore" });
-
-    try {
-      execFileSync("git", ["-C", gitDir, "merge", "branch-b"], { stdio: "ignore" });
-    } catch {
-      // Expected conflict
-    }
-
-    const status = execFileSync("git", ["-C", gitDir, "diff", "--name-only", "--diff-filter=U"], {
-      encoding: "utf8",
-    }).trim();
-
-    if (!status.includes("tasks.md")) {
-      return;
-    }
-
-    const resolved = autoMergeConflicts(gitDir);
-    expect(resolved).toBe(true);
-
-    const content = fs.readFileSync(path.join(gitDir, "proj", "tasks.md"), "utf8");
-    expect(content).toContain("Branch task");
-    expect(content).toContain("Master task");
-    expect(content).not.toContain("<<<<<<<");
-  });
 
   it("returns false for non-mergeable conflicted files", () => {
     const { execFileSync } = require("child_process");
@@ -866,20 +810,7 @@ describe("withDefaults", () => {
 
 // --- stripTaskDoneSection ---
 
-describe("stripTaskDoneSection", () => {
-  it("strips everything after ## Done", () => {
-    const content = "# task\n\n## Active\n\n- A\n\n## Done\n\n- Completed\n- Also done\n";
-    const result = stripTaskDoneSection(content);
-    expect(result).toContain("## Active");
-    expect(result).not.toContain("## Done");
-    expect(result).not.toContain("Completed");
-  });
 
-  it("returns content unchanged when no Done section", () => {
-    const content = "# task\n\n## Active\n\n- A\n\n## Queue\n\n- B\n";
-    expect(stripTaskDoneSection(content)).toBe(content);
-  });
-});
 
 // --- pruneDeadMemories ---
 

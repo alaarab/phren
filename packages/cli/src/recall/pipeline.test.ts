@@ -27,7 +27,6 @@ describe("runPromptPipeline", () => {
     tmp = makeTempDir("recall-pipeline-");
     initTestPhrenRoot(tmp.path);
     write("atlas/FINDINGS.md", "# atlas Findings\n\n- The ledger export retries webhook delivery three times before parking the batch.\n- Parked batches wait for an operator.\n");
-    write("atlas/tasks.md", "# atlas Tasks\n\n## Queue\n\n- [ ] Polish the zorblat quintessa report\n");
     write("harbor/FINDINGS.md", "# harbor Findings\n\n- The saxophone tuner caches chart tiles for ten minutes.\n");
     for (let i = 0; i < 6; i++) write(`harbor/reference/notes-${i}.md`, `# notes ${i}\n\n- Widget ${i} settings live in the panel.\n- Comparison projects honest detailed overview behavior design tradeoffs approach workflow maintenance usability context.\n`);
     // Four docs that each answer a kiln question: more than selection's three slots.
@@ -65,21 +64,13 @@ describe("runPromptPipeline", () => {
     ["no-keywords", "?!"],
     ["no-query", "__"],
     ["no-search-results", "glimmerwick throttlebottom"],
-    // Only the task matches, and the prompt is not about the work.
-    ["trust-filtered", "zorblat quintessa"],
-    // About the backlog, so the task survives trust, but it matches 2 of 7 keywords: too weak to rescue.
-    ["ranked-empty", "backlog zorblat quintessa plimbo frabjous wuggle snarkle"],
   ])("abstains with %s", async (reason, prompt) => {
     const result = await run(prompt);
     expect(result.abstained).toBe(reason);
     expect(result.selected).toEqual([]);
   });
 
-  it("counts trust survivors when a later stage abstains", async () => {
-    const result = await run("backlog zorblat quintessa plimbo frabjous wuggle snarkle");
-    expect(result.trustSurvivors).toBe(1);
-    expect(result.candidates).toEqual([]);
-  });
+
 
   it("abstains below the floor and names each drop's reason and matched keywords", async () => {
     // Each word lives in a different doc, so no bullet matches both.

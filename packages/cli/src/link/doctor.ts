@@ -20,13 +20,11 @@ import { commandVersion, versionAtLeast, nearestWritableTarget, resolveEntryScri
 import { validateGovernanceJson } from "../shared/governance.js";
 import { errorMessage } from "../utils.js";
 import { buildIndex, queryRows } from "../shared/index.js";
-import { validateTaskFormat, validateFindingsFormat } from "../shared/content.js";
+import { validateFindingsFormat } from "../shared/content.js";
 import { commandExists, detectInstalledTools, isEphemeralNpxPath, findStaleHookEntrypoints } from "../hooks.js";
 import { validateSkillFrontmatter, validateSkillsDir } from "./skills.js";
 import { verifyFileChecksums, updateFileChecksums } from "./checksums.js";
 import { buildSkillManifest, skillMirrorPath } from "../skill/registry.js";
-import { inspectTaskHygiene } from "../task/hygiene.js";
-import { resolveTaskFilePath, TASK_FILE_ALIASES } from "../data/tasks.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import { repairPreexistingInstall } from "../init/setup.js";
 import { getManagementPreset, resolveManagementCapabilities } from "../init/management-preset.js";
@@ -680,14 +678,14 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     const injection = medianHookInjectionTokens(phrenPath);
     const problems: string[] = [];
     if (weight.globalClaude > CONTEXT_COST_LIMITS.globalClaudeWords) problems.push(`global AGENTS.md is ${weight.globalClaude} words (aim under ${CONTEXT_COST_LIMITS.globalClaudeWords})`);
-    if (profile === "full") problems.push("MCP profile is full (61 tools, ~53k chars of schema per session); `phren config mcp-profile core` is ~17k");
+    if (profile === "full") problems.push("MCP profile is full (all tools of schema per session); `phren config mcp-profile core` is ~17k");
     if (injection.medianTokens > CONTEXT_COST_LIMITS.medianInjectionTokens) problems.push(`median hook injection is ${injection.medianTokens} tokens over the last ${injection.prompts} prompts`);
     checks.push({
       name: "context-cost",
       ok: problems.length === 0,
       detail: problems.length
         ? problems.join("; ")
-        : `global AGENTS.md ${weight.globalClaude} words · MCP profile ${profile} (${profile === "core" ? "10 tools, ~17k chars" : "61 tools, ~53k chars"})${injection.prompts ? ` · median injection ${injection.medianTokens} tokens over ${injection.prompts} prompts` : ""} · store: findings ${weight.findings.toLocaleString("en-US")} words, archive ${weight.reference.toLocaleString("en-US")}, tasks ${weight.tasks.toLocaleString("en-US")}, skills ${weight.skills.toLocaleString("en-US")}`,
+        : `global AGENTS.md ${weight.globalClaude} words · MCP profile ${profile} (${profile === "core" ? "9 tools" : "all tools"})${injection.prompts ? ` · median injection ${injection.medianTokens} tokens over ${injection.prompts} prompts` : ""} · store: findings ${weight.findings.toLocaleString("en-US")} words, archive ${weight.reference.toLocaleString("en-US")}, skills ${weight.skills.toLocaleString("en-US")}`,
     });
   } catch (err: unknown) {
     logger.debug("doctor", `context-cost: ${errorMessage(err)}`);
@@ -719,31 +717,11 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     ),
   });
   // Each store against its remote: diverged, unsynced for over an hour, or
-  // failing. --fix first collapses repeated task ids (the data layer refuses
-  // to edit them), then runs one full reconcile.
+  // failing. --fix runs a full reconcile.
   try {
     const { resolveAllStores } = await import("../store-registry.js");
     const { syncStore, storeSyncState } = await import("../sync/store-sync.js");
-    const { dedupeTaskIds } = await import("../sync/task-merge.js");
     for (const store of resolveAllStores(phrenPath).filter((entry) => entry.available !== false && fs.existsSync(path.join(entry.path, ".git")))) {
-      const repeated: string[] = [];
-      for (const dir of fs.readdirSync(store.path, { withFileTypes: true })) {
-        if (!dir.isDirectory() || dir.name.startsWith(".")) continue;
-        const file = path.join(store.path, dir.name, "tasks.md");
-        let text: string;
-        try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
-        const result = dedupeTaskIds(text);
-        if (!result.dropped) continue;
-        if (fix) fs.writeFileSync(file, result.content);
-        repeated.push(`${dir.name}/tasks.md (${result.dropped})`);
-      }
-      if (repeated.length) {
-        checks.push({
-          name: `task-ids:${store.name}`,
-          ok: fix,
-          detail: fix ? `collapsed repeated task ids in ${repeated.join(", ")}` : `repeated task ids in ${repeated.join(", ")}; edits to those tasks are refused. Run \`phren doctor --fix\`.`,
-        });
-      }
       let synced = "";
       if (fix) {
         const outcome = await syncStore(store.path, { push: store.role !== "readonly" && store.sync !== "pull-only", source: "doctor" });
@@ -927,25 +905,6 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       const projectName = path.basename(projectDir);
       if (projectName === "global") continue;
 
-      const taskPath = resolveTaskFilePath(phrenPath, projectName);
-      if (taskPath && fs.existsSync(taskPath)) {
-        const content = fs.readFileSync(taskPath, "utf8");
-        const issues = validateTaskFormat(content);
-        checks.push({
-          name: `data:tasks:${projectName}`,
-          ok: issues.length === 0,
-          detail: issues.length ? issues.join("; ") : "valid task file",
-        });
-
-        const repoPath = findProjectDir(projectName);
-        const hygiene = inspectTaskHygiene(phrenPath, projectName, repoPath);
-        checks.push({
-          name: `data:task-hygiene:${projectName}`,
-          ok: hygiene.ok,
-          detail: hygiene.detail,
-        });
-      }
-
       const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
       if (fs.existsSync(findingsPath)) {
         const content = fs.readFileSync(findingsPath, "utf8");
@@ -963,7 +922,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       const projectName = path.basename(projectDir);
       if (projectName === "global") continue;
 
-      for (const mdFile of [FINDINGS_FILENAME, ...TASK_FILE_ALIASES, "review.md", "AGENTS.md", "REFERENCE.md"]) {
+      for (const mdFile of [FINDINGS_FILENAME, "review.md", "AGENTS.md", "REFERENCE.md"]) {
         const filePath = path.join(projectDir, mdFile);
         if (!fs.existsSync(filePath)) continue;
         const content = fs.readFileSync(filePath, "utf8");
@@ -1020,28 +979,6 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     }
   }
 
-  // Zombie blocked-task scan: pre-0.1.25 task lifecycle promoted tasks to Active
-  // and stamped them "Blocked: Command failed: git add -A" on transient git
-  // failures. Those tasks never resolve themselves. With --fix, archive them
-  // to Done with a phren-managed comment so they stop appearing in Active.
-  try {
-    const zombieResult = scanAndOptionallyFixZombieTasks(phrenPath, fix);
-    if (zombieResult.scanned > 0) {
-      const cleared = zombieResult.zombies === 0 || fix;
-      checks.push({
-        name: "zombie-blocked-tasks",
-        ok: cleared,
-        detail: zombieResult.zombies === 0
-          ? `0 zombie blocked tasks across ${zombieResult.scanned} project(s)`
-          : fix
-            ? `archived ${zombieResult.zombies} zombie task(s) across ${zombieResult.fixedProjects} project(s)`
-            : `${zombieResult.zombies} zombie blocked task(s) found across ${zombieResult.affectedProjects} project(s). Run \`phren doctor --fix\` to archive them.`,
-      });
-    }
-  } catch (err: unknown) {
-    debugLog(`doctor: zombie task scan failed: ${errorMessage(err)}`);
-  }
-
   // `@path` import lines in store-managed AGENTS.md/CLAUDE.md resolve outside
   // the repo (the repo file is a symlink into the store), so Claude Code blocks
   // on its external-imports dialog. With --fix, rewrite them as plain mentions.
@@ -1074,85 +1011,4 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
 
   const ok = checks.every((c) => c.ok);
   return { ok, machine, profile: profile || undefined, checks };
-}
-
-interface ZombieScanResult {
-  scanned: number;
-  affectedProjects: number;
-  fixedProjects: number;
-  zombies: number;
-}
-
-const ZOMBIE_BLOCKED_CONTEXT_RE = /^\s*Context:\s*Blocked:\s*Command failed:\s*git\s+(?:add|commit|push|stage|pull|fetch|stash)\b/i;
-
-function scanAndOptionallyFixZombieTasks(phrenPath: string, fix: boolean): ZombieScanResult {
-  const result: ZombieScanResult = { scanned: 0, affectedProjects: 0, fixedProjects: 0, zombies: 0 };
-  const projectDirs = getProjectDirs(phrenPath);
-  for (const project of projectDirs) {
-    const filePath = resolveTaskFilePath(phrenPath, project);
-    if (!filePath || !fs.existsSync(filePath)) continue;
-    result.scanned += 1;
-    const original = fs.readFileSync(filePath, "utf8");
-    const lines = original.split("\n");
-    // Walk in Active section; find task lines whose next line is a zombie Context.
-    let section: string | null = null;
-    const zombieIndices: number[] = [];
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const heading = line.match(/^##\s+(\w+)/);
-      if (heading) {
-        section = heading[1];
-        continue;
-      }
-      if (section !== "Active") continue;
-      if (!/^- \[ \]/.test(line)) continue;
-      const next = lines[i + 1];
-      if (next && ZOMBIE_BLOCKED_CONTEXT_RE.test(next)) {
-        zombieIndices.push(i);
-      }
-    }
-    if (zombieIndices.length === 0) continue;
-    result.affectedProjects += 1;
-    result.zombies += zombieIndices.length;
-    if (!fix) continue;
-
-    // Build edited file: move zombie tasks (and their Context line) to ## Done.
-    // Mark them [x] and prepend "(phren: archived zombie git-failure block)".
-    const archived: string[] = [];
-    const keepLines: string[] = [];
-    section = null;
-    let insertDoneAfter: number | null = null;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const heading = line.match(/^##\s+(\w+)/);
-      if (heading) {
-        section = heading[1];
-        if (section === "Done") insertDoneAfter = keepLines.length;
-        keepLines.push(line);
-        continue;
-      }
-      if (section === "Active" && zombieIndices.includes(i)) {
-        const taskLine = line.replace(/^- \[ \]/, "- [x]");
-        archived.push(`${taskLine}  <!-- phren: archived zombie git-failure block -->`);
-        // Carry Context line if present.
-        const next = lines[i + 1];
-        if (next && ZOMBIE_BLOCKED_CONTEXT_RE.test(next)) {
-          archived.push(next);
-          i += 1;
-        }
-        continue;
-      }
-      keepLines.push(line);
-    }
-    if (archived.length > 0 && insertDoneAfter !== null) {
-      // Insert the archived block right after `## Done` heading (and the blank line).
-      const before = keepLines.slice(0, insertDoneAfter + 1);
-      const after = keepLines.slice(insertDoneAfter + 1);
-      const archivedBlock = ["", ...archived];
-      const next = [...before, ...archivedBlock, ...after].join("\n");
-      fs.writeFileSync(filePath, next, "utf8");
-      result.fixedProjects += 1;
-    }
-  }
-  return result;
 }

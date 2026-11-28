@@ -7,7 +7,6 @@ import { execFileSync } from "child_process";
 import { debugLog, EXEC_TIMEOUT_MS, getProjectDirs } from "../shared.js";
 import { errorMessage } from "../utils.js";
 import { countActiveFindings } from "./archive.js";
-import { isTaskFileName } from "../filenames.js";
 import { METADATA_REGEX } from "./metadata.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 import { FINDINGS_FILENAME } from "../filenames.js";
@@ -138,41 +137,6 @@ export function validateFindingsFormat(content: string): string[] {
         issues.push(`Date heading should be YYYY-MM-DD format: "${line}"`);
       }
     }
-  }
-
-  return issues;
-}
-
-/**
- * Strip the ## Done section (and equivalents) from task content to reduce index bloat.
- * Keeps the title, Active, and Queue sections which are the actionable parts.
- * Handles: Done, Completed, Archived, Finished, Complete.
- */
-export function stripTaskDoneSection(content: string): string {
-  const donePattern = /^## (Done|Completed|Archived|Finished|Complete)\b.*$/im;
-  const match = content.match(donePattern);
-  if (!match || match.index === undefined) return content;
-  return content.slice(0, match.index).trimEnd() + "\n";
-}
-
-/**
- * Validate tasks.md format and structure.
- * Returns an array of issue description strings (empty array means valid).
- */
-export function validateTaskFormat(content: string): string[] {
-  const issues: string[] = [];
-  const lines = content.split("\n");
-
-  if (!lines[0]?.startsWith("# ")) {
-    issues.push("Missing title heading");
-  }
-
-  const hasSections =
-    content.includes("## Active") ||
-    content.includes("## Queue") ||
-    content.includes("## Done");
-  if (!hasSections) {
-    issues.push("Missing expected sections (Active, Queue, Done)");
   }
 
   return issues;
@@ -471,131 +435,11 @@ function buildMergedFindings(ours: string, theirs: string, removed: Map<string, 
   return { text: lines.join("\n"), dedupedContinuations };
 }
 
-/** A parsed task record that may span multiple lines (bullet + Context: continuation). */
-interface TaskRecord {
-  /** The stable bid:XXXXXXXX if present in the bullet line, used as merge key. */
-  stableId?: string;
-  /** The bullet line itself. */
-  bullet: string;
-  /** Continuation lines immediately following the bullet (e.g. "  Context: ..."). */
-  continuations: string[];
-}
-
-/**
- * Pattern for the stable bid comment embedded in task lines. The comment carries
- * more than the bid in real files (`<!-- bid:HASH rank:N created:... -->`), so the
- * pattern must accept any trailing fields up to the closing `-->` — matching only
- * `<!-- bid:HASH -->` silently disabled stable-ID dedup in the union merge.
- */
-const MERGE_BID_PATTERN = /<!--\s*bid:([a-z0-9]{8})\b[^>]*-->/;
-
-/** Render a TaskRecord back to its original lines. */
-function renderTaskRecord(record: TaskRecord): string[] {
-  return [record.bullet, ...record.continuations];
-}
-
-/** Merge key: stable ID if present, otherwise normalised bullet text. */
-function taskRecordKey(record: TaskRecord): string {
-  if (record.stableId) return `bid:${record.stableId}`;
-  return record.bullet.replace(MERGE_BID_PATTERN, "").trim().toLowerCase();
-}
-
-// Parse tasks.md into a map of section name -> multi-line TaskRecord entries.
-function parseTaskSections(content: string): Map<string, TaskRecord[]> {
-  const sections = new Map<string, TaskRecord[]>();
-  let current = "";
-  let currentRecord: TaskRecord | null = null;
-
-  const flush = () => {
-    if (currentRecord && current) {
-      sections.get(current)!.push(currentRecord);
-      currentRecord = null;
-    }
-  };
-
-  for (const line of content.split("\n")) {
-    if (line.startsWith("## ")) {
-      flush();
-      current = line.slice(3).trim();
-      if (!sections.has(current)) sections.set(current, []);
-    } else if (line.startsWith("- ") && current) {
-      flush();
-      const bidMatch = line.match(MERGE_BID_PATTERN);
-      currentRecord = {
-        stableId: bidMatch ? bidMatch[1] : undefined,
-        bullet: line,
-        continuations: [],
-      };
-    } else if (currentRecord && line.startsWith("  ") && line.trim()) {
-      // Any indented, non-empty line belongs to the preceding task: Context:,
-      // GitHub:, sub-bullets. Keeping only Context: dropped GitHub links (and any
-      // future continuation field) from the merged file.
-      currentRecord.continuations.push(line);
-    } else {
-      flush();
-    }
-  }
-  flush();
-
-  return sections;
-}
-
-/**
- * Merge two tasks.md versions: union items per section, deduplicated by stable ID when
- * present or by normalised bullet text otherwise. Context/continuation lines are preserved.
- * Ours wins on conflict. Section order follows Active > Queue > Done.
- */
-export function mergeTask(ours: string, theirs: string): string {
-  const ourSections = parseTaskSections(ours);
-  const theirSections = parseTaskSections(theirs);
-
-  const sectionOrder = ["Active", "Queue", "Done"];
-  const allSections = [...new Set([...ourSections.keys(), ...theirSections.keys()])];
-  const ordered = [
-    ...sectionOrder.filter(s => allSections.includes(s)),
-    ...allSections.filter(s => !sectionOrder.includes(s)),
-  ];
-
-  const titleLine = ours.split("\n")[0] || "# task";
-  const lines = [titleLine, ""];
-
-  for (const section of ordered) {
-    const ourItems = ourSections.get(section) ?? [];
-    const theirItems = theirSections.get(section) ?? [];
-
-    // Merge: ours wins; include theirs only when key not already seen
-    const seen = new Map<string, TaskRecord>();
-    for (const record of ourItems) seen.set(taskRecordKey(record), record);
-    for (const record of theirItems) {
-      const key = taskRecordKey(record);
-      if (!seen.has(key)) {
-        seen.set(key, record);
-      } else if (record.stableId) {
-        // Merge fields from theirs into ours when using stable ID: preserve context lines
-        const oursRecord = seen.get(key)!;
-        if (oursRecord.continuations.length === 0 && record.continuations.length > 0) {
-          seen.set(key, { ...oursRecord, continuations: record.continuations });
-        }
-      }
-    }
-
-    lines.push(`## ${section}`, "");
-    for (const record of seen.values()) {
-      lines.push(...renderTaskRecord(record));
-    }
-    lines.push("");
-  }
-
-  return lines.join("\n");
-}
-
 /** The store paths whose record-oriented markdown can safely use union merge. */
 export function isAutoMergeableStorePath(relFile: string): boolean {
   const normalized = relFile.replace(/\\/g, "/");
   const filename = path.posix.basename(normalized).toLowerCase();
-  return filename === "findings.md"
-    || isTaskFileName(filename)
-    || /^\.config\/task-archive\/[^/]+\.md$/i.test(normalized);
+  return filename === "findings.md";
 }
 
 /**
@@ -624,7 +468,6 @@ export function autoMergeConflicts(phrenPath: string): boolean {
 
   for (const relFile of conflictedFiles) {
     const fullPath = path.join(phrenPath, relFile);
-    const filename = path.basename(relFile).toLowerCase();
 
     const canAutoMerge = isAutoMergeableStorePath(relFile);
     if (!canAutoMerge) {
@@ -638,9 +481,7 @@ export function autoMergeConflicts(phrenPath: string): boolean {
       const versions = extractConflictVersions(content);
       if (!versions) continue;
 
-      const merged = filename === "findings.md"
-        ? mergeFindings(versions.ours, versions.theirs)
-        : mergeTask(versions.ours, versions.theirs);
+      const merged = mergeFindings(versions.ours, versions.theirs);
 
       const tmpMergePath = fullPath + `.tmp-${crypto.randomUUID()}`;
       fs.writeFileSync(tmpMergePath, merged);

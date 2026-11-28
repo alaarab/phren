@@ -1,11 +1,10 @@
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { initializeTaskFormat } from "../data/task-format.js";
-import type { ForgeItem } from "../task/work.js";
+import type { ForgeItem } from "../forge/links.js";
 import { grantAdmin, makeTempDir, writeFile } from "../test-helpers.js";
 import { PROVIDERS, providerFor } from "./git-hosts.js";
 import { ownerInboxDone } from "./owner-inbox-done.js";
-import type { InboxItem } from "./owner-inbox.js";
+import { inboxIssueTitle, type InboxItem } from "./owner-inbox.js";
 
 vi.mock("./git-hosts.js", async original => ({ ...await original<typeof import("./git-hosts.js")>(), providerFor: vi.fn() }));
 
@@ -16,7 +15,7 @@ const item = (over: Partial<InboxItem> & Pick<InboxItem, "id">): InboxItem =>
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.resetAllMocks(); });
 
 describe("owner inbox auto-resolution", () => {
-  it("resolves merged and closed pulls, leaves open and unread ones alone", async () => {
+  it("resolves merged and closed pulls and leaves open, unread and issue-only items alone", async () => {
     const pull = vi.fn(async (url: string) =>
       url.endsWith("/877") ? { state: "merged" } : url.endsWith("/878") ? { state: "closed" } : url.endsWith("/879") ? { state: "open" } : undefined);
     const items = [
@@ -24,30 +23,18 @@ describe("owner inbox auto-resolution", () => {
       item({ id: "22222222-2222-4222-8222-222222222222", pr: "https://github.com/o/r/pull/878" }),
       item({ id: "33333333-3333-4333-8333-333333333333", pr: "https://github.com/o/r/pull/879" }),
       item({ id: "44444444-4444-4444-8444-444444444444", pr: "https://github.com/o/r/pull/880" }),
+      item({ id: "55555555-5555-4555-8555-555555555555", title: inboxIssueTitle({ title: "Owner action", issue: "github.com/o/r#877" }) }),
     ];
     const done = await ownerInboxDone(items, { pull });
     expect(done.get(items[0].id)).toBe("done: PR merged");
     expect(done.get(items[1].id)).toBe("done: PR closed without merging");
     expect(done.has(items[2].id)).toBe(false);
     expect(done.has(items[3].id)).toBe(false);
+    expect(done.has(items[4].id)).toBe(false);
     expect(pull).toHaveBeenCalledTimes(4);
   });
-  it("resolves a task link only on positive evidence the task is Done", async () => {
-    const id = "55555555-5555-4555-8555-555555555555";
-    const linked = item({ id, task: "bid:c2cc33d0" });
-    expect((await ownerInboxDone([linked], { task: async () => true })).get(id)).toBe("done: task bid:c2cc33d0 is Done");
-    expect(await ownerInboxDone([linked], { task: async () => false })).toEqual(new Map());
-    expect(await ownerInboxDone([linked], { task: async () => undefined })).toEqual(new Map());
-    expect(await ownerInboxDone([linked], { task: async () => { throw new Error("store unreadable"); } })).toEqual(new Map());
-  });
-  it("uses the Done task when the linked PR is open or unreadable", async () => {
-    const both = item({ id: "66666666-6666-4666-8666-666666666666", pr: "https://github.com/o/r/pull/877", task: "bid:c2cc33d0" });
-    const task = async () => true;
-    for (const pull of [async () => ({ state: "open" as const }), async () => undefined, async () => { throw new Error("forge down"); }]) {
-      expect((await ownerInboxDone([both], { pull, task })).get(both.id)).toBe("done: task bid:c2cc33d0 is Done");
-    }
-    expect((await ownerInboxDone([both], { pull: async () => ({ state: "merged" }), task })).get(both.id)).toBe("done: PR merged");
-  });
+
+
   it("waits for a post-reopen forge read before using a cached unmerged closure", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.parse(at) + 1000);
@@ -67,33 +54,15 @@ describe("owner inbox auto-resolution", () => {
     await new Promise<void>(resolve => setImmediate(resolve));
     expect(await ownerInboxDone([updated])).toEqual(new Map());
   });
-  it("reads the task store again when an updated item outlives its cached Done task", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(Date.parse(at) + 1000);
-    const store = makeTempDir("owner-inbox-task-");
-    try {
-      grantAdmin(store.path);
-      initializeTaskFormat(store.path);
-      vi.stubEnv("PHREN_PATH", store.path);
-      const file = path.join(store.path, "release", "tasks.md");
-      writeFile(file, "# release tasks\n\n## Done\n\n- [x] Ship the release <!-- bid:c2cc33d0 -->\n");
-      const linked = item({ id: "22222222-2222-4222-8222-222222222222", task: "bid:c2cc33d0" });
-      expect((await ownerInboxDone([linked])).get(linked.id)).toBe("done: task bid:c2cc33d0 is Done");
-      writeFile(file, "# release tasks\n\n## Active\n\n- [ ] Ship the release <!-- bid:c2cc33d0 -->\n");
-      const updated = { ...linked, title: "Finish the reopened task", updatedAt: new Date(Date.parse(at) + 2000).toISOString() };
-      vi.setSystemTime(Date.parse(at) + 3000);
-      expect(await ownerInboxDone([updated])).toEqual(new Map());
-    } finally { store.cleanup(); }
-  });
+
   it("never asks about resolved or non-manual items", async () => {
-    const pull = vi.fn(async () => ({ state: "merged" })), task = vi.fn(async () => true);
+    const pull = vi.fn(async () => ({ state: "merged" }));
     const items = [
       { ...item({ id: "77777777-7777-4777-8777-777777777777", pr: "https://github.com/o/r/pull/1" }), state: "resolved" as const },
-      { ...item({ id: "88888888-8888-4888-8888-888888888888", pr: "https://github.com/o/r/pull/2", task: "bid:c2cc33d0" }), kind: "blocked" as const },
+      { ...item({ id: "88888888-8888-4888-8888-888888888888", pr: "https://github.com/o/r/pull/2" }), kind: "blocked" as const },
     ];
-    expect(await ownerInboxDone(items, { pull, task })).toEqual(new Map());
+    expect(await ownerInboxDone(items, { pull })).toEqual(new Map());
     expect(pull).not.toHaveBeenCalled();
-    expect(task).not.toHaveBeenCalled();
   });
   it("leaves an item open when its pull read fails", async () => {
     const id = "99999999-9999-4999-8999-999999999999";

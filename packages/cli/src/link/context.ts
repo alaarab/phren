@@ -4,7 +4,6 @@ import * as yaml from "js-yaml";
 import { loadYamlDocument } from "../phren-core.js";
 import { isValidProjectName } from "../utils.js";
 import { homeDir, homePath } from "../shared.js";
-import { resolveTaskFilePath } from "../data/tasks.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import { log } from "../init/shared.js";
 
@@ -128,18 +127,9 @@ export function writeContextPlanning(machine: string, profile: string, mcpStatus
       break;
     }
     const summaryFile = path.join(phrenPath, project, "summary.md");
-    const taskFile = resolveTaskFilePath(phrenPath, project);
-    if (!fs.existsSync(summaryFile) && !taskFile) continue;
+    if (!fs.existsSync(summaryFile)) continue;
     content += `\n\n## ${project}\n`;
     if (fs.existsSync(summaryFile)) content += fs.readFileSync(summaryFile, "utf8") + "\n";
-    if (taskFile && fs.existsSync(taskFile)) {
-      let task = fs.readFileSync(taskFile, "utf8");
-      const remaining = MAX_CONTEXT_BYTES - content.length;
-      if (task.length > remaining && remaining > 0) {
-        task = task.slice(0, remaining) + "\n(task truncated)\n";
-      }
-      content += `\n### Task\n${task}\n`;
-    }
   }
   writeContextFile(content);
   log(`  wrote ${contextFilePath()} (planning mode)`);

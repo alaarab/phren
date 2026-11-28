@@ -10,9 +10,9 @@
       "name": "phren",
       "source": "./",
       "description": "Long-term memory for Claude Code. Recalls relevant past findings on every prompt, keeps per-project context, and saves what each session learned to a local git-backed store you own. No account, no telemetry by default.",
-      "version": "0.3.101",
+      "version": "0.4.0",
       "category": "productivity",
-      "tags": ["memory", "context", "knowledge-base", "tasks", "local-first"],
+      "tags": ["memory", "context", "knowledge-base", "local-first"],
       "author": {
         "name": "Ala Arab",
         "url": "https://github.com/alaarab"
@@ -27,8 +27,7 @@
         "context",
         "knowledge-base",
         "project-context",
-        "tasks",
-        "findings",
+            "findings",
         "local-first",
         "git",
         "mcp",

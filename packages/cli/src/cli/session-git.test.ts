@@ -8,9 +8,8 @@ import { TEAM_STORE_PATHSPECS } from "./session-git.js";
 // each iteration already wrapped in its own try/catch so one no-match can't
 // abort the rest). Only the constant's shape is still meaningful to pin down.
 describe("TEAM_STORE_PATHSPECS", () => {
-  it("includes the journal/tasks/findings/reference/skills patterns", () => {
+  it("includes the journal/findings/reference/skills patterns", () => {
     expect(TEAM_STORE_PATHSPECS).toContain("*/journal/*");
-    expect(TEAM_STORE_PATHSPECS).toContain("*/tasks.md");
     expect(TEAM_STORE_PATHSPECS).toContain("*/FINDINGS.md");
     expect(TEAM_STORE_PATHSPECS).toContain("*/reference/**");
     expect(TEAM_STORE_PATHSPECS).toContain("*/skills/**");

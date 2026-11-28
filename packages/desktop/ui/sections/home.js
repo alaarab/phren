@@ -1,4 +1,3 @@
-import { createActiveTasks } from "./home/active-tasks.js";
 import { createSavedToday } from "./home/saved-today.js";
 import { DISPATCH_LIST, hookGet, hookPost } from "../api.js";
 import { projectOf, sessions, store } from "../shell/store.js";
@@ -78,10 +77,6 @@ export function mountHome(root, { openSession, openPulls } = {}) {
         <h2 class="section-label">Up next <span class="count"></span></h2>
         <div class="home-list"></div>
       </section>
-      <section class="home-block" data-block="active-tasks" hidden>
-        <h2 class="section-label">Active tasks <span class="count"></span></h2>
-        <div class="home-list"></div>
-      </section>
       <section class="home-block" data-block="saved-today" hidden>
         <h2 class="section-label">Saved today <span class="count"></span></h2>
         <div class="home-list"></div>
@@ -120,7 +115,6 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     ready: (computer) => computerReady(computer, state.merged),
   });
   const renderUpNext = createUpNext({ block, scheduleLists, state });
-  const activeTasks = createActiveTasks({ block, state });
   const savedToday = createSavedToday({ block, state });
   const renderComputers = createComputers(shared);
   const renderConductor = createConductor({ root, state, receipts, open });
@@ -205,7 +199,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     refreshBtn.setAttribute("aria-busy", "true");
     let ok = true;
     try {
-      const results = await Promise.all([pollReceipts(), pulls.reload(), activeTasks.reload(), savedToday.reload()]);
+      const results = await Promise.all([pollReceipts(), pulls.reload(), savedToday.reload()]);
       ok = results[0] !== false;
     } catch { ok = false; }
     loading = false;
@@ -239,7 +233,6 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     pulls.render();
     finished.renderReturns();
     renderUpNext();
-    activeTasks.render();
     savedToday.render();
     renderComputers();
   }
@@ -260,7 +253,6 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       visible = true;
       startUpdatedTicks();
       startPolling();
-      activeTasks.show();
       savedToday.show();
       checks.follow();
       pulls.show();
@@ -272,7 +264,6 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       visible = false;
       stopUpdatedTicks();
       stopPolling();
-      activeTasks.hide();
       savedToday.hide();
       checks.unfollow();
       pulls.hide();
@@ -284,7 +275,6 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       visible = false;
       stopUpdatedTicks();
       stopPolling();
-      activeTasks.hide();
       savedToday.hide();
       checks.unfollow();
       pulls.hide();

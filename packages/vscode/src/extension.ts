@@ -1,6 +1,5 @@
 import * as path from "path";
 import * as fs from "fs";
-import * as os from "os";
 import * as vscode from "vscode";
 import { PhrenClient } from "./phrenClient";
 import { samePath } from "./pathUtils";
@@ -12,7 +11,6 @@ import { phrenLog } from "./log";
 import { type ExtensionContext as PhrenExtCtx, toErrorMessage, asRecord, asArraySafe } from "./extensionContext";
 import { runOnboardingIfNeeded, registerOnboardingCommands, handleWalkthroughChecks } from "./onboarding";
 import { registerFindingCommands } from "./commands/finding-commands";
-import { registerTaskCommands } from "./commands/task-commands";
 import { registerProjectCommands } from "./commands/project-commands";
 import { registerMachineCommands } from "./commands/machine-commands";
 import { registerNoteCommands } from "./commands/note-commands";
@@ -128,7 +126,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     ...registerFindingCommands(extCtx),
     ...registerNoteCommands(extCtx),
-    ...registerTaskCommands(extCtx),
     ...registerProjectCommands(extCtx),
     ...registerMachineCommands(extCtx),
   );
@@ -140,10 +137,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (
       e.affectsConfiguration("phren.proactivity") ||
       e.affectsConfiguration("phren.proactivityFindings") ||
-      e.affectsConfiguration("phren.proactivityTasks") ||
       e.affectsConfiguration("phren.autoExtract") ||
       e.affectsConfiguration("phren.autoCapture") ||
-      e.affectsConfiguration("phren.taskMode") ||
       e.affectsConfiguration("phren.hooksEnabled") ||
       e.affectsConfiguration("phren.semanticDedup") ||
       e.affectsConfiguration("phren.semanticConflict") ||
@@ -421,21 +416,16 @@ function syncSettingsToPreferences(storePath: string, config: ConfigSource): voi
   try {
     const governancePrefsPath = path.join(storePath, ".config", "install-preferences.json");
     const runtimePrefsPath = path.join(storePath, ".runtime", "install-preferences.json");
-    const workflowPolicyPath = path.join(storePath, ".config", "workflow-policy.json");
 
     // Proactivity → governance install-preferences.json
     const proactivity = config.get<string>("proactivity", "");
     const proactivityFindings = config.get<string>("proactivityFindings", "");
-    const proactivityTasks = config.get<string>("proactivityTasks", "");
     const governancePatch: Record<string, unknown> = {};
     if (proactivity && ["high", "medium", "low"].includes(proactivity)) {
       governancePatch.proactivity = proactivity;
     }
     if (proactivityFindings && ["high", "medium", "low"].includes(proactivityFindings)) {
       governancePatch.proactivityFindings = proactivityFindings;
-    }
-    if (proactivityTasks && ["high", "medium", "low"].includes(proactivityTasks)) {
-      governancePatch.proactivityTasks = proactivityTasks;
     }
     if (Object.keys(governancePatch).length > 0) {
       patchJsonFile(governancePrefsPath, governancePatch);
@@ -450,11 +440,6 @@ function syncSettingsToPreferences(storePath: string, config: ConfigSource): voi
     const autoCapture = config.get<boolean>("autoCapture", false);
     patchJsonFile(runtimePrefsPath, { autoExtract, autoCapture });
 
-    // Task mode → governance workflow-policy.json
-    const taskMode = config.get<string>("taskMode", "");
-    if (taskMode && ["off", "manual", "suggest", "auto"].includes(taskMode)) {
-      patchJsonFile(workflowPolicyPath, { taskMode });
-    }
 
     // Semantic dedup/conflict + LLM model → runtime install-preferences.json
     const semanticDedup = config.get<boolean>("semanticDedup", false);

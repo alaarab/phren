@@ -1,8 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  readTasks,
-  addTask,
-  completeTask,
   readFindings,
   addFinding,
   removeFinding,
@@ -39,19 +36,7 @@ afterEach(() => {
 });
 
 describe("corrupted file recovery", () => {
-  it.each([
-    ["empty", "", 0],
-    ["no sections", "# chaos task\n\nJust some text\n", 0],
-    ["only a Done section", "# chaos task\n\n## Done\n\n- [x] Only done item\n", 1],
-  ])("handles tasks.md that is %s", (_label, content, done) => {
-    fs.writeFileSync(path.join(projectDir, "tasks.md"), content);
-    const result = readTasks(tmpDir, PROJECT);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.data.items.Active).toHaveLength(0);
-    expect(result.data.items.Queue).toHaveLength(0);
-    expect(result.data.items.Done).toHaveLength(done);
-  });
+
 
   it("handles FINDINGS.md with no date headers", () => {
     fs.writeFileSync(path.join(projectDir, "FINDINGS.md"), "# chaos FINDINGS\n\n- Finding without date\n- Another finding\n");
@@ -103,19 +88,6 @@ describe("corrupted file recovery", () => {
     if (!result.ok) return;
     // Only machine-c has a string value
     expect(result.data).toEqual({ "machine-c": "valid" });
-  });
-});
-
-describe("boundary and edge case inputs", () => {
-  it("rejects project names with special characters", () => {
-    const badNames = ["../escape", "with spaces", "with/slash", "with@symbol", ".hidden"];
-    for (const name of badNames) {
-      const result = readTasks(tmpDir, name);
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect([PhrenError.INVALID_PROJECT_NAME, PhrenError.PROJECT_NOT_FOUND]).toContain(result.code);
-      }
-    }
   });
 });
 
@@ -210,8 +182,7 @@ describe("concurrent environment variable isolation", () => {
   });
 
   it("respects PHREN_FILE_LOCK_STALE_MS override", () => {
-    fs.writeFileSync(path.join(projectDir, "tasks.md"), "# chaos task\n\n## Queue\n\n## Done\n");
-    const lockPath = path.join(projectDir, "tasks.md.lock");
+    const lockPath = path.join(projectDir, "FINDINGS.md.lock");
     fs.writeFileSync(lockPath, `99999\n${Date.now() - 2000}`);
     const past = new Date(Date.now() - 2000);
     fs.utimesSync(lockPath, past, past);
@@ -219,7 +190,7 @@ describe("concurrent environment variable isolation", () => {
     // Set stale threshold to 1 second so the 2-second-old lock is stale
     process.env.PHREN_FILE_LOCK_STALE_MS = "1000";
 
-    const msg = addTask(tmpDir, PROJECT, "After custom stale threshold");
+    const msg = addFinding(tmpDir, PROJECT, "After custom stale threshold");
     expect(msg.ok).toBe(true);
     expect(fs.existsSync(lockPath)).toBe(false);
   });

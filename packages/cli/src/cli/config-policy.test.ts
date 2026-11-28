@@ -96,47 +96,7 @@ afterEach(() => {
   tmp.cleanup();
 });
 
-describe("config task-mode", () => {
-  it("reads the default mode and writes a normalised valid mode", async () => {
-    const { handleConfigTaskMode } = await importPolicy();
-    const output = captureConsole();
 
-    handleConfigTaskMode([]);
-    expect(JSON.parse(output.logs[0])).toEqual({ taskMode: "auto" });
-
-    handleConfigTaskMode(["set", "SUGGEST"]);
-    expect(JSON.parse(output.logs[1])).toEqual({ taskMode: "suggest" });
-
-    handleConfigTaskMode(["Manual"]);
-    expect(JSON.parse(output.logs[2])).toEqual({ taskMode: "manual" });
-    expect(getWorkflowPolicy(phrenDir).taskMode).toBe("manual");
-  });
-
-  it("rejects an unknown mode and an unknown action with their usage lines", async () => {
-    const { handleConfigTaskMode } = await importPolicy();
-    const output = captureConsole();
-    mockExit();
-
-    expect((await expectExit(() => handleConfigTaskMode(["set", "sometimes"]))).code).toBe(1);
-    expect(output.errors.join("\n")).toContain("Usage: phren config task-mode set [off|manual|suggest|auto]");
-    expect(getWorkflowPolicy(phrenDir).taskMode).toBe("auto");
-
-    expect((await expectExit(() => handleConfigTaskMode(["sometimes"]))).code).toBe(1);
-    expect(output.errors.join("\n")).toContain("values: off|manual|suggest|auto");
-  });
-
-  it("writes a project override without changing the global mode", async () => {
-    const { handleConfigTaskMode } = await importPolicy();
-    const output = captureConsole();
-    fs.mkdirSync(path.join(phrenDir, "demo"));
-
-    handleConfigTaskMode(["--project", "demo", "set", "off"]);
-
-    expect(JSON.parse(output.logs[0])).toEqual({ _project: "demo", taskMode: "off" });
-    expect(getWorkflowPolicy(phrenDir).taskMode).toBe("auto");
-    expect(readProjectConfig(phrenDir, "demo").config?.taskMode).toBe("off");
-  });
-});
 
 describe("config retention policy", () => {
   it("prints the defaults with the dedup and conflict-detection guidance", async () => {
@@ -187,24 +147,24 @@ describe("config retention policy", () => {
     expect(projectConfig?.retentionPolicy?.decay?.d30).toBe(0.5);
   });
 
-  it("sets budgets globally, including the age-out switch, and a project's open-task budget on its own", async () => {
+  it("sets budgets globally, including the age-out switch, and a project's review budget on its own", async () => {
     const { handleRetentionPolicy } = await importPolicy();
     const output = captureConsole();
     fs.mkdirSync(path.join(phrenDir, "demo"));
 
-    await handleRetentionPolicy(["set", "--budgets.openTasks=200", "--budgets.runtimeAgeOut=true"]);
-    expect(getRetentionPolicy(phrenDir).budgets).toMatchObject({ openTasks: 200, reviewEntries: 150, runtimeAgeOut: true });
+    await handleRetentionPolicy(["set", "--budgets.reviewEntries=200", "--budgets.runtimeAgeOut=true"]);
+    expect(getRetentionPolicy(phrenDir).budgets).toMatchObject({ reviewEntries: 200, runtimeAgeOut: true });
 
-    await handleRetentionPolicy(["--project", "demo", "set", "--budgets.openTasks=400"]);
-    expect(JSON.parse(output.logs.at(-1) ?? "{}").budgets).toMatchObject({ openTasks: 400, reviewEntries: 150, runtimeAgeOut: true });
-    expect(getRetentionPolicy(phrenDir).budgets.openTasks).toBe(200);
+    await handleRetentionPolicy(["--project", "demo", "set", "--budgets.reviewEntries=400"]);
+    expect(JSON.parse(output.logs.at(-1) ?? "{}").budgets).toMatchObject({ reviewEntries: 400, runtimeAgeOut: true });
+    expect(getRetentionPolicy(phrenDir).budgets.reviewEntries).toBe(200);
   });
 
   it.each([
-    [["set", "--budgets.openTasks="], "budgets.openTasks"],
-    [["set", "--budgets.openTasks=-1"], "budgets.openTasks"],
+    [["set", "--budgets.reviewEntries="], "budgets.reviewEntries"],
+    [["set", "--budgets.reviewEntries=-1"], "budgets.reviewEntries"],
     [["set", "--budgets.reviewEntries=lots"], "budgets.reviewEntries"],
-    [["set", "--budgets.openTasks=1.5"], "budgets.openTasks"],
+    [["set", "--budgets.reviewEntries=1.5"], "budgets.reviewEntries"],
     [["set", "--budgets.runtimeAgeOut=yes"], "budgets.runtimeAgeOut"],
     [["set", "--budgets.runtimeAgeOutDays=1"], "budgets.runtimeAgeOutDays"],
     [["set", "--budgets.colour=blue"], "budgets.colour"],
@@ -214,18 +174,18 @@ describe("config retention policy", () => {
     const output = captureConsole();
     mockExit();
     fs.mkdirSync(path.join(phrenDir, "demo"), { recursive: true });
-    await handleRetentionPolicy(["set", "--budgets.openTasks=90"]);
+    await handleRetentionPolicy(["set", "--budgets.reviewEntries=90"]);
     expect((await expectExit(() => handleRetentionPolicy(args))).code).toBe(1);
     expect(output.errors.join("\n")).toContain(named);
-    expect(getRetentionPolicy(phrenDir).budgets.openTasks).toBe(90);
+    expect(getRetentionPolicy(phrenDir).budgets.reviewEntries).toBe(90);
     expect(readProjectConfig(phrenDir, "demo").config?.retentionPolicy).toBeUndefined();
   });
 
   it("stores an explicit 0, which turns a budget off", async () => {
     const { handleRetentionPolicy } = await importPolicy();
     captureConsole();
-    await handleRetentionPolicy(["set", "--budgets.openTasks=0"]);
-    expect(getRetentionPolicy(phrenDir).budgets.openTasks).toBe(0);
+    await handleRetentionPolicy(["set", "--budgets.reviewEntries=0"]);
+    expect(getRetentionPolicy(phrenDir).budgets.reviewEntries).toBe(0);
   });
 });
 

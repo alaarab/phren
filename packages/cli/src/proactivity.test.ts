@@ -4,11 +4,8 @@ import * as path from "path";
 import { initTestPhrenRoot, makeTempDir } from "./test-helpers.js";
 import {
   getProactivityLevel,
-  getProactivityLevelForTask,
   getProactivityLevelForFindings,
   hasExplicitFindingSignal,
-  hasExecutionIntent,
-  hasDiscoveryIntent,
   shouldAutoCaptureFindingsForLevel,
 } from "./proactivity.js";
 
@@ -19,7 +16,6 @@ describe("proactivity config", () => {
     PHREN_PATH: process.env.PHREN_PATH,
     PHREN_PROACTIVITY: process.env.PHREN_PROACTIVITY,
     PHREN_PROACTIVITY_FINDINGS: process.env.PHREN_PROACTIVITY_FINDINGS,
-    PHREN_PROACTIVITY_TASKS: process.env.PHREN_PROACTIVITY_TASKS,
   };
 
   let tmpCleanup: (() => void) | undefined;
@@ -49,7 +45,6 @@ describe("proactivity config", () => {
     process.env.PHREN_PATH = path.join(homeDir, ".phren");
     delete process.env.PHREN_PROACTIVITY;
     delete process.env.PHREN_PROACTIVITY_FINDINGS;
-    delete process.env.PHREN_PROACTIVITY_TASKS;
   });
 
   afterEach(() => {
@@ -58,14 +53,12 @@ describe("proactivity config", () => {
     restoreEnv("PHREN_PATH");
     restoreEnv("PHREN_PROACTIVITY");
     restoreEnv("PHREN_PROACTIVITY_FINDINGS");
-    restoreEnv("PHREN_PROACTIVITY_TASKS");
     tmpCleanup?.();
   });
 
   it("defaults to high when no env var or preference is set", () => {
     expect(getProactivityLevel()).toBe("high");
     expect(getProactivityLevelForFindings()).toBe("high");
-    expect(getProactivityLevelForTask()).toBe("high");
   });
 
   it("uses PHREN_PROACTIVITY as the shared override", () => {
@@ -73,17 +66,14 @@ describe("proactivity config", () => {
 
     expect(getProactivityLevel()).toBe("medium");
     expect(getProactivityLevelForFindings()).toBe("medium");
-    expect(getProactivityLevelForTask()).toBe("medium");
   });
 
-  it("lets findings and task env vars override the shared level", () => {
+  it("lets the findings env var override the shared level", () => {
     process.env.PHREN_PROACTIVITY = "low";
     process.env.PHREN_PROACTIVITY_FINDINGS = "high";
-    process.env.PHREN_PROACTIVITY_TASKS = "medium";
 
     expect(getProactivityLevel()).toBe("low");
     expect(getProactivityLevelForFindings()).toBe("high");
-    expect(getProactivityLevelForTask()).toBe("medium");
   });
 
   it("falls back to governance install preferences when env vars are unset", () => {
@@ -91,19 +81,16 @@ describe("proactivity config", () => {
 
     expect(getProactivityLevel()).toBe("low");
     expect(getProactivityLevelForFindings()).toBe("low");
-    expect(getProactivityLevelForTask()).toBe("low");
   });
 
-  it("uses split governance install preferences for findings and task defaults", () => {
+  it("uses split governance install preferences for findings and base defaults", () => {
     writeGovernanceInstallPreferences({
       proactivity: "low",
       proactivityFindings: "high",
-      proactivityTask: "medium",
     });
 
     expect(getProactivityLevel()).toBe("low");
     expect(getProactivityLevelForFindings()).toBe("high");
-    expect(getProactivityLevelForTask()).toBe("medium");
   });
 
   it("keeps env vars higher priority than governance defaults", () => {
@@ -113,7 +100,6 @@ describe("proactivity config", () => {
 
     expect(getProactivityLevel()).toBe("medium");
     expect(getProactivityLevelForFindings()).toBe("high");
-    expect(getProactivityLevelForTask()).toBe("medium");
   });
 
   it("detects explicit finding signal phrases and tags", () => {
@@ -135,34 +121,5 @@ describe("proactivity config", () => {
 
   it("disables findings auto-capture at low", () => {
     expect(shouldAutoCaptureFindingsForLevel("low", 'Please add finding about the migration order.')).toBe(false);
-  });
-
-  it("detects execution intent signals", () => {
-    expect(hasExecutionIntent("yes do it")).toBe(true);
-    expect(hasExecutionIntent("go ahead and implement it")).toBe(true);
-    expect(hasExecutionIntent("work on these items")).toBe(true);
-    expect(hasExecutionIntent("let's build the API")).toBe(true);
-    expect(hasExecutionIntent("approved, ship it")).toBe(true);
-    expect(hasExecutionIntent("proceed with the migration")).toBe(true);
-    expect(hasExecutionIntent("what if we tried a different approach")).toBe(false);
-    expect(hasExecutionIntent("brainstorm some ideas")).toBe(false);
-  });
-
-  it("detects discovery intent signals", () => {
-    expect(hasDiscoveryIntent("brainstorm some ideas for the API")).toBe(true);
-    expect(hasDiscoveryIntent("explore different caching strategies")).toBe(true);
-    expect(hasDiscoveryIntent("what if we used Redis instead")).toBe(true);
-    expect(hasDiscoveryIntent("review findings from last week")).toBe(true);
-    expect(hasDiscoveryIntent("what are the alternatives to SQLite")).toBe(true);
-    expect(hasDiscoveryIntent("let's evaluate the pros and cons")).toBe(true);
-    expect(hasDiscoveryIntent("implement the caching layer")).toBe(false);
-    expect(hasDiscoveryIntent("fix the login bug")).toBe(false);
-  });
-
-  it("execution intent takes priority when both signals present", () => {
-    const text = "let's build on these ideas and ship it";
-    expect(hasExecutionIntent(text)).toBe(true);
-    expect(hasDiscoveryIntent(text)).toBe(true);
-    // The task lifecycle checks execution first, so both being true means execute
   });
 });

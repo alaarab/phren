@@ -10,6 +10,7 @@ import { logger } from "../logger.js";
 import { chooseAccount, limitedBy, limitKey, noteAccountLimit, readAccountLimits, resolveAccountFailover,
   type AccountChoice, type AccountLimit, type AccountRoom } from "./account-choice.js";
 import { dispatchStatus, failureReason, updateReceipt, type Receipt } from "./dispatch.js";
+import { issueBriefBlock, readDispatchIssue } from "./dispatch-issue.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { readLaunchBrief } from "./launch-brief.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
@@ -61,7 +62,7 @@ export function planContinuation(stopped: { computer: string; account: string },
 }
 
 /** The brief the continuing worker starts with: what stopped, where it was, its last reply, then the original brief. */
-export function continuationBrief(receipt: Receipt, original: string | undefined, here: string, there: string): string {
+export function continuationBrief(receipt: Receipt, original: string | undefined, here: string, there: string, limit = PROMPT_LIMIT): string {
   const returned = receipt.returned;
   const checkout = returned?.checkout;
   const sameComputer = here === there;
@@ -79,8 +80,8 @@ export function continuationBrief(receipt: Receipt, original: string | undefined
   const reply = returned?.reply?.trim();
   if (reply) lines.push(...quoted("Its last reply before the limit", reply));
   const head = lines.join("\n");
-  if (!original) return `${head}The original brief is no longer on ${receipt.computer}; work from the label and the checkout, and ask if the task is unclear.`.slice(0, PROMPT_LIMIT);
-  return withOriginalBrief(head, original, PROMPT_LIMIT, `the stopped worker's brief file on ${receipt.computer}`);
+  if (!original) return `${head}The original brief is no longer on ${receipt.computer}; work from the label and the checkout, and ask if the task is unclear.`.slice(0, limit);
+  return withOriginalBrief(head, original, limit, `the stopped worker's brief file on ${receipt.computer}`);
 }
 
 /** Another agent's words in a brief, fenced as data so the next agent reads them and does not obey them. */
@@ -148,13 +149,17 @@ export class AccountFailover {
       await this.record(receipt, { error: plan.error });
       return;
     }
-    const original = await this.brief(receipt);
-    const prompt = continuationBrief(receipt, original, plan.computer, receipt.computer);
+    const [original, issue] = await Promise.all([this.brief(receipt), readDispatchIssue(receipt.id)]);
+    const block = issue ? `\n\n${issueBriefBlock(issue)}` : "";
+    const originalText = original?.trimEnd();
+    const body = block && originalText?.endsWith(block) ? originalText.slice(0, -block.length) : original;
+    const prompt = continuationBrief(receipt, body, plan.computer, receipt.computer, PROMPT_LIMIT - block.length);
     const { server, workspace, tab, pane } = receipt.origin ?? {} as Partial<NonNullable<Receipt["origin"]>>;
     const origin = receipt.origin ? { server, workspace, tab, pane } : undefined;
     logger.info("dispatch", `${receipt.label} on ${receipt.computer} hit the usage limit of Claude account ${account}; continuing on ${plan.computer} account ${plan.account}: ${plan.reason}.`);
     const result = await this.options.dispatch({
       computer: plan.computer, project: receipt.project, harness: "claude", account: plan.account, label: `${receipt.label} (continued)`.slice(0, 200), prompt,
+      ...(issue ? { issue } : {}),
       ...(receipt.model ? { model: receipt.model } : {}), ...(receipt.effort ? { effort: receipt.effort } : {}),
       ...(receipt.permissionMode ? { permissionMode: receipt.permissionMode } : {}), ...(receipt.releaseActions ? { releaseActions: receipt.releaseActions } : {}),
       ...(receipt.closeOnFinish !== undefined ? { closeOnFinish: receipt.closeOnFinish } : {}), ...(receipt.integrator ? { integrator: receipt.integrator } : {}),

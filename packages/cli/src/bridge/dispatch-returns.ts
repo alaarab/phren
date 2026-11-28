@@ -1,3 +1,5 @@
+import { readDispatchIssue } from "./dispatch-issue.js";
+import type { IssueRef } from "../forge/issues.js";
 import { intentionallyClosed } from "./worker-close.js";
 import { dispatchClonePaths, removeDispatchClone, removeDispatchSecrets } from "./dispatch-clone.js";
 import { removeWorkerFile, workerAlive } from "./worker-identity.js";
@@ -9,7 +11,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { execProbe as run } from "./probe-processes.js";
 import { z } from "zod";
 import { logger } from "../logger.js";
-import { arrivalOf, boundWorkerGone, clearWorkerEnded, dispatchPhase, dispatchStatus, updateReceipt, workerTaskSchema, type OriginPane, type Receipt, type WorkerState, type WorkerTask } from "./dispatch.js";
+import { arrivalOf, boundWorkerGone, clearWorkerEnded, dispatchPhase, dispatchStatus, updateReceipt, type OriginPane, type Receipt, type WorkerState } from "./dispatch.js";
 import { briefArrival, briefId, type BriefArrival } from "./launch-brief.js";
 import { codexServers, LOST_TURN, type LostTurn } from "./codex-servers.js";
 import { findGrant } from "./grants.js";
@@ -21,11 +23,10 @@ import { BridgeError, object, objects, startingTargetSchema, targetSchema, type 
 import { isClaudeUsageLimit, ownerQuestion, readFinalTurn, type FinalTurn } from "./schedule-watch.js";
 import { liveWork, runningTasks, takesPrompt } from "./session-activity.js";
 import { terminalProvider } from "./terminal.js";
-import { childAgentTree, phrenStoreRoot, runningChildAgents } from "./transcripts.js";
+import { childAgentTree, runningChildAgents } from "./transcripts.js";
 import { servicePane } from "./opencode-service.js";
 import { opencodeTurn, readTurn, TURN_REPLY_LIMIT, truncateUtf8, turnPhase, type TurnRecord } from "./turn-records.js";
 import { listMoves, moveFrom, movedWorker, moveToSchema, type MovedWorker, type MoveRecord } from "./session-move.js";
-import { sessionTaskStates, unresolvedTasks, type SessionTaskState } from "../task/session-tasks.js";
 import { awaitedInReply, recentUncommitted, sharedCheckout, unfinishedTurn, waitingOn, type Uncommitted } from "./worker-unfinished.js";
 
 export { truncateUtf8 } from "./turn-records.js";
@@ -98,12 +99,8 @@ export interface WorkerObservation {
   prs?: PullRequest[];
   stalled?: boolean; stalledSince?: string; stallFor?: number;
   /** Why a turn that ended is not done (worker-unfinished.ts): it announced a
-   * next step, left uncommitted work and no PR, or still owes a task its
-   * session took on (task/session-tasks.ts). Also carries parked waits for older Hooks. */
+   * next step or left uncommitted work and no PR. Also carries parked waits. */
   unfinished?: string;
-  /** Tasks the worker's session took on (its ledger, task/session-tasks.ts):
-   * where each stands now, without the store path. */
-  tasks?: WorkerTask[];
   /** The closing sentence that says the turn waits on work still to finish
    * (worker-unfinished.ts `awaitedInReply`): CI, background work or a queue.
    * Returned as waiting, never needs-you. */
@@ -147,8 +144,6 @@ export interface WorkerReaders {
   branch?: (directory: string) => Promise<string | undefined>;
   /** This computer's session moves (session-move.ts), newest first. */
   moves?: () => Promise<MoveRecord[]>;
-  /** The session's task ledger (task/session-tasks.ts): every task it took on and where each stands. */
-  sessionTasks?: (session: string) => SessionTaskState[];
 }
 
 async function checkedOutBranch(directory: string): Promise<string | undefined> {
@@ -186,7 +181,6 @@ const defaultReaders: WorkerReaders = {
   uncommitted: directory => recentUncommitted(directory),
   shared: sharedCheckout,
   branch: checkedOutBranch,
-  sessionTasks: session => sessionTaskStates(phrenStoreRoot(), session),
 };
 
 /** The default readers with the approval reader of the Hook that runs the workers. */
@@ -275,43 +269,20 @@ async function stallFields(target: Target, pane: Json, live: () => Promise<numbe
     : stalled ?? {};
 }
 
-/** The worker session's task ledger (task/session-tasks.ts), read once per
- * observation: the rows the wire carries (no store path, at most 32, nothing
- * when the session took on no task) and the ones it still owes. */
-function sessionLedger(session: string | undefined, readers: WorkerReaders): { fields: Pick<WorkerObservation, "tasks">; open: SessionTaskState[] } {
-  const states = session && readers.sessionTasks ? readers.sessionTasks(session) : [];
-  const open = unresolvedTasks(states);
-  // Every open task counts; only the wire is capped, open rows first so none is the one left off.
-  const shown = [...open, ...states.filter(state => state.resolution !== "open")].slice(0, 32);
-  return { fields: shown.length ? { tasks: shown.map(state => ({ project: state.project, stableId: state.stableId,
-      title: state.title.slice(0, 200), section: state.section, resolution: state.resolution })) } : {}, open };
-}
-
-/** Why a turn that ended with tasks still open is not done: the bids the session still owes. */
-function unsettledTasks(open: readonly SessionTaskState[]): string | undefined {
-  if (!open.length) return undefined;
-  return `${open.length} task(s) not settled: ${open.map(task => `bid:${task.stableId}`).join(", ")}`.slice(0, 200);
-}
-
 /** A finished turn that announced a next step, left uncommitted work in its
- * checkout and no PR, still owes a task its session took on, or waits on work
- * still to finish (worker-unfinished.ts, task/session-tasks.ts), is not done.
+ * checkout and no PR, or waits on work still to finish, is not done.
  * The checkout is where the agent was when it stopped, else the pane's
  * folder, and it is asked only when it is the worker's own: a checkout another
  * pane works in (the owner's, a sibling worker's) holds changes that are not
  * the worker's. A truncated reply has lost its closing sentence, so only the
  * checkout is asked then. */
-async function unfinished(seen: WorkerObservation, open: readonly SessionTaskState[], directory: unknown, readers: WorkerReaders, s: Json, pane: Json,
+async function unfinished(seen: WorkerObservation, directory: unknown, readers: WorkerReaders, s: Json, pane: Json,
   prs?: readonly PullRequest[]): Promise<Pick<WorkerObservation, "unfinished" | "waiting" | "unchecked">> {
   if ((seen.state !== "done" && seen.state !== "idle") || !seen.completed || seen.error || seen.interrupted) return {};
   let folder = typeof directory === "string" && directory ? directory : undefined;
   const others = objects(s.panes).filter(other => other.pane_id !== pane.pane_id).flatMap(other => [other.foreground_cwd, other.cwd]);
   if (folder && readers.shared && await readers.shared(folder, others).catch(() => true)) folder = undefined;
   const marked = await unfinishedTurn({ reply: seen.truncated ? undefined : seen.reply, prs, directory: folder }, readers.uncommitted);
-  // What the reply or the checkout said wins; the tasks it still owes only fill
-  // in, and never for a turn that waits on CI, background work or a queue.
-  const owed = unsettledTasks(open);
-  if (owed && !marked.unfinished && !marked.waiting) return { ...marked, unfinished: owed };
   return marked.waiting ? { ...marked, unfinished: `${WAIT_UNFINISHED_PREFIX}${marked.waiting}` } : marked;
 }
 const paneDirectory = (pane: Json): unknown => pane.foreground_cwd || pane.cwd;
@@ -344,7 +315,7 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     // Another conversation in the same pane means the worker is gone.
     if (expected && current && current !== expected) return { state: await intentionallyClosed(target) ? "closed" : "gone" };
     const lost = target.source === "codex" ? readers.lost?.(target.server, String(pane.pane_id), expected ?? current) : undefined;
-    if (lost) return { state: "done", session: lost.threadId, completed: true, endedAt: lost.at, error: LOST_TURN, ...sessionLedger(lost.threadId, readers).fields };
+    if (lost) return { state: "done", session: lost.threadId, completed: true, endedAt: lost.at, error: LOST_TURN };
     const status = String(pane.agent_status);
     // The record counts only for the conversation this dispatch started, in
     // the terminal still there, and never for another dispatch's worker.
@@ -354,10 +325,9 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
       && !(target.dispatch && record.dispatch && target.dispatch !== record.dispatch) ? record : undefined;
     if (own) {
       const seen = await fromTurn(own, own.session, status, target.source, readers);
-      const tasks = sessionLedger(seen.session, readers);
       const full = targetSchema.safeParse({ ...target, session: seen.session });
       const prs = full.success && seen.state === "done" ? await workerPrs(full.data, own) : undefined;
-      return { ...seen, ...tasks.fields, ...(prs ? { prs } : {}), ...await unfinished(seen, tasks.open, own.stop?.cwd ?? paneDirectory(pane), readers, s, pane, prs),
+      return { ...seen, ...(prs ? { prs } : {}), ...await unfinished(seen, own.stop?.cwd ?? paneDirectory(pane), readers, s, pane, prs),
         ...await limitCheckout(seen, own.stop?.cwd ?? paneDirectory(pane), readers), ...(full.success && seen.state === "working"
           ? await stallFields(full.data, { ...pane, agent_status: "working" }, liveReader(own, target.source, own.session, readers), readers) : {}) };
     }
@@ -365,7 +335,7 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     const state = (["working", "idle", "done", "blocked"] as const).find(value => value === status) ?? "unknown";
     if ((state !== "idle" && state !== "done") || !session) {
       const full = targetSchema.safeParse({ ...target, session });
-      return { state, ...(session ? { session } : {}), ...sessionLedger(session, readers).fields, ...(full.success && state === "working"
+      return { state, ...(session ? { session } : {}), ...(full.success && state === "working"
         ? await stallFields(full.data, pane, liveReader(undefined, target.source, full.data.session, readers), readers) : {}) };
     }
     const turn = await readers.finalTurn(target.source, session).catch(() => undefined);
@@ -377,12 +347,11 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     const end = turn?.completed ? settled(turn.lastAssistant, runningTasks(undefined, turn, now)) : undefined;
     const live = turn?.completed ? liveWork(undefined, turn, children, now) ?? (end?.state === "working" ? end.background : undefined) : undefined;
     if (live) {
-      return { state: "working", session, completed: true, background: live, ended: true, ...sessionLedger(session, readers).fields, ...(turn?.error ? { error: turn.error } : {}), ...replyFields(turn?.lastAssistant) };
+      return { state: "working", session, completed: true, background: live, ended: true, ...(turn?.error ? { error: turn.error } : {}), ...replyFields(turn?.lastAssistant) };
     }
     const seen: WorkerObservation = { state, session, completed: turn?.completed === true, ...(end?.background ? { background: end.background } : {}), ...(turn?.error ? { error: turn.error } : {}),
       ...(turn?.interrupted ? { interrupted: true as const } : {}), ...replyFields(turn?.lastAssistant) };
-    const tasks = sessionLedger(session, readers);
-    return { ...seen, ...tasks.fields, ...await unfinished(seen, tasks.open, paneDirectory(pane), readers, s, pane), ...await limitCheckout(seen, paneDirectory(pane), readers) };
+    return { ...seen, ...await unfinished(seen, paneDirectory(pane), readers, s, pane), ...await limitCheckout(seen, paneDirectory(pane), readers) };
   };
   // A worker moved to another agent (session-move.ts) is followed to it: the
   // old pane's conversation is gone, and the dispatching Hook is told where it went.
@@ -419,7 +388,6 @@ const observationSchema = z.object({
   stalled: z.boolean().optional(), stalledSince: z.string().datetime().optional(), stallFor: z.number().nonnegative().optional(),
   interrupted: z.boolean().optional(), approval: z.unknown().optional(), unfinished: z.string().max(200).optional(),
   waiting: z.string().max(200).optional(), ended: z.literal(true).optional(), unchecked: z.boolean().optional(),
-  tasks: z.array(workerTaskSchema).max(32).optional(),
   checkout: z.object({ path: z.string().max(4096), branch: z.string().max(256).optional() }).strict().optional(),
   moved: z.unknown().optional(),
 }).passthrough();
@@ -623,8 +591,6 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
       ...(next === "stalled" ? { stalledSince: seen.stalledSince, stallFor: seen.stallFor } : {}),
       ...(next === "waiting" ? { waitingOn: waitingOn(waitingFor!), waitingFor: waitingFor!.slice(0, 200) } : {}),
       ...(failed ? { error: failed } : {}), ...(question ? { question } : {}), ...(turn ? { turn } : {}),
-      // The session's task ledger travels with the return that ended it.
-      ...((next === "done" || next === "needs-you" || next === "waiting" || next === "failed") && seen.tasks ? { tasks: seen.tasks } : {}),
       ...((next === "done" || next === "needs-you" || next === "waiting") && seen.background ? { background: seen.background } : {}),
       // Nothing still running: say what it waited on.
       ...((next === "done" || next === "needs-you" || next === "waiting") && !seen.background && background ? { waited: background } : {}) };
@@ -638,7 +604,6 @@ export function noticeLine(receipts: readonly Receipt[]): string {
   const word = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone", "stalled": "stalled",
     // Unreachable: the `waiting` branch below words it through `waitedOn`.
     "waiting": "waiting" } as const;
-  // The same words the task row and the phone read (task/work.ts `workStatusLine`).
   const waitedOn = { ci: "CI", background: "background work", queue: "the queue", other: "work" } as const;
   const describe = (receipt: Receipt, room: number) => {
     const returned = receipt.returned!;
@@ -660,9 +625,10 @@ export function noticeLine(receipts: readonly Receipt[]): string {
 }
 
 /** What `dispatch_returns` lists for one unread return. */
-export function returnRow(receipt: Receipt): Json {
+export function returnRow(receipt: Receipt, issue?: IssueRef): Json {
   const returned = receipt.returned!;
   return { id: receipt.id, computer: receipt.computer, project: receipt.project, label: receipt.label, harness: receipt.harness,
+    ...(issue ? { issue } : {}),
     ...(returned.prs ? { prs: returned.prs } : {}),
     ...(returned.integratorDelivery ? { integratorDelivery: returned.integratorDelivery } : {}),
     ...(returned.state === "stalled" ? { stalled: true, stalledSince: returned.stalledSince, stallFor: returned.stallFor } : {}),
@@ -670,7 +636,6 @@ export function returnRow(receipt: Receipt): Json {
     ...(returned.waitingFor ? { waitingFor: returned.waitingFor } : {}),
     ...(returned.reply !== undefined ? { reply: returned.reply } : {}),
     ...(returned.truncated ? { truncated: true } : {}), ...(returned.error ? { error: returned.error } : {}), ...(returned.question ? { question: returned.question } : {}),
-    ...(returned.tasks ? { tasks: returned.tasks } : {}),
     ...(returned.background ? { background: returned.background } : {}),
     ...(returned.waited && !returned.background ? { waited: returned.waited } : {}),
     ...(receipt.approval && returned.state === "blocked" ? { approval: { actionId: receipt.approval.actionId, tool: receipt.approval.tool,
@@ -681,6 +646,10 @@ export function returnRow(receipt: Receipt): Json {
     ...(receipt.moves ? { moves: receipt.moves } : {}), ...(receipt.target ? { target: receipt.target } : {}),
     // One word for clients that do not fold the receipt's states themselves (dispatch.ts `dispatchPhase`).
     phase: dispatchPhase(receipt) };
+}
+
+async function issueReturnRow(receipt: Receipt): Promise<Json> {
+  return returnRow(receipt, await readDispatchIssue(receipt.id).catch(() => undefined));
 }
 
 /** How much of a worker's final reply a watched return line shows. */
@@ -1240,7 +1209,7 @@ export class DispatchReturns {
   async take(consume = true): Promise<Json[]> {
     const unread = (await dispatchStatus()).filter(receipt => receipt.returned && !receipt.returned.read)
       .sort((a, b) => a.returned!.at.localeCompare(b.returned!.at));
-    if (!consume) return unread.map(returnRow);
+    if (!consume) return Promise.all(unread.map(issueReturnRow));
     const rows: Json[] = [];
     for (const receipt of unread) {
       let marked = false;
@@ -1252,7 +1221,7 @@ export class DispatchReturns {
         return true;
       }).catch(() => undefined);
       // A concurrent take already handed this one over.
-      if (marked && current?.returned) rows.push(returnRow(current));
+      if (marked && current?.returned) rows.push(await issueReturnRow(current));
     }
     await this.forwardPrs(); await this.cleanup();
     return rows;

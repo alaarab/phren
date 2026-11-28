@@ -201,10 +201,8 @@ export interface WalkthroughResult {
   projectOwnershipDefault: ProjectOwnershipMode;
   managementPreset: ManagementPreset;
   findingsProactivity: ProactivityLevel;
-  taskProactivity: ProactivityLevel;
   lowConfidenceThreshold: number;
   riskySections: WorkflowRiskSection[];
-  taskMode: "off" | "manual" | "suggest" | "auto";
   bootstrapCurrentProject: boolean;
   bootstrapOwnership?: ProjectOwnershipMode;
   ollamaEnabled: boolean;
@@ -273,7 +271,7 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
   // Express mode: skip the entire walkthrough with recommended defaults
   const useExpress = options?.express === true
     || (options?.express !== false && options?.advanced !== true && await prompts.confirm(
-      "Use recommended settings? (global storage, MCP on, hooks on, auto tasks)",
+      "Use recommended settings? (global storage, MCP on, hooks on)",
       true
     ));
 
@@ -288,10 +286,8 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
       projectOwnershipDefault: "phren-managed" as ProjectOwnershipMode,
       managementPreset: "managed" as ManagementPreset,
       findingsProactivity: "high" as ProactivityLevel,
-      taskProactivity: "high" as ProactivityLevel,
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale", "Conflicts"],
-      taskMode: "auto" as const,
       bootstrapCurrentProject: false,
       ollamaEnabled: false,
       autoCaptureEnabled: false,
@@ -376,10 +372,8 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
       projectOwnershipDefault: "phren-managed" as ProjectOwnershipMode,
       managementPreset: "managed" as ManagementPreset,
       findingsProactivity: "high" as ProactivityLevel,
-      taskProactivity: "high" as ProactivityLevel,
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale", "Conflicts"] as WorkflowRiskSection[],
-      taskMode: "auto" as const,
       bootstrapCurrentProject: false,
       ollamaEnabled: false,
       autoCaptureEnabled: false,
@@ -474,7 +468,7 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
 
   printSection("MCP");
   log("MCP mode registers phren as a tool server so your AI agent can call it");
-  log("directly: search memory, manage tasks, save findings, etc.");
+  log("directly: search memory, save findings, etc.");
   log("  Recommended for: Claude Code, Cursor, Copilot CLI, Codex");
   log("  Alternative: hooks-only mode (read-only context injection, any agent)");
   log("  Change later: phren mcp-mode on|off");
@@ -558,39 +552,6 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
   }
 
   printSection("Task Management");
-  log("Choose how phren handles tasks as you work.");
-  log("  auto (recommended): captures tasks naturally as you work, links findings to tasks");
-  log("  suggest: proposes tasks but waits for approval before writing");
-  log("  manual: tasks are fully manual — you add them yourself");
-  log("  off: never touch tasks automatically");
-  log("  Change later: phren config workflow set --taskMode=<mode>");
-  const taskMode = await prompts.select<"off" | "manual" | "suggest" | "auto">(
-    "Task mode",
-    [
-      { value: "auto", name: "auto (recommended)" },
-      { value: "suggest", name: "suggest" },
-      { value: "manual", name: "manual" },
-      { value: "off", name: "off" },
-    ],
-    "auto"
-  );
-  let taskProactivity: ProactivityLevel = "high";
-  if (taskMode === "auto" || taskMode === "suggest") {
-    log("  Task proactivity controls how much evidence phren needs before capturing tasks.");
-    log("  high (recommended): captures tasks as they come up naturally");
-    log("  medium: only when you explicitly mention a task");
-    log("  low: minimal auto-capture");
-    log("  Change later: phren config proactivity.tasks <high|medium|low>");
-    taskProactivity = await prompts.select<ProactivityLevel>(
-      "Task proactivity",
-      [
-        { value: "high", name: "high (recommended)" },
-        { value: "medium", name: "medium" },
-        { value: "low", name: "low" },
-      ],
-      "high"
-    );
-  }
 
   printSection("Workflow Guardrails");
   log("Choose how strict review gates should be for risky or low-confidence writes.");
@@ -714,8 +675,6 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
     `Hooks: ${hooks === "on" ? "enabled" : "disabled"}`,
     `Auto-capture: ${autoCaptureEnabled ? "enabled" : "disabled"}`,
     `Findings capture level: ${findingsProactivity}`,
-    `Task mode: ${taskMode}`,
-    `Task proactivity: ${taskProactivity}`,
     `Low-confidence threshold: ${lowConfidenceThreshold}`,
     `Risky sections: ${riskySections.join(", ")}`,
     `Finding sensitivity: ${findingSensitivity}`,
@@ -741,10 +700,8 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
     projectOwnershipDefault,
     managementPreset,
     findingsProactivity,
-    taskProactivity,
     lowConfidenceThreshold,
     riskySections,
-    taskMode,
     bootstrapCurrentProject,
     bootstrapOwnership,
     ollamaEnabled,

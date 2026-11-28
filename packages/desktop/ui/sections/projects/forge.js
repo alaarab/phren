@@ -1,9 +1,8 @@
 // The Projects page's Code block: the checkout's host, branch and open pull
-// requests with checks, the branch's tasks and the token connect.
+// requests with checks and the token connect.
 import { el } from "../../dom.js";
 import { hookGet } from "../../api.js";
 import { hostMark } from "../../changes.js";
-import { loadBranchTasks, renderBranchTasks } from "../../branch-tasks.js";
 import { capitalize, checksWord, fixItPrompt, hostTerms, tokenPage } from "../../git-review.js";
 import { openLaunchSheet } from "../../shell/launch.js";
 import { store } from "../../shell/store.js";
@@ -57,7 +56,6 @@ export function createForge(ctx) {
       ]);
       if (!shared) rememberProjectGit(detail.computer, project.name, data);
       project.forge = { data, projectHostToken: capabilities.projectHostToken === true };
-      void loadForgeTasks(detail, project, project.forge);
     } catch (err) {
       const code = err?.body?.code;
       if (code === "no-checkout") project.forge = { missing: true };
@@ -68,13 +66,6 @@ export function createForge(ctx) {
   }
 
 
-  /** The open tasks that name the checkout's branch, under the Code block. */
-  async function loadForgeTasks(detail, project, forge) {
-    const tasks = await loadBranchTasks(detail.computer, project.name, forge.data?.branch);
-    if (!tasks?.length || project.forge !== forge) return;
-    forge.tasks = { tasks, done: new Set(), busy: null, error: "" };
-    if (state.detail === detail) renderDetail();
-  }
 
   function forgeBlock(project) {
     const forge = project.forge;
@@ -117,7 +108,6 @@ export function createForge(ctx) {
       branch.append(el("span", "pj-spacer"), fix);
     }
     list.append(branch);
-    if (forge.tasks) list.append(renderBranchTasks({ computer: state.detail.computer, project: project.name, branch: res.branch, state: forge.tasks, rerender: renderDetail }));
     if (res.available === false) {
       if (res.reason === "auth" && forge.projectHostToken && tokenPage(host)) {
         const connect = el("button", "pj-btn primary", "Connect");

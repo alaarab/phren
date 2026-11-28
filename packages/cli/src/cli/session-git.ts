@@ -117,7 +117,6 @@ export async function hasUnrelatedHistories(cwd: string): Promise<boolean> {
  */
 export const TEAM_STORE_PATHSPECS = [
   "*/journal/*",
-  "*/tasks.md",
   "*/truths.md",
   "*/FINDINGS.md",
   "*/FINDINGS.md.bak",

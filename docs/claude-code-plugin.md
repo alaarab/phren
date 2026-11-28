@@ -2,7 +2,7 @@
 
 phren gives Claude Code a memory that lasts between sessions. It recalls
 relevant findings from past sessions on every prompt, keeps each project's
-context (and, if you turn tasks on, its task queue), and saves what a session learned to a git-backed store
+context, and saves what a session learned to a git-backed store
 on your machine.
 
 ## Install
@@ -25,7 +25,7 @@ Codex, Copilot CLI, Cursor and VS Code if you use them.
 | | |
 |---|---|
 | **Hooks** | SessionStart loads the project's context, UserPromptSubmit injects the findings that match the prompt, PostToolUse notes tool activity, Stop saves and syncs the session. The same four hooks `phren init` writes. |
-| **MCP server** | phren's memory tools (`search_knowledge`, `add_finding`, `get_project_summary`, `session`, …; task tools too once `phren modules enable tasks` is on) through `npx -y @phren/cli@<version> mcp`, pinned to the release the plugin ships with. |
+| **MCP server** | phren's memory tools (`search_knowledge`, `add_finding`, `get_project_summary`, `session`, …) through `npx -y @phren/cli@<version> mcp`, pinned to the release the plugin ships with. |
 | **Skills** | `/phren:phren-init`, `/phren:phren-sync`, `/phren:phren-discover`, `/phren:phren-consolidate`, `/phren:phren-summarize`, `/phren:phren-profiles`. |
 
 `claude plugin details phren` reports about 300 tokens always loaded (the six
@@ -77,7 +77,7 @@ embeddings, and LLM-assisted dedup (`PHREN_FEATURE_SEMANTIC_DEDUP`).
 ## Evals
 
 `evals/` holds a small `claude plugin eval` suite: first-run setup, memory
-recall from a seeded store, saving a finding, and adding a task. phren's MCP
+recall from a seeded store, and saving a finding. phren's MCP
 server is replaced by fixed mocks (`evals/mocks/phren/`, with the real tool schemas in `_tools.json`),
 and each run gets a temporary home, so no store is touched; but every run is a
 real model call on your own Claude credential.

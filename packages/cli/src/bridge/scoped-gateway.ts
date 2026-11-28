@@ -6,7 +6,7 @@ import type { Readable, Writable } from "node:stream";
 import type { ZodType } from "zod";
 import { BridgeError } from "./protocol.js";
 import {
-  findingWriteSchema, taskCompleteSchema, isBranchName, isRepoPath, isSearchText, MAX_FILE_PATHS, MAX_FINDING_BODY, PROJECT_NAME,
+  findingWriteSchema, isRepoPath, isSearchText, MAX_FILE_PATHS, MAX_FINDING_BODY, PROJECT_NAME,
 } from "./gitboy-contract.js";
 
 // A scoped SSH key reaches the Hook through this gateway instead of the full
@@ -31,7 +31,7 @@ const MAX_HEADER_LINE = 8192;
 const MAX_HEADERS = 32;
 const READ_TIMEOUT_MS = 10_000;
 /** How long the Hook may go quiet on an admitted request: every scoped route is
- * a store read or one finding/task write (whose file lock waits at most 5 s),
+ * a store read or one finding write (whose file lock waits at most 5 s),
  * so a minute of silence means it is stuck, not slow. */
 const ANSWER_IDLE_MS = 60_000;
 const PROJECT = PROJECT_NAME.source.slice(1, -1);
@@ -64,21 +64,15 @@ const RULES: Record<GatewayScope, Rule[]> = {
       if (!/^(?:[1-9]|1\d|20)$/.test(limit)) return "limit must be 1 to 20.";
       return [["q", q], ["limit", limit]];
     } },
-    { method: "GET", path: new RegExp(`^/v1/projects/${PROJECT}/tasks$`), query: query => {
-      const branch = one(query, "branch");
-      if (!only(query, ["branch"]) || branch === undefined || !isBranchName(branch)) return "Send one valid branch.";
-      return [["branch", branch]];
-    } },
   ],
   "gitboy-write": [
-    { method: "POST", path: new RegExp(`^/v1/projects/${PROJECT}/tasks/complete$`), body: { max: 256, schema: taskCompleteSchema } },
     { method: "POST", path: new RegExp(`^/v1/projects/${PROJECT}/findings$`), body: { max: MAX_FINDING_BODY, schema: findingWriteSchema } },
   ],
 };
 
 const DESCRIBE: Record<GatewayScope, string> = {
-  "gitboy-read": "GET /v1/projects/<project>/memory, /memory/files, /memory/search and /tasks",
-  "gitboy-write": "POST /v1/projects/<project>/findings and /tasks/complete",
+  "gitboy-read": "GET /v1/projects/<project>/memory, /memory/files, /memory/search",
+  "gitboy-write": "POST /v1/projects/<project>/findings",
 };
 
 export function isGatewayScope(value: string): value is GatewayScope {

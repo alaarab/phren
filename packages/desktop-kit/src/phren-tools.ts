@@ -8,7 +8,7 @@ import {
 } from "./tool-presentation.js";
 
 export type PhrenStatus = "running" | "succeeded" | "failed";
-export type TargetKind = "task" | "finding" | "search";
+export type TargetKind = "finding" | "search";
 
 export interface PhrenField { name: string; value: string }
 export interface PhrenRow { title: string; detail: string | null; trailing: string | null }
@@ -39,7 +39,7 @@ export interface PhrenToolPresentation {
   resultSummary: string | null;
   titles: string[];
   items: string[];
-  /** The raw tool name as the agent called it ("mcp__phren__add_task"). */
+  /** The raw tool name as the agent called it ("mcp__phren__add_finding"). */
   toolName: string;
   status: PhrenStatus;
   fullInput: string;
@@ -105,7 +105,7 @@ export namespace PhrenToolPresentation {
     export const returns = (rows: PhrenReturnRow[]): PhrenConductorReturns => ({ kind: "returns", rows });
   }
 
-  /** The tool after phren's own prefix: Claude Code sends `mcp__phren__add_task`; OpenCode `phren_add_task`. */
+  /** The tool after phren's own prefix: Claude Code sends `mcp__phren__add_finding`; OpenCode `phren_add_finding`. */
   export function bareTool(name: string | null | undefined): string | null {
     const parts = (name ?? "").split(".").filter((p) => p !== "");
     const tool = parts.length > 0 ? parts[parts.length - 1] : null;
@@ -160,16 +160,8 @@ export namespace PhrenToolPresentation {
         break;
       }
       case "add_finding": verb = "Save finding"; body = value("finding", "text", "content"); break;
-      case "add_task": verb = "Add task"; body = value("task", "item", "text"); break;
-      case "complete_task": verb = "Completed a task"; body = value("item", "task", "id"); break;
-      case "manage_task": {
-        verb = "Update task"; body = value("item", "task", "id", "text");
-        if (action !== "") details.push(field("Action", action));
-        break;
-      }
       case "search_knowledge": verb = "Search memory"; body = value("query", "q"); break;
       case "get_memory_detail": verb = "Read a memory"; body = value("id", "memoryId", "memory_id"); break;
-      case "get_tasks": verb = "Read tasks"; body = value("status", "filter"); break;
       case "get_project_summary": verb = "Read project"; body = ""; break;
       case "session": verb = "Session"; body = value("summary", "message", "name"); break;
       case "phren_admin": verb = "Phren admin"; body = value("message", "value", "setting"); break;
@@ -268,7 +260,7 @@ export namespace PhrenToolPresentation {
       const message = str(envelope["message"]);
       if (message !== undefined) summary = nonempty(firstLine(message.replace(/^[#*\s]+/gm, "").replace(/\*\*/g, "")));
     }
-    const listKey = ["item", "task", "finding"].find((k) => (arr(values[k])?.length ?? 0) > 1);
+    const listKey = ["item", "finding"].find((k) => (arr(values[k])?.length ?? 0) > 1);
     const items = listKey !== undefined
       ? (values[listKey] as JsonValue[]).slice(0, 50).map((v) => plain(v)).filter((s) => s !== "")
       : [];
@@ -292,17 +284,13 @@ export namespace PhrenToolPresentation {
     const store = string(values, ["store", "storeId", "storeID"]) ?? string(data, ["store", "storeId", "storeID"]) ?? null;
     const targetProject = project ?? string(data, ["project"]) ?? null;
     const kind: TargetKind | null =
-      ["add_task", "manage_task", "complete_task", "update_task", "get_task"].includes(tool) ? "task" :
       ["add_finding", "revise_finding", "edit_finding", "get_memory_detail"].includes(tool) ? "finding" :
       tool === "search_knowledge" ? "search" : null;
     let target: PhrenTarget | null = null;
     if (kind !== null && status === "succeeded" && !["remove", "delete"].includes(action)) {
-      const record = obj(data["task"] ?? data["finding"] ?? data["item"]) ?? data;
-      const id = string(record, ["stableId", "stable_id", "taskId", "findingId", "id"]) ?? string(values, ["finding_id", "findingId", "id", "memoryId", "memory_id"]) ?? null;
-      const updates = obj(values["updates"]) ?? {};
-      const text = kind === "task"
-        ? (string(updates, ["text"]) ?? string(values, ["item", "task", "text"]) ?? null)
-        : (string(values, ["new_text", "newText", "text", "finding", "content"]) ?? null);
+      const record = obj(data["finding"] ?? data["item"]) ?? data;
+      const id = string(record, ["stableId", "stable_id", "findingId", "id"]) ?? string(values, ["finding_id", "findingId", "id", "memoryId", "memory_id"]) ?? null;
+      const text = string(values, ["new_text", "newText", "text", "finding", "content"]) ?? null;
       target = { kind, store, project: targetProject, stableID: id, text };
     }
     const fullOutput = result !== null ? readable(result) : null;
@@ -438,17 +426,7 @@ function readableAt(text: string, depth: number): string {
   return prettyJson(value);
 }
 
-const TASK_TAGS = /\s*\[(?:high|medium|low|pinned)]/g;
 
-/** One task as a row: its text without the tags the fields already carry. */
-function taskRow(item: JsonObject): PhrenRow | null {
-  const line = str(item["line"]);
-  if (line === undefined) return null;
-  const claim = str(obj(item["claim"])?.["computer"]);
-  const detail = [str(item["priority"]), bool(item["pinned"]) === true ? "pinned" : null, claim !== undefined ? "claimed on " + claim : null]
-    .filter((p): p is string => p !== null && p !== undefined).join(" · ");
-  return { title: line.replace(TASK_TAGS, "").trim(), detail: nonempty(detail), trailing: str(item["id"]) ?? null };
-}
 
 function inboxRow(item: JsonObject): PhrenRow | null {
   const rawTitle = str(item["title"]);
@@ -532,26 +510,6 @@ function readOf(op: string, action: string, data: JsonObject, envelope: JsonObje
         const desc = str(item["description"]);
         return { title: name, detail: desc !== undefined ? sentence(desc) : null, trailing: required.length > 0 ? required.join(", ") : null };
       }), count(actions.length, "action")];
-    }
-    case "get_tasks": {
-      const groups: PhrenRowGroup[] = []; let total = 0;
-      const add = (project: string | null, items: JsonObject, label: boolean): void => {
-        for (const section of ["Active", "Queue", "Done"]) {
-          const tasks = objects(items[section]) ?? [];
-          total += tasks.length;
-          const built = tasks.slice(0, 200).map(taskRow).filter((r): r is PhrenRow => r !== null);
-          if (built.length > 0) groups.push({ header: label ? joined(project, section) : section, rows: built });
-        }
-      };
-      const items = obj(data["items"]);
-      const projects = objects(data["projects"]);
-      const single = taskRow(data);
-      if (items !== undefined) add(str(data["project"]) ?? null, items, false);
-      else if (projects !== undefined) for (const p of projects) add(str(p["project"]) ?? null, obj(p["items"]) ?? {}, true);
-      else if (single !== null) { total = 1; groups.push({ header: str(data["section"]) ?? null, rows: [single] }); }
-      else return null;
-      if (total === 0) return null;
-      return [PhrenToolPresentation.Detail.rows(groups), count(total, "task")];
     }
     case "list_projects": {
       const projects = objects(data["projects"]);
@@ -653,8 +611,7 @@ function readOf(op: string, action: string, data: JsonObject, envelope: JsonObje
       const counts = obj(data["counts"]);
       if (counts === undefined) return null;
       const findings = int(counts["findings"]);
-      const openTasks = int(counts["openTasks"]);
-      return [null, joined(findings !== undefined ? count(findings, "finding") : null, openTasks !== undefined ? count(openTasks, "open task") : null)];
+      return [null, findings !== undefined ? count(findings, "finding") : null];
     }
     default: return null;
   }

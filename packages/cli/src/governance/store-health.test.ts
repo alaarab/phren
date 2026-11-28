@@ -52,7 +52,7 @@ function recordedLines(): Array<Record<string, unknown>> {
 }
 
 describe("store health collection", () => {
-  it("counts physical tiers, lifecycle states, extra duplicates, citation coverage, tasks and review across subscribed stores", () => {
+  it("counts physical tiers, lifecycle states, extra duplicates, citation coverage and review across subscribed stores", () => {
     const team = attachTeam();
     put(primary, "proj/FINDINGS.md", [
       "# Findings", "## 2026-11-25",
@@ -76,7 +76,6 @@ describe("store health collection", () => {
     put(primary, "proj/reference/topics/orphan.older.md", "- repeat me <!-- fid:11111111 -->\n- Older unique\n");
     put(primary, "proj/reference/topics/ignored.txt", "- Not a topic\n");
     put(primary, "other/FINDINGS.md", "- Repeat me <!-- fid:11111111 -->\n");
-    put(primary, "proj/tasks.md", "# Tasks\n## Active\n- Working\n- Also working\n## Queue\n- Later\n## Done\n- Finished\n- Also finished\n");
     put(primary, "proj/review.md", "# Review\n## Review\n- Review me\n## Stale\n- Old\n## Conflicts\n- Conflict\n");
     const result = collectStoreHealth(primary, now, "test-computer");
     expect(result.at).toBe("2026-11-25T12:00:00.000Z");
@@ -89,7 +88,7 @@ describe("store health collection", () => {
       duplicateFids: 2, duplicateTexts: 3,
       citations: { none: 7, timestampOnly: 1, withFile: 2, withCommit: 2, withSymbol: 2, withRemote: 0 },
       checkableCitations: { any: 0, withFile: 0 },
-      openTasks: 3, doneTasks: 2, reviewEntries: 3,
+      reviewEntries: 3,
     });
     expect(result.stores[0].citationCoverage).toBe(0);
     expect(result.stores[0].totals).toEqual({
@@ -98,7 +97,7 @@ describe("store health collection", () => {
       duplicateFids: 2, duplicateTexts: 3,
       citations: { none: 8, timestampOnly: 1, withFile: 2, withCommit: 2, withSymbol: 2, withRemote: 0 },
       checkableCitations: { any: 0, withFile: 0 },
-      openTasks: 3, doneTasks: 2, reviewEntries: 3,
+      reviewEntries: 3,
     });
     expect(result.stores[1].projects).toEqual([{
       project: "proj", activeFindings: 1, archivedBullets: 0, olderBullets: 0,
@@ -106,7 +105,7 @@ describe("store health collection", () => {
       duplicateFids: 0, duplicateTexts: 0,
       citations: { none: 1, timestampOnly: 0, withFile: 0, withCommit: 0, withSymbol: 0, withRemote: 0 },
       checkableCitations: { any: 0, withFile: 0 },
-      openTasks: 0, doneTasks: 0, reviewEntries: 0,
+      reviewEntries: 0,
     }]);
     expect(fs.existsSync(path.join(team, ".runtime"))).toBe(false);
     expect(result.recall).toBeNull();
@@ -174,12 +173,12 @@ describe("store health collection", () => {
     ].map(row => JSON.stringify(row));
     put(primary, ".runtime/recall-trace.jsonl", trace.join("\n") + '\n{"at":');
     expect(collectStoreHealth(primary, now, "test-computer").recall).toEqual({
-      prompts: 7, injected: 1, abstained: 3, skipped: 2, suppressedRepeats: 4, taskCapturePaused: 1,
+      prompts: 7, injected: 1, abstained: 3, skipped: 2, suppressedRepeats: 4,
       byAbstainReason: { "below-floor": 2, "no-candidates": 1 }, clankerIds: { injected: 0, opened: 0 },
     });
     put(primary, ".runtime/recall-trace.jsonl", "");
     expect(collectStoreHealth(primary, now, "test-computer").recall).toEqual({
-      prompts: 0, injected: 0, abstained: 0, skipped: 0, suppressedRepeats: 0, taskCapturePaused: 0, byAbstainReason: {},
+      prompts: 0, injected: 0, abstained: 0, skipped: 0, suppressedRepeats: 0, byAbstainReason: {},
       clankerIds: { injected: 0, opened: 0 },
     });
   });
@@ -215,7 +214,7 @@ describe("store health collection", () => {
         contradictedBullets: 0, bulletsWithoutFid: 0, duplicateFids: 0, duplicateTexts: 0,
         citations: { none: 0, timestampOnly: 0, withFile: 0, withCommit: 0, withSymbol: 0, withRemote: 0 },
         checkableCitations: { any: 0, withFile: 0 },
-        openTasks: 0, doneTasks: 0, reviewEntries: 0,
+        reviewEntries: 0,
       }, citationCoverage: 0 }], runtimeBytes: {},
       runtimeClasses: { codeIndexes: 0, fanoutArchive: 0, fanouts: 0, sessions: 0, packages: 0, logs: 0, other: 0 },
       budgets: { over: [] }, recall: null,
@@ -226,14 +225,12 @@ describe("store health collection", () => {
 
 describe("budgets in the health line", () => {
   it("groups runtime bytes by class and marks each component over its budget with what that stops", () => {
-    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { openTasks: 2, reviewEntries: 2, runtimeMB: 1, fanoutArchiveMB: 0 } }));
+    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { reviewEntries: 2, runtimeMB: 1, fanoutArchiveMB: 0 } }));
     put(primary, "proj/tasks.md", "# Tasks\n## Active\n- One\n## Queue\n- Two\n- Three\n## Done\n- Old\n");
     put(primary, "proj/review.md", "# Review\n## Review\n- A\n- B\n## Stale\n- C\n");
     // Past the 150 default, so only an explicit 0 keeps it off the list.
-    put(primary, "calm/tasks.md", `# Tasks\n## Queue\n${Array.from({ length: 160 }, (_, i) => `- Item ${i}`).join("\n")}\n`);
-    put(primary, "calm/phren.project.yaml", "config:\n  retentionPolicy:\n    budgets:\n      openTasks: 0\n");
-    put(primary, "busy/tasks.md", "# Tasks\n## Queue\n- One\n- Two\n- Three\n");
-    put(primary, "busy/phren.project.yaml", "config:\n  retentionPolicy:\n    budgets:\n      openTasks: 5\n");
+    put(primary, "calm/phren.project.yaml", "config:\n  retentionPolicy:\n    budgets:\n      reviewEntries: 0\n");
+    put(primary, "busy/phren.project.yaml", "config:\n  retentionPolicy:\n    budgets:\n      reviewEntries: 5\n");
     put(primary, ".runtime/code/proj.sqlite", "x".repeat(1_100_000));
     put(primary, ".runtime/agent-fanouts-archive/job-1/events.jsonl", "y".repeat(100));
     put(primary, ".runtime/agent-fanouts/job-2/events.jsonl", "y".repeat(10));
@@ -245,7 +242,6 @@ describe("budgets in the health line", () => {
     const result = collectStoreHealth(primary, now, "test-computer");
     expect(result.runtimeClasses).toEqual({ codeIndexes: 1_100_000, fanoutArchive: 100, fanouts: 10, sessions: 1, packages: 2, logs: 3, other: 1 });
     expect(result.budgets.over).toEqual([
-      { component: "openTasks", store: "personal", project: "proj", value: 3, budget: 2, effect: "the prompt hook files no new tasks" },
       { component: "reviewEntries", store: "personal", project: "proj", value: 3, budget: 2, effect: "machine-generated entries are not queued" },
       { component: "runtimeBytes", value: 1_100_117, budget: 1_048_576, effect: "reported only" },
     ]);
@@ -267,14 +263,14 @@ describe("budgets in the health line", () => {
 
   it("gives doctor a warn-only line from the latest health record", () => {
     expect(budgetDoctorCheck(primary)).toEqual({ name: "budgets", ok: true, detail: "no store health recorded yet" });
-    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { openTasks: 1 } }));
-    put(primary, "proj/tasks.md", "# Tasks\n## Queue\n- One\n- Two\n");
+    put(primary, ".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { reviewEntries: 1 } }));
+    put(primary, "proj/review.md", "# Review\n\n- One\n- Two\n");
     recordStoreHealth(primary, now, "test-computer");
     expect(budgetDoctorCheck(primary)).toEqual({
       name: "budgets", ok: true,
-      detail: "over budget on 2026-11-25: personal/proj open tasks 2 of 1 (the prompt hook files no new tasks)",
+      detail: "over budget on 2026-11-25: personal/proj review entries 2 of 1 (machine-generated entries are not queued)",
     });
-    put(primary, "proj/tasks.md", "# Tasks\n## Queue\n- One\n");
+    put(primary, "proj/review.md", "# Review\n\n- One\n");
     recordStoreHealth(primary, new Date(now.getTime() + 86_400_000), "test-computer");
     expect(budgetDoctorCheck(primary)).toEqual({ name: "budgets", ok: true, detail: "within budget on 2026-11-26" });
   });

@@ -168,7 +168,6 @@ export function buildFilterBar(): void {
   const typeDefs = [
     { key: "project", label: "Projects", color: KIND_COLORS.project },
     { key: "finding", label: "Findings", color: TOPIC_COLORS.general },
-    { key: "task", label: "Tasks", color: KIND_COLORS["task-active"] },
     { key: "entity", label: "Fragments", color: KIND_COLORS.entity },
     { key: "reference", label: "Refs", color: KIND_COLORS.reference },
     { key: "topic", label: "Topics", color: TOPIC_COLORS.general },
@@ -499,7 +498,6 @@ function renderLegend(): void {
   const kindChips = [
     { key: "project", label: "Projects", color: KIND_COLORS.project },
     { key: "finding", label: "Findings", color: TOPIC_COLORS.general },
-    { key: "task", label: "Tasks", color: KIND_COLORS["task-active"] },
     { key: "entity", label: "Fragments", color: KIND_COLORS.entity },
     { key: "reference", label: "Refs", color: KIND_COLORS.reference },
     { key: "topic", label: "Topics", color: TOPIC_COLORS.general },
