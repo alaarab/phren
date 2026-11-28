@@ -54,6 +54,24 @@ function inboxRead(query: string, peer = false): Promise<unknown> {
   });
 }
 
+function inboxPost(body: unknown, query = ""): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const req = Readable.from([Buffer.from(JSON.stringify(body))]) as IncomingMessage;
+    req.method = "POST";
+    req.url = `/v1/owner-inbox${query ? `?${query}` : ""}`;
+    req.headers = {};
+    const res = {
+      statusCode: 200,
+      setHeader() {},
+      end(raw: string) {
+        if (this.statusCode !== 200) return reject(new Error(`Inbox write returned ${this.statusCode}: ${raw}`));
+        try { resolve(JSON.parse(raw)); } catch (error) { reject(error); }
+      },
+    };
+    http.handler!(req, res as unknown as ServerResponse);
+  });
+}
+
 it("sends a CLI add made in the ledger's initialization millisecond with an origin/main peer", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "inbox-"));
   const ledgerFile = path.join(root, "owner-inbox-push.json");
@@ -134,6 +152,58 @@ it("sends a CLI add made in the ledger's initialization millisecond with an orig
       await serving;
     }
     process.umask(previousUmask);
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("adds and lists an issue link, and hides the field from a reader that does not ask", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "inbox-issue-"));
+  const previousSignals = process.listeners("SIGTERM");
+  const stop = () => process.listeners("SIGTERM").find(listener => !previousSignals.includes(listener));
+  vi.stubEnv("PHREN_BRIDGE_HOME", root);
+  const store = path.join(root, "store"), config = path.join(store, ".config");
+  await mkdir(config, { recursive: true });
+  await writeFile(path.join(config, "modules.yaml"), "version: 1\nenabled: { hook: true, conductor: true }\n");
+  vi.stubEnv("PHREN_PATH", store);
+  vi.stubEnv("PHREN_OWNER_INBOX_BACKFILL_ID", undefined);
+  vi.spyOn(herdr, "recentServers").mockResolvedValue([]);
+  vi.spyOn(AgentHooks.prototype, "start").mockResolvedValue(undefined);
+  vi.spyOn(BrowserRegistry.prototype, "start").mockResolvedValue(undefined);
+  vi.spyOn(peers, "hookPeers").mockResolvedValue([]);
+  vi.spyOn(peerReads, "peerRead").mockResolvedValue({ ok: true, items: [] });
+  vi.spyOn(ApprovalPushService.prototype, "ownerInboxPushDevices").mockReturnValue([]);
+  const serving = serve("test");
+  let startupError: unknown;
+  void serving.catch(error => { startupError = error; });
+  try {
+    await vi.waitFor(() => {
+      if (startupError) throw startupError;
+      expect(stop()).toBeDefined();
+    });
+    const issue = "github.com/alaarab/phren#42";
+    const added = await inboxPost({ action: "add", title: "Rotate the deploy key", issue }, "issues=1");
+    expect(added).toMatchObject({ ok: true, item: { title: "Rotate the deploy key", issue } });
+    // A reader that asks for it gets the structured link, locally and through a peer's query flag.
+    expect(await inboxRead("local=1&issues=1")).toMatchObject({ items: [{ title: "Rotate the deploy key", issue }] });
+    expect(await inboxPost({ action: "list" }, "issues=1")).toMatchObject({ items: [{ title: "Rotate the deploy key", issue }] });
+    // Every older strict reader gets the link in the title and no unknown key.
+    for (const reply of [await inboxRead("local=1"), await inboxRead("local=1&compact=1&reconcile=1", true), await inboxPost({ action: "list" })]) {
+      expect(reply).toMatchObject({ items: [{ title: "Rotate the deploy key (issue: github.com/alaarab/phren#42)" }] });
+      expect("issue" in ((reply as { items: Record<string, unknown>[] }).items[0])).toBe(false);
+    }
+    // The stored row carries the link only in its title.
+    const stored = JSON.parse(await readFile(path.join(root, "owner-inbox.json"), "utf8"));
+    expect(stored).toEqual([expect.objectContaining({ title: "Rotate the deploy key (issue: github.com/alaarab/phren#42)" })]);
+    expect("issue" in (stored[0] as object)).toBe(false);
+  } finally {
+    const shutdown = stop();
+    if (shutdown) {
+      shutdown("SIGTERM");
+      await serving;
+    }
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();

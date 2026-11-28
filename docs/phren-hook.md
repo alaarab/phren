@@ -1894,17 +1894,31 @@ gate adds `ownerInboxClose` (the signed close route) and `ownerInboxPush` (the
 `{ok:true,items:[Item],unreachable:[{computer,error}]}` across linked computers.
 `GET ?local=1` reads only this Hook (used by peer aggregation, no recursion).
 `includeResolved=true` in GET, or `includeResolved:true` in POST, includes history.
+`issues=1` asks for an item's issue link as a field.
 A linked computer name in a POST list reads only that Hook's inbox.
 
 `Item` is `{id,kind:"manual"|"needs-you"|"blocked",title,state:"open"|"resolved",
 createdAt,updatedAt,inboxComputer,project?,computer?,target?,dispatch?,actionId?,
-source?,live?,resolvedAt?,resolution?,command?,task?,pr?,key?,paste?}`. All times are ISO timestamps. `target`
+source?,live?,resolvedAt?,resolution?,command?,task?,pr?,issue?,key?,paste?}`. All times are ISO timestamps. `target`
 is a full session target or a starting target for a startup dialog. `id` is a
 UUID; `source` is opaque. `inboxComputer:"local"` means the connected Hook owns
 it; another name means send the action to that Hook. `computer` describes the
 worker, which can differ from the inbox owner.
 
-Add accepts `{action:"add",title,project?,id?,computer?,command?,task?,pr?,key?}`.
+`issue` is the forge issue the row carries out, `domain/owner/name#N` (at most
+300 characters). It is stored only as `" (issue: <ref>)"` appended to the row's
+title, so a Hook or phone from before it existed still reads every stored row
+with its strict item schema. A linked title is stored whole and never trimmed:
+an add whose title does not fit beside the link (500 characters together) is
+refused with 400 `Title too long with an issue link: shorten it to N
+characters.` A reader that asks for the field (`?issues=1`, on a read or a
+write) gets the plain title and `issue` instead; every other reader gets the row
+as stored.
+Send the flag in the query, not the body: a Hook that predates the field refuses
+a body key it does not know and ignores the query flag. The suffix is applied
+once, so an add that repeats a row already carrying the link writes nothing.
+
+Add accepts `{action:"add",title,project?,id?,computer?,command?,task?,pr?,issue?,key?}`.
 Resolve accepts `{action:"resolve",id,resolution?,computer?,ifUpdatedAt?}`.
 Both return `{ok:true,item}`. `computer` routes to the named linked Hook. Omit
 it for local. Remote responses include the row's `inboxComputer`. The generated
@@ -1916,13 +1930,16 @@ Adds match open manual items by normalized PR or `key`. An add may name a
 resolved manual id with changed fields to reopen it. Writes that match
 different items return 409. Identical adds and resolves without a precondition
 are idempotent. To send `command`, `task`, `pr`, `key` or `ifUpdatedAt` to
-another Hook, its `/v1/health` must advertise `capabilities.ownerInboxActions`.
+another Hook, its `/v1/health` must advertise `capabilities.ownerInboxActions`;
+an `issue` needs `capabilities.ownerInboxIssues`.
 An older Hook still accepts legacy adds and resolves. Requests with new fields
-return 409 with `code: "owner-inbox-actions-unsupported"`.
+return 409 with `code: "owner-inbox-actions-unsupported"` (or
+`"owner-inbox-issues-unsupported"` for the issue link).
 
 `compact=1` on either read form (the aggregate or `?local=1`) answers each item
 with only `{id,title,kind,state,createdAt,updatedAt,inboxComputer?,project?,
-computer?,target?}`. The aggregate always carries `inboxComputer`. The flag is
+computer?,target?}`, plus `issue?` when the reader also sent `issues=1`.
+The aggregate always carries `inboxComputer`. The flag is
 forwarded to peer reads and the aggregate is projected again here, so older
 peers that ignore it still answer safely. A compact peer read also carries
 `reconcile=1`, which adds `live`, `source` and `actionId` so the reading Hook can
@@ -1934,6 +1951,10 @@ current shapes.
 `POST /v1/owner-inbox/close` takes the strict body
 `{"id":"<uuid>","ifUpdatedAt":"<exact wire string>","decision":"resolve|dismiss"}`
 and answers `{ok:true,item}` with the stored item and `inboxComputer:"local"`.
+`issues=1` on the route peels the issue link off that item's title into `issue`
+and answers the plain title, like every other inbox read; without it the item is
+the stored row, link in the title. The decision body never carries `issues`, so
+a Hook that predates the field still reads it.
 Send it to the Hook that owns the row. The id matches case-insensitively, since
 a legacy add may have kept an uppercase UUID; two stored rows that differ only
 by case are ambiguous and answer 409. An unknown id is 404; a changed revision

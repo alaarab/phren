@@ -46,12 +46,15 @@ export function register(server: McpServer): void {
   });
   server.registerTool("owner_inbox", {
     title: "◆ phren · owner inbox",
-    description: "One owner inbox on this conductor's Hook for everything that waits on the owner. Post each owner-only action as a title and a paste-able command, with task (bid) and pr links where available. The paste resolves that revision of the item after the command succeeds. Resolve can also supply ifUpdatedAt to require the item's current updatedAt. Open actions resolve automatically when their GitHub or gitboy PR merges or closes, or when the linked task is Done. GitLab merge requests can be linked for reference. A PR or key matches an open item, and conflicting identifiers are rejected. Re-adding a resolved manual id with changed fields reopens it. Automatic needs-you and blocked items are deduplicated by pane, session and question, and resolve when their source stops waiting or disappears. Lists show verified live automatic items. Resolving an inbox item leaves any worker prompt awaiting its own answer. Use operation add, list or resolve (also through phren_admin action owner_inbox). Set includeResolved to list history.",
-    inputSchema: ownerInboxSchema.omit({ action: true }).extend({ operation: ownerInboxSchema.shape.action }),
+    description: "One owner inbox on this conductor's Hook for everything that waits on the owner. Post each owner-only action as a title and a paste-able command, with task (bid), pr and issue (domain/owner/name#N) links where available. The paste resolves that revision of the item after the command succeeds. Resolve can also supply ifUpdatedAt to require the item's current updatedAt. Open actions resolve automatically when their GitHub or gitboy PR merges or closes, or when the linked task is Done. GitLab merge requests can be linked for reference. A PR or key matches an open item, and conflicting identifiers are rejected. Re-adding a resolved manual id with changed fields reopens it. Automatic needs-you and blocked items are deduplicated by pane, session and question, and resolve when their source stops waiting or disappears. Lists show verified live automatic items. Resolving an inbox item leaves any worker prompt awaiting its own answer. Use operation add, list or resolve (also through phren_admin action owner_inbox). Set includeResolved to list history.",
+    inputSchema: ownerInboxSchema.omit({ action: true, issues: true }).extend({ operation: ownerInboxSchema.shape.action }),
   }, async input => {
     try {
       const { operation, ...rest } = input;
-      const result = await hookRequest("/v1/owner-inbox", { ...rest, action: operation ?? "list" });
+      // This build reads and writes the structured `issue` link. The flag is a
+      // query parameter, never a body key: a Hook from before the field existed
+      // parses the body with a strict schema.
+      const result = await hookRequest("/v1/owner-inbox?issues=1", { ...rest, action: operation ?? "list" });
       return mcpResponse({ ok: result.ok === true, data: result, message: input.operation === "add" ? "Added to the owner inbox." : input.operation === "resolve" ? "Owner inbox item resolved." : `${Array.isArray(result.items) ? result.items.length : 0} owner inbox items.` });
     } catch (error) { return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not read the owner inbox." }); }
   });

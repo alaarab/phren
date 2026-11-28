@@ -124,6 +124,34 @@ describe("owner inbox compact reads", () => {
     expect(view.items).toEqual([{ id, title: "OVH US VPS-2 is in stock", kind: "manual", state: "open", createdAt: AT, updatedAt: AT, project: "phren", target }]);
   });
 
+  it("gives a compact reader the issue link in the title unless it asks for the field", async () => {
+    state.peers = [];
+    // A stored row carries the link in its title and no key of its own.
+    const row = fullRow({ title: "OVH US VPS-2 is in stock (issue: github.com/alaarab/phren#42)" });
+    const legacy = await ownerInboxView(inbox([row]), { action: "list" }, true, true);
+    expect(legacy.items).toEqual([{ ...compactInboxItem(row), title: "OVH US VPS-2 is in stock (issue: github.com/alaarab/phren#42)" }]);
+    expect("issue" in (legacy.items as Json[])[0]).toBe(false);
+    const asked = await ownerInboxView(inbox([row]), { action: "list", issues: true }, true, true);
+    expect(asked.items).toMatchObject([{ id, title: "OVH US VPS-2 is in stock", issue: "github.com/alaarab/phren#42" }]);
+    expect(compactInboxItem(row, false, true).issue).toBe("github.com/alaarab/phren#42");
+  });
+
+  it("asks peers for the structured link only when the reader does, and shapes their answers", async () => {
+    state.peers = [{ name: "Desk" }];
+    const stored = fullRow({ title: "OVH US VPS-2 is in stock (issue: github.com/alaarab/phren#42)" });
+    state.answers.set("Desk\n/v1/owner-inbox?local=1", { ok: true, items: [stored] });
+    const legacy = await ownerInboxView(inbox([]), { action: "list" });
+    expect(state.reads[0].route).toBe("/v1/owner-inbox?local=1");
+    expect(legacy.items).toMatchObject([{ title: "OVH US VPS-2 is in stock (issue: github.com/alaarab/phren#42)" }]);
+    expect("issue" in (legacy.items as Json[])[0]).toBe(false);
+    // A new peer answers with the field peeled off the title, and this Hook
+    // strips it again for a reader that did not ask.
+    state.answers.set("Desk\n/v1/owner-inbox?local=1&issues=1", { ok: true, items: [{ ...stored, title: "OVH US VPS-2 is in stock", issue: "github.com/alaarab/phren#42" }] });
+    const asked = await ownerInboxView(inbox([]), { action: "list", issues: true });
+    expect(state.reads[1].route).toBe("/v1/owner-inbox?local=1&issues=1");
+    expect(asked.items).toMatchObject([{ title: "OVH US VPS-2 is in stock", issue: "github.com/alaarab/phren#42" }]);
+  });
+
   it("keeps the aggregation keys only when the peer read asks for them", async () => {
     const row = fullRow({ kind: "blocked", target });
     const plain = await ownerInboxView(inbox([row]), { action: "list" }, true, true);

@@ -4,7 +4,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OwnerInboxPushSweep, type OwnerInboxPushSender } from "./owner-inbox-push.js";
-import type { OwnerInboxPush } from "./push.js";
+import { ownerInboxPushBody, type OwnerInboxPush } from "./push.js";
 import { OwnerInbox, type InboxItem } from "./owner-inbox.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -87,6 +87,24 @@ describe("owner inbox push sweep", () => {
     expect(sender.sent).toHaveLength(3);
     await restarted.observe(rows);
     expect(sender.attempts).toHaveLength(3);
+  });
+
+  it("keeps an issue link inside the alert's 500-byte body", async () => {
+    const sender = fakeSender();
+    const issue = "github.com/alaarab/phren#42";
+    const long = row({ title: `${"é".repeat(400)} (issue: ${issue})` });
+    const box = sweep(sender);
+    // The first pass seeds the ledger; the alert goes out on the next one.
+    await box.observe([long]);
+    sender.devices.push(DEVICE_A);
+    await box.observe([long]);
+    const sent = sender.sent.find(item => item.value.id === long.id);
+    if (!sent) throw new Error("the sweep did not deliver the row");
+    const body = sent.value.title;
+    expect(Buffer.byteLength(body, "utf8")).toBeLessThanOrEqual(500);
+    expect(body.endsWith(` (issue: ${issue})`)).toBe(true);
+    // The payload's own cut leaves it alone.
+    expect(ownerInboxPushBody(body)).toBe(body);
   });
 
   it("alerts once for each Hook's own rows and skips shared tasks on both Hooks", async () => {

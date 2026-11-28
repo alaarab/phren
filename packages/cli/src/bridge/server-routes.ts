@@ -18,7 +18,7 @@ import { bodyDigest, OWNER_PROOF_HEADER, OwnerProof } from "./owner-proof.js";
 import { listMoves, moveSessionFields, readMove, type MoveRecord, type SessionMover } from "./session-move.js";
 import { getTaskListRoute, getTaskDetailRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
-import type { OwnerInbox } from "./owner-inbox.js";
+import { inboxWire, type OwnerInbox } from "./owner-inbox.js";
 import { cancelDispatch, closeFinishedWorker, closeOwnPane } from "./worker-close.js";
 import { reportWorker, readIntegrator, setIntegrator } from "./worker-reports.js";
 import { sessionStalls } from "./stalls.js";
@@ -225,6 +225,7 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
     result.ownerInboxActions = true;
     result.ownerInboxClose = true;
     result.ownerInboxPush = true;
+    result.ownerInboxIssues = true;
   }
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
   if (snapshot.has("hook")) result.approvalRules = { version: 2, effects: ["always-ask", "deny"], harnesses: ["claude"], events: ["PermissionRequest"], tools: ["Bash"], inputField: "command", conductorTools: false, mcpTools: false, preExecution: false };
@@ -589,8 +590,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/owner-inbox": {
             const local = url.searchParams.get("local") === "1";
             // `reconcile=1` only means anything to a peer reading this Hook: it
-            // keeps the keys the aggregate filters and dedupes on.
-            result = await ownerInboxView(ctx.inbox!, { action: "list", includeResolved: url.searchParams.get("includeResolved") === "true" },
+            // keeps the keys the aggregate filters and dedupes on. `issues=1`
+            // asks for the structured issue link; without it the link is only
+            // in the title, which older strict readers still accept.
+            result = await ownerInboxView(ctx.inbox!, { action: "list", includeResolved: url.searchParams.get("includeResolved") === "true",
+              issues: url.searchParams.get("issues") === "1" },
               local, url.searchParams.get("compact") === "1", local && url.searchParams.get("reconcile") === "1"); break;
           }
           // A terminal reference from chat text (alaarab/phren-apps#676): this computer's pane or tab, or a linked peer's.
@@ -1161,7 +1165,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           await streamSpeech(data, response);
           return;
         } else if (url.pathname === "/v1/owner-inbox") {
-          result = await ownerInboxView(ctx.inbox!, data, false, url.searchParams.get("compact") === "1");
+          // `issues=1` is a query flag so a peer can ask for the structured
+          // issue link without a body key an older strict schema rejects.
+          result = await ownerInboxView(ctx.inbox!, { ...data, ...(url.searchParams.get("issues") === "1" ? { issues: true } : {}) },
+            false, url.searchParams.get("compact") === "1");
         } else if (url.pathname === "/v1/owner-inbox/close") {
           // A signed decision from the paired phone, sent straight to the Hook
           // that owns the row. The peer gateway stamps peer origin and strips
@@ -1170,7 +1177,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           const input = ownerInboxCloseSchema.parse(data);
           if (!ctx.inbox) throw new BridgeError(503, "The owner inbox is unavailable on this Hook.");
           const item = await ctx.inbox.close(input.id, input.ifUpdatedAt, input.decision);
-          result = { ok: true, item: { ...item, inboxComputer: "local" } };
+          // A phone that did not ask for the issue field gets the link in the title.
+          result = { ok: true, item: { ...inboxWire(item, url.searchParams.get("issues") === "1"), inboxComputer: "local" } };
         } else if (url.pathname === "/v1/conductor/integrator") {
           result = await setIntegrator(data.integrator);
         } else if (url.pathname === "/v1/dispatch/report") {

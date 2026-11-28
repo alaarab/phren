@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "rule": "A stored inbox row carries its issue link only inside the title, so a Hook from before the field existed (strict row schema) still reads every row. A reader that asks for the field (issues=1 on the Hook route, or issues:true in a POST body) receives the plain title and `issue` instead.",
+  "stored": {
+    "id": "6f1d0b6e-6f2a-4a4e-9a5c-3a0b1c2d4e5f",
+    "kind": "manual",
+    "title": "Rotate the deploy key (issue: github.com/alaarab/phren#42)",
+    "state": "open",
+    "createdAt": "2026-11-28T09:00:00.000Z",
+    "updatedAt": "2026-11-28T09:00:00.000Z",
+    "project": "phren"
+  },
+  "legacyReader": {
+    "id": "6f1d0b6e-6f2a-4a4e-9a5c-3a0b1c2d4e5f",
+    "kind": "manual",
+    "title": "Rotate the deploy key (issue: github.com/alaarab/phren#42)",
+    "state": "open",
+    "createdAt": "2026-11-28T09:00:00.000Z",
+    "updatedAt": "2026-11-28T09:00:00.000Z",
+    "project": "phren"
+  },
+  "issueReader": {
+    "id": "6f1d0b6e-6f2a-4a4e-9a5c-3a0b1c2d4e5f",
+    "kind": "manual",
+    "title": "Rotate the deploy key",
+    "state": "open",
+    "createdAt": "2026-11-28T09:00:00.000Z",
+    "updatedAt": "2026-11-28T09:00:00.000Z",
+    "project": "phren",
+    "issue": "github.com/alaarab/phren#42"
+  }
+}

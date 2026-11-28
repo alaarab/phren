@@ -2,7 +2,7 @@ import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { atomicInPrivateDir, bridgeRoot } from "./protocol.js";
-import type { InboxItem } from "./owner-inbox.js";
+import { pushIssueTitle, type InboxItem } from "./owner-inbox.js";
 import { isOwnerInboxPushSource } from "./owner-inbox-sources.js";
 import type { OwnerInboxPush } from "./push.js";
 
@@ -262,7 +262,9 @@ export class OwnerInboxPushSweep {
         }
         let accepted = false;
         try {
-          accepted = await this.sender.notifyOwnerInbox({ id: entry.id, title: live.title, expiresAt: entry.expiresAt }, deviceID);
+          // The alert body is the title cut at 500 UTF-8 bytes, so the link's
+          // bytes are reserved here and the cut never drops it.
+          accepted = await this.sender.notifyOwnerInbox({ id: entry.id, title: pushIssueTitle(live), expiresAt: entry.expiresAt }, deviceID);
         } catch { accepted = false; }
         if (accepted) {
           this.accepted.add(key);

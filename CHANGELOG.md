@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Owner Inbox items can carry an `issue` link (`domain/owner/name#N`), accepted by `phren owner-inbox add --issue`, `owner_inbox` and the Hook add route. It is stored inside the item's title (`" (issue: <ref>)"`), so a 0.3.100 Hook and older phones keep reading every row; readers that ask for it (`issues=1`) receive the structured field instead. A linked title is stored whole: one that does not fit beside the link (500 characters together) is refused with 400 rather than trimmed. Capability `ownerInboxIssues`.
+
 ## [0.3.100] - 2026-11-27
 
 ### Added

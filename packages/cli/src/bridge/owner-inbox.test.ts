@@ -5,7 +5,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { OwnerInbox, type InboxItem, type InboxSource } from "./owner-inbox.js";
+import { INBOX_TITLE_LIMIT, OwnerInbox, inboxIssueTitle, inboxTargetSchema, inboxWire, issueInTitle, parseIssueLink, pushIssueTitle, titleBudget, type InboxItem, type InboxSource } from "./owner-inbox.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import { hookPeers, peerRequest } from "./peers.js";
 vi.mock("./peers.js", () => ({ hookPeers: vi.fn(), peerRequest: vi.fn() }));
@@ -38,6 +38,134 @@ describe("owner inbox", () => {
     ]) await expect(box.run({ action: "add", title: "Bad add", ...bad })).rejects.toThrow(z.ZodError);
     const twenty = await box.run({ action: "add", title: "Twenty lines is fine", command: Array.from({ length: 20 }, (_, i) => `step ${i + 1}\t`).join("\n") });
     expect((twenty.item as InboxItem).command).toContain("step 20");
+  });
+  it("stores an issue link in the title, and serves it as a field only on request", async () => {
+    const box = inbox(), issue = "github.com/alaarab/phren#42", key = "deploy-key";
+    const added = await box.run({ action: "add", title: "Rotate the deploy key", project: "phren", key, issue, issues: true });
+    expect(added.item).toMatchObject({ title: "Rotate the deploy key", issue });
+    // Stored as the title every older reader parses, with no key of its own.
+    const stored = JSON.parse(await readFile(path.join(root, "owner-inbox.json"), "utf8"));
+    expect(stored).toEqual([expect.objectContaining({ title: "Rotate the deploy key (issue: github.com/alaarab/phren#42)", project: "phren", key })]);
+    expect("issue" in (stored[0] as object)).toBe(false);
+    // A reader that asks for it gets the plain title and the field.
+    expect((await box.run({ issues: true })).items).toMatchObject([{ title: "Rotate the deploy key", issue }]);
+    // An older reader gets the stored row, link in the title, no extra key.
+    const legacy = (await box.run({})).items as Record<string, unknown>[];
+    expect(legacy).toMatchObject([{ title: "Rotate the deploy key (issue: github.com/alaarab/phren#42)" }]);
+    expect("issue" in legacy[0]).toBe(false);
+    // The same add again writes nothing: the suffix is idempotent.
+    expect((await box.run({ action: "add", title: "Rotate the deploy key", project: "phren", key, issue })).updated).toBeUndefined();
+    // A re-add of the same key can change or drop the link; a repeated suffix is
+    // never appended.
+    await box.run({ action: "add", title: "Rotate the deploy key", project: "phren", key });
+    expect((await box.run({ issues: true })).items).toMatchObject([{ title: "Rotate the deploy key" }]);
+    expect("issue" in ((await box.run({ issues: true })).items as Record<string, unknown>[])[0]).toBe(false);
+  });
+  it("writes rows a 0.3.100 Hook reads, so a rollback keeps the inbox", async () => {
+    // The row schema of that release, copied here: strict, so any key this build
+    // adds would make the whole file unreadable there.
+    const rowSchema03100 = z.object({
+      id: z.string().uuid(), kind: z.enum(["manual", "needs-you", "blocked"]), title: z.string().min(1).max(500),
+      createdAt: z.string().datetime(), updatedAt: z.string().datetime(), state: z.enum(["open", "resolved"]),
+      resolvedAt: z.string().datetime().optional(), resolution: z.string().max(2000).optional(),
+      project: z.string().max(200).optional(), computer: z.string().max(253).optional(),
+      target: inboxTargetSchema.optional(), dispatch: z.string().uuid().optional(), actionId: z.string().max(200).optional(),
+      source: z.string().max(500).optional(), live: z.boolean().optional(),
+      command: z.string().min(1).max(4000).optional(), task: z.string().max(40).optional(),
+      pr: z.string().max(1000).optional(), key: z.string().min(1).max(200).optional(),
+    }).strict();
+    const box = inbox();
+    await box.run({ action: "add", title: "Rotate the deploy key", command: "true", task: "bid:c2cc33d0", issue: "github.com/alaarab/phren#42" });
+    await box.run({ action: "add", title: "Approve the release", key: "release" });
+    const stored = JSON.parse(await readFile(path.join(root, "owner-inbox.json"), "utf8"));
+    expect(z.array(rowSchema03100).parse(stored)).toHaveLength(2);
+    expect(stored[0].title).toBe("Rotate the deploy key (issue: github.com/alaarab/phren#42)");
+  });
+  it("folds an issue key from the previous build into the title", async () => {
+    const file = path.join(root, "owner-inbox.json"), issue = "github.com/alaarab/phren#42";
+    const row: InboxItem = { id: randomUUID(), kind: "manual", title: "Rotate the deploy key", state: "open", createdAt: at, updatedAt: at };
+    await writeFile(file, JSON.stringify([{ ...row, issue }]));
+    expect(await inbox().run({})).toMatchObject({ items: [{ title: `${row.title} (issue: ${issue})` }] });
+    const stored = JSON.parse(await readFile(file, "utf8"));
+    expect(stored).toEqual([{ ...row, title: `${row.title} (issue: ${issue})` }]);
+    expect((await inbox().run({ issues: true })).items).toMatchObject([{ title: row.title, issue }]);
+  });
+  it("rejects an issue link that is not a canonical safe-integer ref", async () => {
+    const box = inbox();
+    for (const issue of ["alaarab/phren#42", "github.com/alaarab/phren", "github.com/alaarab/phren#0", "github.com/alaarab/phren#01",
+      "github.com/alaarab#42", "github.com/alaarab/phren#42x", "https://github.com/alaarab/phren/issues/42", "GitHub.com/alaarab/phren#42",
+      "github.com/alaarab/phren#9007199254740992", "github.com/../phren#42", "github.com/./phren#42", "github.com//phren#42",
+      "github.com/alaarab/#42", "github.com/ala arab/phren#42", ".com/alaarab/phren#42", "github..com/alaarab/phren#42"]) {
+      await expect(box.run({ action: "add", title: "Bad link", issue })).rejects.toThrow(z.ZodError);
+    }
+    // 300 characters is the most one link may carry, and their fields are safe
+    // integers up to the platform's own bound.
+    await expect(box.run({ action: "add", title: "Too long", issue: `github.com/${"a".repeat(300)}/r#1` })).rejects.toThrow(z.ZodError);
+    expect(parseIssueLink("github.com/alaarab/phren#9007199254740991")).toEqual({ repo: "github.com/alaarab/phren", number: 9007199254740991 });
+    expect((await box.run({ action: "add", title: "Largest", issue: "github.com/alaarab/phren#9007199254740991" })).item)
+      .toMatchObject({ title: "Largest (issue: github.com/alaarab/phren#9007199254740991)" });
+    // Composition is exact: a title that fits is stored whole, never trimmed.
+    const budget = titleBudget("github.com/alaarab/phren#42");
+    const longest = inboxIssueTitle({ title: "x".repeat(budget), issue: "github.com/alaarab/phren#42" });
+    expect(longest.length).toBe(INBOX_TITLE_LIMIT);
+    expect(longest).toBe(`${"x".repeat(budget)} (issue: github.com/alaarab/phren#42)`);
+    expect(issueInTitle(longest)).toEqual({ title: "x".repeat(budget), issue: "github.com/alaarab/phren#42" });
+  });
+  it("refuses a linked title that does not fit instead of trimming it", async () => {
+    const box = inbox(), issue = "github.com/alaarab/phren#42", budget = titleBudget(issue);
+    await expect(box.run({ action: "add", title: "x".repeat(budget + 1), issue }))
+      .rejects.toMatchObject({ status: 400, message: `Title too long with an issue link: shorten it to ${budget} characters.` });
+    // A title without a link keeps its own 500-character bound.
+    expect((await box.run({ action: "add", title: "y".repeat(500) })).item).toMatchObject({ title: "y".repeat(500) });
+    await expect(box.run({ action: "add", title: "y".repeat(501) })).rejects.toThrow(z.ZodError);
+  });
+  it("keeps linked titles that differ only at the end distinct across edits", async () => {
+    const box = inbox(), issue = "github.com/alaarab/phren#42", key = "deploy-key", budget = titleBudget(issue);
+    const id = "55555555-5555-4555-8555-555555555555";
+    // Both fit exactly, and differ only in the last character a trim would drop.
+    const first = `${"a".repeat(budget - 1)}1`, second = `${"a".repeat(budget - 1)}2`;
+    const one = (await box.run({ action: "add", id, title: first, key, issue })).item as InboxItem;
+    const two = (await box.run({ action: "add", id, title: second, key, issue })).item as InboxItem;
+    expect(one.title).toBe(`${first} (issue: ${issue})`);
+    expect(two.title).toBe(`${second} (issue: ${issue})`);
+    expect(two.title).not.toBe(one.title);
+    // The edit is a real revision change, so a close at the old one is stale.
+    expect(two.updatedAt).not.toBe(one.updatedAt);
+    expect((await box.run({}))).toMatchObject({ items: [{ id, title: two.title }] });
+    await expect(box.close(id, one.updatedAt, "resolve")).rejects.toMatchObject({ status: 409 });
+    // A resolved item reopens when its title changes.
+    await box.run({ action: "resolve", id });
+    expect(await box.run({ action: "add", id, title: first, key, issue }))
+      .toMatchObject({ reopened: true, item: { id, title: one.title, state: "open" } });
+  });
+  it("keeps the link inside APNs's 500-byte alert body", async () => {
+    const issue = "github.com/alaarab/phren#42";
+    // Four bytes each, and a surrogate pair each: the cut must not split one.
+    const title = pushIssueTitle({ title: "😀".repeat(200), issue });
+    expect(Buffer.byteLength(title, "utf8")).toBeLessThanOrEqual(500);
+    expect(title.endsWith(` (issue: ${issue})`)).toBe(true);
+    expect(title).not.toContain("\ufffd");
+    const { ownerInboxPushBody } = await import("./push.js");
+    expect(ownerInboxPushBody(title)).toBe(title);
+    // A plain title is left alone.
+    expect(pushIssueTitle({ title: "Rotate the deploy key" })).toBe("Rotate the deploy key");
+  });
+  it("matches the conformance fixture's legacy and issue-reader shapes", async () => {
+    const fixture = JSON.parse(await readFile(new URL("../../fixtures/conformance/owner-inbox-issue.json", import.meta.url), "utf8"));
+    // The stored row is exactly what an older reader gets back.
+    expect(inboxWire(fixture.stored)).toEqual(fixture.legacyReader);
+    expect(fixture.stored).toEqual(fixture.legacyReader);
+    expect(inboxWire(fixture.stored, true)).toEqual(fixture.issueReader);
+    // The write path derives the stored title from the plain title and the link.
+    expect(inboxIssueTitle({ title: fixture.issueReader.title, issue: fixture.issueReader.issue })).toBe(fixture.stored.title);
+    // The documented Item shape is strict: the stored row parses, and the
+    // structured one only parses in a build that knows `issue`.
+    const legacyItem = z.object({
+      id: z.string().uuid(), kind: z.enum(["manual", "needs-you", "blocked"]), title: z.string(),
+      state: z.enum(["open", "resolved"]), createdAt: z.string(), updatedAt: z.string(), project: z.string().optional(),
+    }).strict();
+    expect(legacyItem.safeParse(fixture.legacyReader).success).toBe(true);
+    expect(legacyItem.safeParse(fixture.issueReader).success).toBe(false);
   });
   it("matches the normalized PR even when only one add carries a key", async () => {
     const box = inbox(), pr = "https://github.com/alaarab/phren/pull/877";
@@ -215,6 +343,36 @@ describe("owner inbox", () => {
     ]) await expect(ownerInboxView(box, input)).rejects.toMatchObject({ status: 409, details: { code: "owner-inbox-actions-unsupported" } });
     await expect(ownerInboxView(box, resolve)).resolves.toMatchObject({ item: { inboxComputer: "Desk", id, state: "resolved" } });
     expect(vi.mocked(peerRequest).mock.calls.filter(([, route]) => route === "/v1/owner-inbox")).toHaveLength(2);
+  });
+  it("refuses an issue link on a peer Hook without the capability and forwards it to one that has it", async () => {
+    vi.mocked(hookPeers).mockResolvedValue([linked("Desk")] as never);
+    const box = inbox(), issue = "github.com/alaarab/phren#42";
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/health"
+      ? { capabilities: { ownerInboxActions: true } } : { ok: true, item: {} });
+    await expect(ownerInboxView(box, { action: "add", computer: "Desk", title: "Rotate the deploy key", issue }))
+      .rejects.toMatchObject({ status: 409, details: { code: "owner-inbox-issues-unsupported" } });
+
+    // A peer that advertises the capability takes the link; this Hook's answer
+    // flag never crosses, because an older strict schema would reject it.
+    const remote = new OwnerInbox(undefined, path.join(root, "desk.json")), bodies: unknown[] = [];
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route, body) => {
+      if (route === "/v1/health") return { capabilities: { ownerInboxActions: true, ownerInboxIssues: true } };
+      bodies.push(body);
+      const asked = route.includes("issues=1");
+      if (route.startsWith("/v1/owner-inbox?local=1")) return remote.run({ action: "list", issues: asked });
+      // An upgraded peer honors `issues=1` on the write route too.
+      return remote.run({ ...(body as object), ...(asked ? { issues: true } : {}) });
+    });
+    const added = await ownerInboxView(box, { action: "add", computer: "Desk", title: "Rotate the deploy key", issue, issues: true });
+    expect(added.item).toMatchObject({ inboxComputer: "Desk", title: "Rotate the deploy key", issue });
+    expect(bodies[0]).toMatchObject({ issue });
+    expect("issues" in (bodies[0] as object)).toBe(false);
+    // A reader that does not ask sees the link only in the title.
+    expect((await ownerInboxView(box, { action: "list", computer: "Desk" })).items)
+      .toMatchObject([{ title: "Rotate the deploy key (issue: github.com/alaarab/phren#42)" }]);
+    // One that does ask for it receives the stored link.
+    expect((await ownerInboxView(box, { action: "list", computer: "Desk", issues: true })).items)
+      .toMatchObject([{ title: "Rotate the deploy key", issue }]);
   });
   it("retires automatic waits when answered and preserves manual decisions and history", async () => {
     const box = inbox();
