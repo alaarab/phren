@@ -18,6 +18,7 @@ import { bodyDigest, OWNER_PROOF_HEADER, OwnerProof } from "./owner-proof.js";
 import { listMoves, moveSessionFields, readMove, type MoveRecord, type SessionMover } from "./session-move.js";
 import { getTaskListRoute, getTaskDetailRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
+import { issueItemRoute, issueListRoute, issueWriteRoute } from "./issue-routes.js";
 import type { OwnerInbox } from "./owner-inbox.js";
 import { cancelDispatch, closeFinishedWorker, closeOwnPane } from "./worker-close.js";
 import { reportWorker, readIntegrator, setIntegrator } from "./worker-reports.js";
@@ -213,7 +214,7 @@ export const ownerInboxCloseSchema = z.object({
 
 export const capabilities = { browsers: true, turnCheckpoints: true, transcript: true, progress: true, images: true, prompt: true, stop: true, terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, sessionSeen: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", macWindows: macWindowsSupported() ? 1 : undefined, macWindowStream: macWindowsSupported() ? 1 : undefined, code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, ownerConfirm: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true, housekeeping: 1, housekeepingInventory: 1 };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", macWindows: macWindowsSupported() ? 1 : undefined, macWindowStream: macWindowsSupported() ? 1 : undefined, code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, ownerConfirm: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true, housekeeping: 1, housekeepingInventory: 1, issues: 1 };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -849,6 +850,16 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             if (url.searchParams.get("peers") === "1") result = { ...result as Json, ...await fromPeers("/v1/resources") };
             break;
           }
+          case "/v1/issues": {
+            // The phone's issue list (docs/phren-hook.md#issues-from-the-phone): owner-only,
+            // bounded, bodies trimmed, and every store project's repo when none is named.
+            if (!ownerRequest(request, {})) throw new BridgeError(403, "Only the owner reads issues.");
+            result = await issueListRoute(url, modules.store); break;
+          }
+          case "/v1/issues/item": {
+            if (!ownerRequest(request, {})) throw new BridgeError(403, "Only the owner reads issues.");
+            result = await issueItemRoute(url); break;
+          }
           case "/v1/housekeeping": {
             // The newest housekeeping report (docs/housekeeping.md); null before the first pass.
             // This computer only; the phone asks each computer itself. `peers=1` is for `phren housekeeping`.
@@ -1122,6 +1133,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await renameSession(selectedServer(url), data);
         } else if (url.pathname === "/v1/sessions/seen") {
           result = await markSessionSeen(data);
+        } else if (url.pathname.startsWith("/v1/issues/")) {
+          // Owner-only, owner-proof signed once the phone signs (owner-proof.ts). The
+          // bodies are the MCP issue tools' schemas (issue-routes.ts).
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner changes issues.");
+          result = await issueWriteRoute(url.pathname, data, info.computer.name);
         } else if (url.pathname === "/v1/housekeeping/scan") {
           // Owner-only: a fresh inventory (sizes take a while); the answer comes back through the view's revision.
           if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner starts a housekeeping scan.");

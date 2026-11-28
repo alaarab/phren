@@ -34,6 +34,7 @@ const ROUTES = new Set([
   "POST /v1/push/register",
   "POST /v1/sets/link",
   "POST /v1/housekeeping/approve", "POST /v1/housekeeping/dismiss", "POST /v1/housekeeping/restore", "POST /v1/housekeeping/scan",
+  "POST /v1/issues/create", "POST /v1/issues/edit", "POST /v1/issues/comment", "POST /v1/issues/claim", "POST /v1/issues/close",
   "POST /v1/owner-confirms/answer",
   "POST /v1/owner-inbox/close",
   "GET /v1/mac/windows", "GET /v1/mac/windows/snapshot", "GET /v1/mac/windows/stream",

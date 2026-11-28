@@ -163,6 +163,8 @@ describe("built-in registration declarations", () => {
     for (const operation of ["list", "edit", "cancel"]) currentPosts.add(`/v1/prompt/after-turn/${operation}`);
     // checkpoints.ts routes preview and restore behind one prefix check.
     for (const operation of ["preview", "restore"]) currentPosts.add(`/v1/git/checkpoints/${operation}`);
+    // issue-routes.ts routes the five writes behind one /v1/issues/ prefix check.
+    for (const operation of ["create", "edit", "comment", "claim", "close"]) currentPosts.add(`/v1/issues/${operation}`);
     for (const route of storeRoutes("POST")) currentPosts.add(route);
     // Routed before the per-method blocks, beside the other /v1/store/ prefix routes.
     currentPosts.add("/v1/store/pull-now");

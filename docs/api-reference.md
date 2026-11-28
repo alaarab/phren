@@ -1251,6 +1251,32 @@ See [Settling tasks](task-responsibility.md#settling-tasks).
 
 ---
 
+## Issues
+
+Forge issues live in `packages/cli/src/forge/` and reach the phone through the
+Hook's owner-only routes, advertised as `capabilities.issues: 1`. The five
+writes also require the paired phone's owner-proof signature once it has signed
+one, and refuse peers and agent origins. See [Issues](issues.md) for repository
+selection and credentials.
+
+| Route | Inputs | Answer |
+| --- | --- | --- |
+| `GET /v1/issues` | `repos` (repeatable or comma-separated), `state`, `assignee`, `label`, `search`, `limit` (1-200) | `{issues, errors, truncated}`; without `repos`, every store project whose repository resolves, cached five minutes. |
+| `GET /v1/issues/item` | `repo`, `number` | `{issue}` with the full body. |
+| `POST /v1/issues/create` | `repo`, `title`, optional `body`, `checklist`, `labels` | `{ok:true, issue}`. |
+| `POST /v1/issues/edit` | `repo`, `number`, optional `title`, `body`, `checklist`, `addLabels`, `removeLabels`, `state` | `{ok:true, issue}`. |
+| `POST /v1/issues/comment` | `repo`, `number`, `body` | `{ok:true, url}`. |
+| `POST /v1/issues/claim` | `repo`, `number`, optional `computer`, `release` | `{ok:true, issue}`. |
+| `POST /v1/issues/close` | `repo`, `number`, optional `comment` | `{ok:true, issue}`. |
+
+Lists stay under 256 KB: bodies are cut to 2,000 characters and marked
+`truncated: true`, and rows are dropped with a top-level `truncated: true` when
+the answer would be larger; `/v1/issues/item` has the whole body. Forge failures
+map to `auth` 502, `not-found` 404, `forbidden` 403, `rate-limited` 429,
+`unavailable` 503 and `invalid` 400, with a `forge-<code>` code.
+
+---
+
 ## Finding Capture
 
 ### `add_finding`

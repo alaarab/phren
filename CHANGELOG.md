@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Forge issues core for GitHub and gitboy, with project repository lookup, checklists, and computer claims.
+- The phone's forge issue routes (`GET /v1/issues`, `GET /v1/issues/item`, `POST /v1/issues/{create,edit,comment,claim,close}`, capability `issues: 1`). They are owner-only, the writes are owner-proof signed, and a list covers every store project's repository when none is named. List bodies are trimmed to 2,000 characters and the answer stays under 256 KB; forge failures map to stable HTTP statuses.
 
 ## [0.3.100] - 2026-11-27
 
