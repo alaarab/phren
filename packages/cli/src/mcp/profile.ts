@@ -83,7 +83,7 @@ const COMPOSITES: Record<string, Composite> = {
   },
   manage_task: {
     title: "◆ phren · manage task",
-    summary: "Change an existing task: complete, update, remove, pin, claim for this computer, or tidy the done list. Pass `action` plus that action's own parameters.",
+    summary: "Deprecated: tasks are retired in 0.4.0, so every write action returns `tasks-retired`; nothing is written. Use forge issues (`create_issue`, `claim_issue`, `comment_issue`) for work and the owner Inbox for owner actions. Pass `action` plus that action's own parameters.",
     actions: {
       complete: "complete_task",
       claim: "claim_task",

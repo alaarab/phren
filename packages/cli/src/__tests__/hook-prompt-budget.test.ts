@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 
-/** The prompt hook end to end for a project over its open-task budget: it still
- * injects memory, files no task, and says so in its trace line and the recall trace. */
+/** The prompt hook end to end for a project over the old open-task budget:
+ * tasks are retired, so it injects memory, files no task, and records no pause. */
 const cli = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../dist/index.js");
 
 describe.skipIf(!fs.existsSync(cli))("hook-prompt open-task budget", () => {
@@ -49,7 +49,8 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt open-task budget", () => {
     expect(output).toContain("myproject/FINDINGS.md");
     const line = output.split("\n").find(p => p.startsWith("◆ phren · trace:") || p.startsWith("◆ phren · matched="));
     if (clanker === "off") {
-      expect(line).toMatch(/^◆ phren · trace: intent=debug; matched=[^;]*tokens_budget; budget=\d+\/2000;tokens≈\d+\/550; stages=[^\n]*; tasks=paused open 3\/2$/);
+      expect(line).toMatch(/^◆ phren · trace: intent=debug; matched=[^;]*tokens_budget; budget=\d+\/2000;tokens≈\d+\/550; stages=[^\n]*$/);
+      expect(output).not.toContain("tasks=");
     } else {
       expect(line).toMatch(/^◆ phren · matched=[^;]*tokens_budget$/);
       expect(output).toContain(`</phren-context>\n${line}\n`);
@@ -59,7 +60,8 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt open-task budget", () => {
     }
     expect(output).not.toContain("Queued task");
     expect(fs.readFileSync(path.join(store, "myproject", "tasks.md"), "utf8")).toBe(tasks);
-    expect(lastTrace().taskCapturePaused).toEqual({ open: 3, budget: 2 });
+    // tasks retired (0.4.0): the prompt hook no longer files tasks or reports a task budget pause.
+    expect(lastTrace().taskCapturePaused).toBeUndefined();
     // Clanker mode's printed ids go into the trace, so store health can pair them with get_memory_detail opens.
     const ids = lastTrace().injected.map((row: { id?: string }) => row.id);
     if (clanker === "off") expect(ids.every((id: string | undefined) => id === undefined)).toBe(true);
@@ -67,7 +69,7 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt open-task budget", () => {
       expect(ids.length).toBeGreaterThan(0);
       for (const id of ids) expect(output).toContain(`${id} fb:`);
     }
-  });
+  }, 30_000);
 });
 
 describe.skipIf(!fs.existsSync(cli))("hook-prompt open-task budget for a team-store project", () => {
@@ -97,15 +99,15 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt open-task budget for a team-st
   });
   afterAll(() => tmp?.cleanup());
 
-  it("uses the budget of the store that owns the project", () => {
+  it("injects memory and never files a task, whatever the owning store's budget", () => {
     const output = spawnSync(process.execPath, [cli, "hook-prompt"], {
       input: JSON.stringify({ prompt: "Fix the render callback so it reads the frame size from the main thread", cwd: workRepo, session_id: "team-budget" }),
       env: { ...process.env, PHREN_PATH: primary, PHREN_PROFILE: "", HOME: tmp.path, PHREN_FEATURE_AUTO_EXTRACT: "0", PHREN_CLANKER: "off" },
       encoding: "utf8", timeout: 60_000,
     }).stdout ?? "";
     expect(output).toContain("teamproj/FINDINGS.md");
-    expect(output).toMatch(/trace: .*; tasks=paused open 3\/2/);
+    expect(output).not.toContain("tasks=paused");
     expect(fs.readFileSync(path.join(team, "teamproj", "tasks.md"), "utf8")).toBe(tasks);
-  });
+  }, 30_000);
 });
 

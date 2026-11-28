@@ -14,6 +14,12 @@ phren bridge update
 Restart Hook and MCP after enabling the module. Full MCP exposes these tools;
 core MCP reaches them through `phren_admin`.
 
+**Tasks are retired in 0.4.0.** Work is tracked as forge issues on gitboy.dev
+(private) and GitHub (public): create, claim and comment with `create_issue`,
+`claim_issue` and `comment_issue` (`phren issue` on the CLI), and make a PR say
+`Closes <repo>#N`. Human actions go to the owner Inbox. Task reads still work;
+every task write returns `tasks-retired`. See [issues](issues.md).
+
 ## Enroll computers
 
 The Hook connects only to peers already configured in its private
@@ -138,22 +144,19 @@ refused by name and skipped by `anywhere`. Design and routes are in
 [Conductor sets](conductor-sets.md).
 
 Computers that are not linked can each run their own conductor. They
-coordinate through the synced store by claiming tasks: `claim_task` (or
-`manage_task` with `action: "claim"`) pulls the store, moves the task to Active
-with a line under it in `tasks.md`,
+coordinate through the forge, not the store: claim an issue before you
+dispatch it with `claim_issue`. That assigns it to the signed-in user and sets
+a `working-on:<computer>` label, removing any other `working-on:*` label.
 
-```md
-- [ ] Port the parser <!-- bid:aaaa1111 rank:1 -->
-  Claimed: Mini 2026-09-25T04:30:00Z session:w22-p1
+```sh
+phren issue claim gitboy.dev/owner/repo#42
 ```
 
-then commits and pushes. A task another computer holds is refused. When two
-claims race, the store merge keeps the one that reached the remote first, and
-the other call reports it as `heldBy`. `get_tasks` summaries show
-`[claimed: <computer>]`; conductors skip tasks claimed elsewhere. Completing a
-task clears its claim, `release: true` returns it to the Queue, and `force`
-takes over a claim more than a day old. Phren versions older than claims drop
-the `Claimed:` line when they rewrite `tasks.md`, so update every computer.
+A claimed issue another computer holds is refused. A claim that reports it is
+held elsewhere means another conductor got there first: move on. Closing the
+issue or `claim_issue` with `release` frees it. When a conductor must work from
+a synced task list during the read-only window, `get_tasks` still shows
+`[claimed: <computer>]`, but new work belongs in issues.
 
 On the phone, hold a project or computer for 0.4 seconds to open the computer
 chooser. It lists names, colors, reachability and project session counts, puts
@@ -1338,15 +1341,17 @@ owner-inbox list` show it across the linked computers. The owning Hook persists
 each item. An item's `inboxComputer` tells clients where to resolve it; its
 `computer` can instead name the remote worker. Unreachable inboxes are
 reported. `add` takes `title`, optional `project`, an optional stable UUID `id`
-to keep on retries, and for an owner action a paste-able `command`, the `task`
-(`bid:xxxxxxxx`), the `pr` URL and an optional dedupe `key`. The generated
+to keep on retries, and for an owner action a paste-able `command`, the linked
+issue (`issue:"repo#N"`, where the sending client supports it), the `pr` URL
+and an optional dedupe `key`. The old `task` (`bid:xxxxxxxx`) link is retired
+with tasks. The generated
 `paste` clears the item on its owning Hook after the command succeeds and
 only if its `updatedAt` still matches. Multiline commands run with `sh -e`.
 The same normalized PR or `key` matches an open item. Conflicting identifiers
 are rejected. Posting a resolved item again under its id with changed fields
 reopens it. A manual item resolves itself when its GitHub or gitboy PR merges
-or closes, or when its linked task is Done. GitLab merge requests can be saved
-as links. A closed unmerged PR or Done task needs a fresh read after the item
+or closes, or when its linked issue closes. GitLab merge requests can be saved
+as links. A closed unmerged PR or closed issue needs a fresh read after the item
 is edited or reopened. `resolve` takes `id`, optional `computer` (the
 `inboxComputer`, omitted for local), `resolution` and `--if-updated-at`.
 For remote adds with the new fields and guarded remote resolves, the
@@ -1356,7 +1361,7 @@ For example, run these commands from a shell.
 
 ```sh
 phren owner-inbox add "Restart the router" --project phren
-phren owner-inbox add "Merge phren#940: owner inbox" --command "gh pr merge 940 -R alaarab/phren --squash" --task bid:ac70edca --pr https://github.com/alaarab/phren/pull/940
+phren owner-inbox add "Merge phren#940: owner inbox" --command "gh pr merge 940 -R alaarab/phren --squash" --pr https://github.com/alaarab/phren/pull/940
 phren owner-inbox list --all
 phren owner-inbox resolve <id> --computer <name> --resolution "Restarted"
 ```
@@ -1430,6 +1435,12 @@ Tampering can remove restrictions back to today's behavior, never grant beyond i
 
 ### Private task links and merge reconciliation
 
+> **Retired in 0.4.0.** Tasks are read-only; dispatch now carries an
+> `issue:{repo, number}` (or `"repo#N"`) instead, a brief asks for ONE summary
+> comment on the issue when the worker finishes, and PRs say
+> `Closes <repo>#N`. See [issues](issues.md). The task behaviour below stays
+> documented for the read-only window and the later removal.
+
 Dispatch can carry `task:{storeId,project,stableId}` privately with its launch.
 `dispatch_report` uses it to save repository-qualified PR and branch links in
 `tasks.md`; the worker can also supply `task` explicitly. Read `taskLinks` in the
@@ -1445,7 +1456,7 @@ state, and the report's pull request (on GitHub, GitLab or gitboy) becomes the
 task's pull request; the response's `taskWork` says whether it was saved. See
 [task work links](task-responsibility.md#task-work-links).
 
-Use `phren tasks reconcile --dry-run` to preview merge completion, then `--apply`
-to enable subsequent sweeps. Schedule the command nightly if desired. Tasks
-needing acceptance beyond a merge remain open as `merged, verify`; `[needs owner]`
-tasks are skipped. See [task reconciliation](task-responsibility.md#complete-tasks-from-merged-prs).
+Use `phren tasks reconcile --dry-run` to preview merge completion. `--apply` is
+retired with tasks (`tasks-retired`), so no further sweeps run; tasks needing
+acceptance beyond a merge stay open as `merged, verify`. Move the work to
+issues. See [task reconciliation](task-responsibility.md#complete-tasks-from-merged-prs).

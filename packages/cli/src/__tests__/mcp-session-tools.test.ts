@@ -195,7 +195,7 @@ describe("mcp-session tool contract", () => {
     expect(fs.existsSync(sessionFile(tmp.path, "ended-demo"))).toBe(true);
   });
 
-  it("removes checkpoint files when complete_task finishes the associated task", async () => {
+  it("keeps a task's checkpoint because complete_task no longer writes", async () => {
     registerTasks(server as any, {
       phrenPath: tmp.path,
       profile: "test",
@@ -242,7 +242,9 @@ describe("mcp-session tool contract", () => {
     expect(fs.existsSync(checkpointFile)).toBe(true);
 
     const completed = parseResult(await server.call("complete_task", { project: "demo", item: "snapshot pipeline" }));
-    expect(completed.ok).toBe(true);
-    expect(fs.existsSync(checkpointFile)).toBe(false);
+    expect(completed.ok).toBe(false);
+    expect(completed.errorCode).toBe("tasks-retired");
+    // The session tool's own hook still ends the task's checkpoint with the session, not the task write.
+    expect(fs.existsSync(checkpointFile)).toBe(true);
   });
 });

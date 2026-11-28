@@ -20,6 +20,10 @@ Usage at or above the threshold is skipped. Recent OpenCode log errors saying
 Go usage limit exceeded or Rate limit exceeded exclude that provider for 30
 minutes. Unknown usage is reported explicitly and does not invent headroom.
 
+Fan-out serves forge issues: a brief names the issue it serves, asks the worker
+to post ONE summary comment on it when done, and its PR says `Closes <repo>#N`.
+Phren tasks are retired in 0.4.0 (read-only); see [issues](issues.md).
+
 ```yaml
 threshold: 80
 computerCap: 6

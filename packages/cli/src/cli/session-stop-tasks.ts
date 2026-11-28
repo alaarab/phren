@@ -3,6 +3,7 @@
  * them instead of walking away. Claude and Codex understand a Stop hook that
  * blocks; other harnesses cannot, so they are left alone. */
 import { currentSessionId, resolutionPrompt, sessionTaskStates, unresolvedTasks, type SessionTaskState } from "../task/session-tasks.js";
+import { TASKS_RETIRED } from "../task/retired.js";
 
 export interface TaskStopDecision {
   decision: "block";
@@ -34,6 +35,8 @@ export function taskStopDecision(input: {
   env?: NodeJS.ProcessEnv;
 }): TaskStopDecision | undefined {
   try {
+    // tasks retired (0.4.0): the Stop hook no longer nags about open tasks.
+    if (TASKS_RETIRED) return undefined;
     const env = input.env ?? process.env;
     if (env.PHREN_TASK_STOP_CHECK === "off") return undefined;
     if (!STOP_TOOLS.has(input.tool)) return undefined;

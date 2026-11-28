@@ -91,7 +91,7 @@ describe("hook session start onboarding notice", () => {
     const notice = getSessionStartOnboardingNotice(phrenPath, repoDir, "repo");
     expect(notice).toContain("project \"repo\" is tracked but memory is still empty");
     expect(notice).toContain("add_finding");
-    expect(notice).toContain("add_task");
+    expect(notice).toContain("create_issue");
   });
 
   it("returns null for tracked projects after memory is captured", () => {

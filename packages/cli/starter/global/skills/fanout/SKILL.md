@@ -3,14 +3,16 @@ name: fanout
 description: Delegate independent, bounded implementation or review work to headless agent workers using phren fanout.
 ---
 
-Fan out when independent tasks can make progress alongside the lead's work.
+Fan out when independent pieces of work can make progress alongside the lead's work.
 Give each writer a separate worktree and a concrete output to validate. A brief
-should name the goal, owned files, constraints, tests, and completion report.
+should name the goal, the forge issue it serves, owned files, constraints,
+tests, and completion report: post ONE summary comment on the issue when you
+finish, and make the PR say `Closes <repo>#N`.
 Include relevant findings and exact review issues; avoid sending the whole chat.
 It also says that owner-only actions (merge, release, login, token, root step,
 decision) go to the owner inbox as one line plus a paste-able command, linked
-to the task and PR: `phren owner-inbox add <title> --command <cmd> --task
-<bid> --pr <url>`. They resolve themselves when the PR merges or the owner
+to the issue and PR: `phren owner-inbox add <title> --command <cmd> --pr
+<url>`. They resolve themselves when the PR merges or the owner
 runs the paste.
 
 Start every worker through `phren fanout run`, never with `opencode run`,

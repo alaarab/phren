@@ -32,13 +32,10 @@ beforeEach(() => {
 afterEach(() => tmp.cleanup());
 
 describe("taskStopDecision", () => {
-  it("blocks on an Active task the session recorded, naming its bid", () => {
+  it("no longer blocks on an Active task the session recorded", () => {
     writeTasks(`- [ ] Implement parser <!-- bid:${BID} -->`);
     record();
-    const decision = decide();
-    expect(decision?.decision).toBe("block");
-    expect(decision?.reason).toContain(`bid:${BID}`);
-    expect(decision?.open.map(task => task.resolution)).toEqual(["open"]);
+    expect(decide()).toBeUndefined();
   });
 
   it.each([

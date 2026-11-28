@@ -105,6 +105,7 @@ import {
 import { approximateTokens, SNIPPET_OVERHEAD_TOKENS } from "../shared/retrieval.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { handleTaskPromptLifecycle } from "../task/lifecycle.js";
+import { TASKS_RETIRED } from "../task/retired.js";
 import { bestFindingNodeId } from "../finding-graph-id.js";
 import { readKnowsBlock } from "../content/summarize.js";
 
@@ -265,7 +266,8 @@ export async function handleHookPrompt() {
     const taskLevel = resolvedConfig.proactivity.tasks
       ?? resolvedConfig.proactivity.base
       ?? getProactivityLevelForTask(getPhrenPath());
-    const taskLifecycle = moduleEnabled(getPhrenPath(), "tasks") ? handleTaskPromptLifecycle({
+    // tasks retired (0.4.0): the prompt hook no longer captures tasks.
+    const taskLifecycle = !TASKS_RETIRED && moduleEnabled(getPhrenPath(), "tasks") ? handleTaskPromptLifecycle({
       phrenPath: getPhrenPath(),
       prompt,
       project: detectedProject,

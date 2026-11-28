@@ -56,7 +56,7 @@ it("keeps concurrent MCP calls from several servers working while other processe
 
   try {
     const calls = clients.flatMap((client, c) => [
-      ...Array.from({ length: 5 }, (_, i) => client.callTool({ name: "add_task", arguments: { project: "demo", item: [`Contention task ${c}-${i}`] } })),
+      ...Array.from({ length: 5 }, (_, i) => client.callTool({ name: "add_finding", arguments: { project: "demo", finding: [`Contention note ${c}-${i} about index lock waits`] } })),
       ...Array.from({ length: 2 }, (_, i) => client.callTool({ name: "add_finding", arguments: { project: "demo", finding: [`Contention finding zebracorn ${c}-${i} about index lock waits`] } })),
       ...Array.from({ length: 3 }, () => client.callTool({ name: "search_knowledge", arguments: { query: "demo" } })),
       ...Array.from({ length: 2 }, () => client.callTool({ name: "get_tasks", arguments: { project: "demo" } })),
@@ -70,8 +70,9 @@ it("keeps concurrent MCP calls from several servers working while other processe
     try { fs.unlinkSync(lock); } catch { /* already gone */ }
   }
 
+  // Task writes are retired: the read-only get_tasks calls above changed nothing.
   const tasks = fs.readFileSync(path.join(store, "demo", "tasks.md"), "utf8");
-  for (let c = 0; c < 3; c++) for (let i = 0; i < 5; i++) expect(tasks).toContain(`Contention task ${c}-${i}`);
+  expect(tasks).toBe("# Tasks\n\n## Queue\n\n- Seed task\n");
   // Once the lock is free the next index read refreshes past the last good index.
   await new Promise(resolve => setTimeout(resolve, 1100));
   const found = parse(await clients[0].callTool({ name: "search_knowledge", arguments: { query: "zebracorn" } }));

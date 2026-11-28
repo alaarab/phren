@@ -16,7 +16,8 @@ import { localMoveAvailability, moveComputers } from "./move-computers.js";
 import { ownerRequest, requestPeer, type PeerIdentity } from "./request-origin.js";
 import { bodyDigest, OWNER_PROOF_HEADER, OwnerProof } from "./owner-proof.js";
 import { listMoves, moveSessionFields, readMove, type MoveRecord, type SessionMover } from "./session-move.js";
-import { getTaskListRoute, getTaskDetailRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
+import { getTaskListRoute, getTaskDetailRoute, getTaskDirectoryRoute } from "./task-routes.js";
+import { TASKS_RETIRED_CODE, TASKS_RETIRED_MESSAGE } from "../task/retired.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
 import { cancelDispatch, closeFinishedWorker, closeOwnPane } from "./worker-close.js";
@@ -516,6 +517,11 @@ async function peerContinuationIntent(caller: PeerIdentity, id: string, conversa
   const candidates = (await hookPeers()).filter(peer => peerFingerprint(peer) === caller.fingerprint && (!caller.name || caller.name === peer.name));
   if (candidates.length !== 1) throw new BridgeError(403, "The launch origin is not uniquely verified.");
   return peerRequest(candidates[0], `/v1/sessions/move/intent?id=${z.string().uuid().parse(id)}${conversation === undefined ? "" : `&conversation=${conversation}`}`, undefined, 5_000);
+}
+
+/** Tasks are retired in 0.4.0: the phone keeps every task read, and every task write is 410. */
+function taskWriteRetired(): never {
+  throw new BridgeError(410, TASKS_RETIRED_MESSAGE, { code: TASKS_RETIRED_CODE });
 }
 
 export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
@@ -1018,13 +1024,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           const parsed = z.object({ action: z.enum(["dispatch", "hand_off", "returns", "approve", "grants-list", "grants-add", "grants-remove"]), data: z.record(z.string(), z.unknown()), origin: targetSchema.omit({ source: true, session: true }) }).strict().parse(data);
           result = await conductorCall(parsed.action, parsed.data, parsed.origin, () => executeConductor(parsed.action, parsed.data, parsed.origin));
         } else if (url.pathname === "/v1/tasks/launch") {
-          result = await launches.run(async () => launchTaskRoute(modules.store, selectedServer(url), data));
+          taskWriteRetired();
         } else if (url.pathname === "/v1/tasks/save") {
-          result = saveTaskRoute(modules.store, data);
+          taskWriteRetired();
         } else if (url.pathname === "/v1/tasks/create") {
-          result = createTaskRoute(modules.store, data);
+          taskWriteRetired();
         } else if (url.pathname === "/v1/tasks/update") {
-          result = updateTaskRoute(modules.store, data);
+          taskWriteRetired();
         } else if (url.pathname === "/v1/subagents/resume") {
           result = await fanoutMessages.send(data);
         } else if (url.pathname === "/v1/subagents/archive-finished") {

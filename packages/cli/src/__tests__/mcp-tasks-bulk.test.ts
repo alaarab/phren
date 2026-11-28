@@ -5,6 +5,7 @@ import { makeTempDir, grantAdmin } from "../test-helpers.js";
 import { register } from "../tools/tasks.js";
 import type { McpContext } from "../tools/types.js";
 import { TASKS_FILENAME } from "../data/access.js";
+import { TASKS_RETIRED_CODE, TASKS_RETIRED_MESSAGE } from "../task/retired.js";
 
 type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
 
@@ -42,16 +43,17 @@ const SAMPLE_TASKS = `# testproj tasks
 
 `;
 
-describe("add_task bulk (array): error field when nothing is added", () => {
+describe("bulk task writes are retired", () => {
   let tmp: { path: string; cleanup: () => void };
   let server: ReturnType<typeof makeMockServer>;
+  const taskFile = () => path.join(tmp.path, PROJECT, TASKS_FILENAME);
 
   beforeEach(() => {
-    tmp = makeTempDir("mcp-tasks-bulk-add-");
+    tmp = makeTempDir("mcp-tasks-bulk-retired-");
     grantAdmin(tmp.path);
     const projectDir = path.join(tmp.path, PROJECT);
     fs.mkdirSync(projectDir, { recursive: true });
-    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_TASKS);
+    fs.writeFileSync(taskFile(), SAMPLE_TASKS);
 
     const ctx: McpContext = {
       phrenPath: tmp.path,
@@ -69,46 +71,18 @@ describe("add_task bulk (array): error field when nothing is added", () => {
     tmp.cleanup();
   });
 
-  it("returns ok:false and an error field when all items are empty strings", async () => {
+  it("add_task returns tasks-retired even when every item is empty", async () => {
     const res = parseResult(
       await server.call("add_task", { project: PROJECT, item: ["", "   "] })
     );
 
     expect(res.ok).toBe(false);
-    expect(typeof res.error).toBe("string");
-    expect(res.error.length).toBeGreaterThan(0);
-    expect(res.data.added).toHaveLength(0);
-  });
-});
-
-describe("complete_task bulk (array): error field when nothing is completed", () => {
-  let tmp: { path: string; cleanup: () => void };
-  let server: ReturnType<typeof makeMockServer>;
-
-  beforeEach(() => {
-    tmp = makeTempDir("mcp-tasks-bulk-complete-");
-    grantAdmin(tmp.path);
-    const projectDir = path.join(tmp.path, PROJECT);
-    fs.mkdirSync(projectDir, { recursive: true });
-    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), SAMPLE_TASKS);
-
-    const ctx: McpContext = {
-      phrenPath: tmp.path,
-      profile: "",
-      db: () => { throw new Error("unused"); },
-      rebuildIndex: async () => {},
-      updateFileInIndex: () => {},
-      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
-    };
-    server = makeMockServer();
-    register(server as any, ctx);
+    expect(res.errorCode).toBe(TASKS_RETIRED_CODE);
+    expect(res.error).toBe(TASKS_RETIRED_MESSAGE);
+    expect(fs.readFileSync(taskFile(), "utf8")).toBe(SAMPLE_TASKS);
   });
 
-  afterEach(() => {
-    tmp.cleanup();
-  });
-
-  it("returns ok:false and an error field when no items match", async () => {
+  it("complete_task returns tasks-retired instead of reporting no matches", async () => {
     const res = parseResult(
       await server.call("complete_task", {
         project: PROJECT,
@@ -117,7 +91,8 @@ describe("complete_task bulk (array): error field when nothing is completed", ()
     );
 
     expect(res.ok).toBe(false);
-    expect(typeof res.error).toBe("string");
-    expect(res.error.length).toBeGreaterThan(0);
+    expect(res.errorCode).toBe(TASKS_RETIRED_CODE);
+    expect(res.error).toBe(TASKS_RETIRED_MESSAGE);
+    expect(fs.readFileSync(taskFile(), "utf8")).toBe(SAMPLE_TASKS);
   });
 });
