@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as yaml from "js-yaml";
 import { z } from "zod";
 import { VERSION } from "../package-metadata.js";
-import type { ModuleManifest, ModuleRoute, ModuleTool, ModulesConfig } from "./manifest.js";
+import type { ModuleManifest, ModuleRoute, ModulesConfig, ModuleTool } from "./manifest.js";
 
 const core = (names: string[]): ModuleTool[] => names.map(name => ({ name, profiles: ["core", "full"] }));
 const full = (names: string[]): ModuleTool[] => names.map(name => ({ name, profiles: ["full"] }));
@@ -174,6 +174,29 @@ export function readConfig(store: string): ModulesConfig | undefined {
   return validateConfig(config, true);
 }
 
+/**
+ * Module names that shipped in older CLIs and were removed. Computers still on
+ * those versions rewrite every module they know into modules.yaml, so a retired
+ * name is treated as known: ignored without a warning and dropped on the next
+ * write instead of resurfacing a warning on every command.
+ */
+export const RETIRED_MODULES: ReadonlySet<string> = new Set(["tasks"]);
+
+function dropRetired(config: ModulesConfig): void {
+  const drop = (values: Record<string, boolean> | undefined): void => {
+    if (!values) return;
+    for (const name of Object.keys(values)) if (RETIRED_MODULES.has(name)) delete values[name];
+  };
+  drop(config.enabled);
+  if (config.enabled && Object.keys(config.enabled).length === 0) delete config.enabled;
+  for (const [name, profile] of Object.entries(config.profiles ?? {})) {
+    drop(profile.enabled);
+    if (profile.enabled && Object.keys(profile.enabled).length === 0) delete profile.enabled;
+    if (Object.keys(profile).length === 0) delete config.profiles![name];
+  }
+  if (config.profiles && Object.keys(config.profiles).length === 0) delete config.profiles;
+}
+
 /** Warned once per process so serve's migrate-then-snapshot double read stays one line. */
 const warnedUnknownModules = new Set<string>();
 
@@ -186,6 +209,9 @@ export function validateConfig(input: unknown, warnUnknown = false): ModulesConf
   const parsed = configSchema.safeParse(input);
   if (!parsed.success) throw new Error("Invalid .config/modules.yaml: expected version: 1 and boolean module overrides.");
   const config = parsed.data;
+  // Dropping here means the same config object that reads hand back is what
+  // writes dump, so a retired key never reaches a file this build writes.
+  dropRetired(config);
   const names = new Set(BUILTIN_MODULES.map(module => module.name));
   const unknown = new Set<string>();
   for (const values of [config.enabled, ...Object.values(config.profiles ?? {}).map(profile => profile.enabled)]) {
