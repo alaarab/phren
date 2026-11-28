@@ -232,7 +232,7 @@ describe("task lifecycle", () => {
     expect(allContexts.some((c) => /Blocked: Command failed: git/.test(c!))).toBe(false);
   });
 
-  it("auto mode still blocks the task on a non-git error", () => {
+  it("auto mode no longer blocks the task on a non-git error while tasks are retired", () => {
     writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
       schemaVersion: 1,
 
@@ -259,8 +259,8 @@ describe("task lifecycle", () => {
     const task = readTasks(tmp.path, project);
     expect(task.ok).toBe(true);
     if (!task.ok) return;
-    const blocked = task.data.items.Active.find((i) => /Disk full/.test(i.context ?? ""));
-    expect(blocked).toBeDefined();
+    const blocked = [...task.data.items.Active, ...task.data.items.Queue].find((i) => /Disk full/.test(i.context ?? ""));
+    expect(blocked).toBeUndefined();
   });
 
   it("auto mode never completes the tracked task after a successful stop", () => {

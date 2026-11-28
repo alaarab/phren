@@ -16,6 +16,7 @@
 import { spawn } from "node:child_process";
 import * as os from "node:os";
 import { insideDreamWindow, type DreamingConfig } from "../config/dreaming.js";
+import { TASKS_RETIRED } from "../task/retired.js";
 import type { DreamSession } from "./dream-schedule.js";
 
 export { readAuditLastRun, type AuditLastRun } from "../task/audit.js";
@@ -134,6 +135,8 @@ export class TaskAuditScheduler {
 
 /** Off with `PHREN_TASK_AUDIT=off`; otherwise the ticker runs and each project's dreaming config decides. */
 export function taskAuditEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  // tasks retired (0.4.0)
+  if (TASKS_RETIRED) return false;
   return env.PHREN_TASK_AUDIT?.trim().toLowerCase() !== "off";
 }
 

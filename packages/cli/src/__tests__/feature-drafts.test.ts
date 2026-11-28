@@ -134,21 +134,17 @@ describe("Feature 4: stack-ranked priorities", () => {
     expect(gravitated[0].rank).toBeUndefined();
   });
 
-  it("phren task reorder moves a task to a new rank", () => {
-    const { exitCode, stdout, stderr } = runCli(
+  it("phren task reorder is retired and leaves the task unchanged", () => {
+    const { exitCode, stderr } = runCli(
       ["task", "reorder", project, "Add rate limiting", "--rank=1"],
       { PHREN_PATH: tmp.path, PHREN_ACTOR: "test" },
     );
-    expect(exitCode).toBe(0);
-    void stdout; void stderr;
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toContain("Phren tasks are retired");
 
-    // After reorder, rank:1 should now belong to "Add rate limiting"
     const content = readTasks(tmp.path, project);
-    expect(content).toContain("Add rate limiting");
-    // rank:1 should now appear near "Add rate limiting"
-    const lines = content.split("\n");
-    const rateLimitLine = lines.find((l) => l.includes("Add rate limiting")) ?? "";
-    expect(rateLimitLine).toContain("rank:1");
+    const rateLimitLine = content.split("\n").find((l) => l.includes("Add rate limiting")) ?? "";
+    expect(rateLimitLine).not.toContain("rank:1");
   });
 
   it("phren task reorder exits non-zero when project is missing", () => {

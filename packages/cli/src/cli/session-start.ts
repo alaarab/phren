@@ -137,7 +137,7 @@ export function getSessionStartOnboardingNotice(
   return [
     "<phren-notice>",
     `Phren onboarding: project "${activeProject}" is tracked but memory is still empty.`,
-    "Capture one finding with `add_finding` and one task with `add_task` to seed future SessionStart context.",
+    "Capture one finding with `add_finding` to seed future SessionStart context.",
     "Run `phren doctor` if setup seems incomplete.",
     "<phren-notice>",
     "",

@@ -7,6 +7,7 @@ import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 import { clearProjectConfigCache, getProjectRemote } from "../project-config.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { MEMORY_LIMITS, memoryForFiles, memorySearch, projectMemory, saveFinding, completeProjectTask, tasksForBranch } from "./project-memory.js";
+import { TASKS_RETIRED_CODE, TASKS_RETIRED_MESSAGE } from "../task/retired.js";
 
 vi.mock("node:fs", async original => {
   const actual = await original<typeof import("node:fs")>();
@@ -229,7 +230,10 @@ describe("POST /v1/projects/:project/tasks/complete", () => {
     expect(() => completeProjectTask(store, "app", { id: "bid:cccc0002", extra: 1 })).toThrow();
     expect(tasksForBranch(store, "app", "other-work").tasks.map(t => t.id)).toEqual(["bid:cccc0002"]);
     expect((await hookGet("/v1/projects/app/tasks/complete", "GET")).status).toBe(405);
-    expect((await hookGet("/v1/projects/app/tasks/complete", "POST", true, { id: "bid:cccc0002" })).body).toMatchObject({ status: "completed" });
+    const body = await hookGet("/v1/projects/app/tasks/complete", "POST", true, { id: "bid:cccc0002" });
+    expect(body.status).toBe(410);
+    expect(body.body).toEqual({ error: TASKS_RETIRED_MESSAGE, code: TASKS_RETIRED_CODE });
+    expect(tasksForBranch(store, "app", "other-work").tasks.map(t => t.id)).toEqual(["bid:cccc0002"]);
   });
 });
 

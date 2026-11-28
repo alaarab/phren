@@ -9,6 +9,7 @@ import { isLocalComputer } from "./dispatch-hosts.js";
 import type { InboxSource } from "./owner-inbox.js";
 import { openTasks } from "./task-work.js";
 import { isStale, taskLastTouched, taskStaleEnabled, taskTitle } from "../task/session-tasks.js";
+import { TASKS_RETIRED } from "../task/retired.js";
 import { phrenStoreRoot } from "./transcripts.js";
 
 /** The inbox calls its sources every five seconds; recompute at most this often. */
@@ -25,6 +26,8 @@ export class StaleTaskSources {
     private readonly local: (computer: string) => boolean = computer => isLocalComputer(computer)) {}
 
   sources(): InboxSource[] {
+    // tasks retired (0.4.0): stale tasks no longer reach the owner inbox.
+    if (TASKS_RETIRED) return [];
     if (!taskStaleEnabled()) return [];
     const now = this.now();
     if (this.cache && now - this.cache.at < CACHE_MS) return this.cache.rows;

@@ -36,3 +36,12 @@ An issue reference (`<ref>`) is `repo#N` (the repository may be `owner/name`, `d
 ## MCP tools
 
 `list_issues`, `get_issue`, `create_issue`, `update_issue`, `claim_issue`, `comment_issue` and `close_issue` take a repository (`repo`) or a project (`project`) plus the issue `number`. `list_issues` and `get_issue` are in the core tool profile; the rest are full-profile tools. Their parameters and response shapes are in the [API reference](api-reference.md#issues).
+
+## Retired tasks: what still writes
+
+Phren tasks are retired in 0.4.0. The task tools, commands and Hook routes are
+read-only. These paths still touch `tasks.md`, on purpose:
+
+- Phone store-file sync (`POST /v1/store/file`, `/v1/store/delete`) writes or removes `tasks.md` as an ordinary store file.
+- `phren_admin(action: "import_project")` with `overwrite` restores a project export, including its `tasks.md`.
+- Background archiving of old Done entries still trims `tasks.md`.

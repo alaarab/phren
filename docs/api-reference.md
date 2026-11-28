@@ -2,6 +2,8 @@
 
 Phren exposes 90 MCP tools across 19 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the nine memory tools (`list_issues` and `get_issue` are among them) plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default twelve. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
+Tasks are retired in 0.4.0. `get_tasks` still reads, but every task write returns `tasks-retired`; work is tracked as forge issues (`list_issues`, `create_issue`, `claim_issue`, `comment_issue`) and human actions go to the owner Inbox. See [issues](issues.md).
+
 ## Core profile
 
 | Tool | Does | Stands for (full-profile names) |
@@ -13,9 +15,9 @@ Phren exposes 90 MCP tools across 19 modules in the bundled implementation catal
 | `revise_finding` | `action`: supersede, retract, edit, remove, link, resolve_contradiction, pin, feedback | `supersede_finding`, `retract_finding`, `edit_finding`, `remove_finding`, `link_findings`, `resolve_contradiction`, `pin_memory`, `memory_feedback` |
 | `list_issues` | List forge issues | None |
 | `get_issue` | Read one forge issue | None |
-| `get_tasks` | List tasks | None |
-| `add_task` | Add a task | None |
-| `manage_task` | `action`: complete, update, remove, pin, claim, tidy | `complete_task`, `update_task`, `remove_task`, `pin_task`, `claim_task`, `tidy_done_tasks` |
+| `get_tasks` | List tasks (read-only) | None |
+| `add_task` | **Deprecated, read-only**: returns `tasks-retired` | None |
+| `manage_task` | **Deprecated, read-only**: `action`: complete, update, remove, pin, claim, tidy all return `tasks-retired` | `complete_task`, `update_task`, `remove_task`, `pin_task`, `claim_task`, `tidy_done_tasks` |
 | `session` | `action`: start, end, context, history | `session_start`, `session_end`, `session_context`, `session_history` |
 | `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction, topic summaries (`get_topic_summaries`, `set_topic_summary`), code index (`code_search`, `code_definition`, `code_references`, `code_outline`, `code_usage`), dispatch and hand-off |
 
@@ -1211,9 +1213,17 @@ Close an issue, optionally posting one comment first. Closing an already closed 
 
 ## Task Management
 
+> **Tasks are retired in 0.4.0.** Only `get_tasks` (and the read-only task views) work. Every task write — `add_task`, each `manage_task` action, and the full-profile `complete_task`, `update_task`, `remove_task`, `pin_task`, `claim_task` and `tidy_done_tasks` — returns:
+>
+> ```json
+> { "ok": false, "errorCode": "tasks-retired", "error": "Phren tasks are retired. Use forge issues (phren issue / create_issue) for work and the owner Inbox for owner actions. Run `phren migrate tasks` to move existing tasks." }
+> ```
+>
+> Create, claim and comment on forge issues instead ([issues](issues.md)); put human actions in the owner Inbox. `phren migrate tasks` moves existing tasks.
+
 ### `get_tasks`
 
-Tasks expose independent Human/Agent responsibility, stable-ID prerequisites and derived readiness. See [Task responsibility and prerequisites](task-responsibility.md) for filters, updates, activation and the Hook directory/create APIs, revision-checked text/context save, and task-bound launch.
+Tasks expose independent Human/Agent responsibility, stable-ID prerequisites and derived readiness. See [Task responsibility and prerequisites](task-responsibility.md) for filters, updates, activation and the Hook directory/create APIs, revision-checked text/context save, and task-bound launch. Since 0.4.0 the Hook's task routes keep their reads; `/v1/tasks/create`, `/update`, `/save` and `/launch` answer HTTP 410 with code `tasks-retired`.
 
 Get tasks for a project (or all projects). Supports progressive disclosure: use `summary:true` for lightweight planning views (~200 tokens), pagination for browsing, or `id` with a stable `bid:` hash for single-item fetches during execution. Stable IDs are also used by cross-session task checkpoints.
 
@@ -1232,6 +1242,8 @@ List views show only the latest 300 characters of a long Context (marked `contex
 
 ### `add_task`
 
+**Retired in 0.4.0:** returns `tasks-retired`; nothing is written.
+
 Append one or more tasks to a project's tasks.md file. Adds to the Queue section. Supports batch adds by passing an array.
 
 | Parameter | Type | Required | Description |
@@ -1244,7 +1256,7 @@ A title over 80 characters is still added, and the reply carries one line per
 such title (also in `data.warnings`) suggesting a short title and the context to
 move the rest into. `update_task` with new `text` warns the same way.
 
-Task mutations (`add_task` and every `manage_task` action, including their individual tools in the full profile) add `data.write` alongside the existing result fields:
+Task mutations no longer write: since 0.4.0 `add_task` and every `manage_task` action return `tasks-retired`, so they carry no `data.write` receipt. The receipt format below describes the retired behaviour and future removal.
 
 ```json
 { "path": "/absolute/store/project/tasks.md", "commit": null }
@@ -1255,6 +1267,8 @@ Task mutations (`add_task` and every `manage_task` action, including their indiv
 Scalar and batch writes use the same receipt. Partial batches retain their existing success lists and `errors`. Even a fully rejected batch can rewrite task formatting and then includes a receipt; it still reports `ok: false`. Successful dry runs and no-op operations that do not write return `data.write: null`. Validation failures before a write retain their existing error response without a receipt.
 
 ### `complete_task`
+
+**Retired in 0.4.0:** returns `tasks-retired`; nothing is written.
 
 Move one or more tasks to the Done section by matching text. Supports batch completion by passing an array.
 
@@ -1268,6 +1282,8 @@ When a task is completed, phren clears any checkpoint file associated with that 
 
 ### `remove_task`
 
+**Retired in 0.4.0:** returns `tasks-retired`; nothing is written.
+
 Remove a task from a project's `tasks.md` by matching text or task ID.
 
 | Parameter | Type | Required | Description |
@@ -1276,6 +1292,8 @@ Remove a task from a project's `tasks.md` by matching text or task ID.
 | `item` | string | yes | Exact/partial task text, or task ID like `A1`, `Q3`, `D2`. |
 
 ### `update_task`
+
+**Retired in 0.4.0:** returns `tasks-retired`; nothing is written.
 
 Update a task's text, priority, context, section, GitHub metadata, pin status, or promote it. Also supports work_next (pick highest-priority Queue item) and promote (clear speculative flag). When work_next is true, item is not needed.
 
@@ -1306,6 +1324,8 @@ The `updates` object accepts:
 
 ### `tidy_done_tasks`
 
+**Retired in 0.4.0:** returns `tasks-retired`; nothing is written.
+
 Archive older Done items beyond a keep threshold to keep task lists short.
 
 | Parameter | Type | Required | Description |
@@ -1315,6 +1335,8 @@ Archive older Done items beyond a keep threshold to keep task lists short.
 | `dry_run` | boolean | no | Preview what would change without writing. |
 
 ### `pin_task`
+
+**Retired in 0.4.0:** returns `tasks-retired`; nothing is written.
 
 Pin or unpin a task. Pinned tasks always appear in hook context regardless of priority, so they stay visible across every prompt.
 
@@ -1326,6 +1348,8 @@ Pin or unpin a task. Pinned tasks always appear in hook context regardless of pr
 
 ### `claim_task`
 
+**Retired in 0.4.0:** returns `tasks-retired`; nothing is written. Claim a forge issue with `claim_issue` instead.
+
 Claim a task for this computer, so conductors that are not linked through the Hook do not take the same work. Syncs the store, moves the task to Active with a `Claimed: <computer> <ISO time> [session:<id>]` line under it, then commits and pushes. A task another computer holds is refused; when two claims race, the one that reached the store's remote first wins and the other call returns `heldBy`. Completing a task clears its claim. Conductors skip tasks claimed by other computers.
 
 | Parameter | Type | Required | Description |
@@ -1336,12 +1360,7 @@ Claim a task for this computer, so conductors that are not linked through the Ho
 | `release` | boolean | no | Release this computer's claim and return the task to the Queue. |
 | `force` | boolean | no | Take over another computer's claim once it is more than a day old. |
 
-A claim, `update_task` with `section: "Active"`, `promote` with
-`move_to_active` and `work_next` record the task in the calling session's
-ledger (the `session` parameter, else `CLAUDE_CODE_SESSION_ID` or Codex's
-thread id). When that session then holds more than three Active tasks, the
-reply adds a warning (`data.warning`); the move itself always goes through.
-See [Settling tasks](task-responsibility.md#settling-tasks).
+A claim and the other task moves used to record the task in the calling session's ledger and warn past three Active tasks. Tasks are retired, so nothing is recorded and the Stop hook no longer nags. See [Settling tasks](task-responsibility.md#settling-tasks).
 
 ---
 
@@ -2948,7 +2967,7 @@ trimmed: an add whose title and link exceed 500 characters together returns 400
 and names the length that fits. Open manual items resolve
 on the list tick when a GitHub or gitboy PR merges or closes (`done: PR merged`,
 `done: PR closed without merging`). When the PR read supplies neither outcome,
-a linked Done task also resolves the item (`done: task <bid> is Done`). GitLab
+a linked closed issue also resolves the item. GitLab
 merge requests can be linked for reference. The PR probe refreshes in the
 background. Unmerged closure and Done task evidence must come from a read after
 the latest item update to clear a reopened or edited action. Automatic items

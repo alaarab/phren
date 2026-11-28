@@ -3,6 +3,14 @@
 
 Open-source knowledge layer for AI agents. Published as `@phren/cli` on npm.
 
+Tasks are retired in 0.4.0: work lives in forge issues (`phren issue` /
+`create_issue`, claimed with `claim_issue`; PRs say `Closes repo#N`) and human
+actions go to the owner Inbox. `get_tasks` and the task views still read; every
+task write returns `tasks-retired` with the migration notice. The Stop-hook
+nag, prompt auto-capture, weekly task audit, stale-task inbox source and the
+nightly stale requeue stay in the code gated off by `TASKS_RETIRED`
+(`packages/cli/src/task/retired.ts`). See `docs/issues.md`.
+
 ## Project Location
 
 Source lives at `~phren`. Published to npm. Starter templates are bundled in the package.
@@ -75,9 +83,9 @@ Outside the pnpm workspace:
 | `packages/cli/src/bridge/prompt-deliveries.ts` | Phone messages typed into a pane, by `deliveryId`: bound to the pane (not the conversation), settled by any conversation there through UserPromptSubmit, failed with a reason when the pane closes, the agent restarts or a turn ends without it, kept 24 h in `deliveries.json` as hashes. Backs `/v1/prompt` state, retries and `/v1/prompt/status`. |
 | `packages/cli/src/bridge/codex-thread-origin.ts` | Drops Codex hook callbacks from a nested `codex exec` or a subagent thread (rollout `originator`/`source`), so they never rebind the pane they run in. |
 | `packages/cli/src/bridge/agent-hook-callback.ts` | The agent side of `hook <source>`: reads the agent's payload, applies the tool-call time budget (`withinToolBudget`) and posts it to the daemon's local socket; `agent-hook-asks.ts` holds the pure ask/answer translations (Codex app-server approvals, OpenCode decisions, conductor `dispatch`/`hand_off` asks). Both are re-exported by `agent-hooks.ts`. |
-| `packages/cli/src/task/session-tasks.ts` | Tasks get closed (#934): the per-session task ledger (`.runtime/session-tasks/<session>.json`, written by the MCP task tools), the done / queue / parked / open rule the Stop hook (`cli/session-stop-tasks.ts`) and dispatch returns judge by, the WIP limit (3), the 80-character title advice and the 24 h staleness rule. |
-| `packages/cli/src/bridge/task-stale.ts` | Stale Active tasks as owner-inbox sources (`task-stale:<project>:<bid>`, cached 5 min, at most 20); `dream/stale-tasks.ts` is the scheduled dream's requeue of the same tasks. |
-| `packages/cli/src/task/audit.ts` | `phren task audit`: the bounded weekly audit of a project's open tasks by its helper model (40 per run, rotated by last audit), closing done-with-evidence tasks and noting the rest; `bridge/task-audit-schedule.ts` runs it weekly on the Hook in the dreaming window. |
+| `packages/cli/src/task/session-tasks.ts` | Tasks get closed (#934): the per-session task ledger (`.runtime/session-tasks/<session>.json`, written by the MCP task tools), the done / queue / parked / open rule the Stop hook (`cli/session-stop-tasks.ts`) and dispatch returns judge by, the WIP limit (3), the 80-character title advice and the 24 h staleness rule. Gated off in 0.4.0. |
+| `packages/cli/src/bridge/task-stale.ts` | Stale Active tasks as owner-inbox sources (`task-stale:<project>:<bid>`, cached 5 min, at most 20); `dream/stale-tasks.ts` is the scheduled dream's requeue of the same tasks. Both gated off in 0.4.0. |
+| `packages/cli/src/task/audit.ts` | `phren task audit`: the bounded weekly audit of a project's open tasks by its helper model (40 per run, rotated by last audit), closing done-with-evidence tasks and noting the rest; `bridge/task-audit-schedule.ts` runs it weekly on the Hook in the dreaming window. Ticker off in 0.4.0; the manual command runs dry-run only. |
 | `packages/cli/src/task/work.ts` | Task work links format: the `Work:` record (worker, branch/worktree, PR, issue), forge URL and `bid:` reference parsing (gitboy's closes/mentions rule), the one-line status and the auto-close rule. Pure. |
 | `packages/cli/src/bridge/task-work.ts` | Fills task work links: binds a dispatch to the task its brief names, records and follows its worker from the receipt, links a `dispatch_report`'s pull request. `PHREN_TASK_WORK=off`. |
 | `packages/cli/src/bridge/task-work-live.ts` | Live task work state for `GET /v1/tasks` and `/v1/tasks/detail` (worker from receipts, PR CI/mergeability and issue state through the git host providers' `item`, cached a minute) and the five-minute sweep that links PRs naming a task and closes tasks whose linked PR merged or issue closed. |

@@ -49,11 +49,11 @@ describe("phren task audit handler", () => {
   });
   afterEach(() => { vi.restoreAllMocks(); process.exitCode = 0; store.cleanup(); elsewhere.cleanup(); });
 
-  it("passes the project, trigger and limit to the engine and prints the summary", async () => {
+  it("passes the project and limit to the engine and runs dry-run only while tasks are retired", async () => {
     const out = await run(["--project", "demo", "--scheduled", "--limit", "7"], elsewhere.path, store.path);
     expect(engine.calls[0]).toMatchObject({ project: "demo",
-      opts: { phrenPath: store.path, trigger: "scheduled", dryRun: false, limit: 7 } });
-    expect(out).toMatch(/Task audit r1 for demo: ok.*closed 1/);
+      opts: { phrenPath: store.path, trigger: "scheduled", dryRun: true, limit: 7 } });
+    expect(out).toMatch(/Task audit r1 for demo: ok \(dry run\).*closed 1/);
     expect(process.exitCode ?? 0).toBe(0);
   });
 

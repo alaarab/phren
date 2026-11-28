@@ -6,6 +6,18 @@ import { enableTaskFormat, taskFormatStatus, taskFormatMigrationHint, taskFormat
 import { resolveAllStores, type StoreEntry } from "../store-registry.js";
 import { addTask, completeTask, updateTask, reorderTask, pinTask, removeTask, workNextTask, tidyDoneTasks, linkTaskIssue, promoteTask, resolveTaskItem } from "../data/tasks.js";
 import { buildTaskIssueBody, createGithubIssueForTask, parseGithubIssueUrl, resolveProjectGithubRepo } from "../task/github.js";
+import { TASKS_RETIRED, TASKS_RETIRED_CODE, TASKS_RETIRED_MESSAGE } from "../task/retired.js";
+
+/** Every task write refuses the same way: the code and message on stderr, exit 3. */
+function refuseRetiredWrite(): void {
+  console.error(`${TASKS_RETIRED_CODE}: ${TASKS_RETIRED_MESSAGE}`);
+  process.exitCode = 3;
+}
+
+/** Every subcommand that writes tasks; read-only in 0.4.0. */
+const TASK_WRITE_SUBCOMMANDS = new Set([
+  "add", "complete", "remove", "update", "pin", "reorder", "next", "promote", "tidy", "link", "create-issue",
+]);
 
 function printTaskUsage() {
   console.log("Usage:");
@@ -45,13 +57,26 @@ export async function handleTaskNamespace(args: string[]): Promise<void> {
     return;
   }
 
+  // tasks retired (0.4.0): only reads (list, format, reconcile --dry-run) still work.
+  if (TASKS_RETIRED && TASK_WRITE_SUBCOMMANDS.has(subcommand)) {
+    refuseRetiredWrite();
+    return;
+  }
+
   if (subcommand === "reconcile") {
     const argsRest = args.slice(1);
     if (argsRest.some(arg => arg.startsWith("--") && !["--dry-run", "--apply"].includes(arg)) || argsRest.filter(arg => !arg.startsWith("--")).length > 1 || (argsRest.includes("--dry-run") && argsRest.includes("--apply"))) throw new Error("Usage: phren tasks reconcile [project] [--dry-run | --apply]");
+    // tasks retired (0.4.0): reconcile may read, never apply.
+    if (TASKS_RETIRED && argsRest.includes("--apply")) {
+      refuseRetiredWrite();
+      return;
+    }
     const { reconcileTasks } = await import("../task/reconcile.js");
     const result = await reconcileTasks(getPhrenPath(), { project: argsRest.find(arg => !arg.startsWith("--")), dryRun: argsRest.includes("--dry-run"), apply: argsRest.includes("--apply") });
     console.log(`${result.dryRun ? "Dry run" : "Reconciled"}: ${result.checked} linked tasks checked, ${result.done} done, ${result.review} for review, ${result.linked} links imported, ${result.errors} errors (${result.requests} GitHub reads).`);
-    if (result.dryRun) console.log("No tasks changed. Use --apply to enable updates for future sweeps; --dry-run always previews.");
+    if (result.dryRun) console.log(TASKS_RETIRED
+      ? "No tasks changed. Task reconciliation is read-only now that tasks are retired; move work to forge issues. See docs/issues.md."
+      : "No tasks changed. Use --apply to enable updates for future sweeps; --dry-run always previews.");
     return;
   }
 

@@ -133,26 +133,30 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
     expect(matchingResults).toHaveLength(0);
   });
 
-  it("tasks round-trip: add -> get -> complete -> get", async () => {
+  it("task writes are retired while get_tasks still reads", async () => {
+    writeFile(path.join(tmp.path, "integ-proj", "tasks.md"),
+      "# integ-proj\n\n## Active\n\n- [ ] Implement xylophone frequency calibration module\n\n## Queue\n\n## Done\n");
+
     const addRes = parseResult(await server.call("add_task", {
       project: "integ-proj",
-      item: "Implement xylophone frequency calibration module",
+      item: "Add a second xylophone task",
     }));
-    expect(addRes.ok).toBe(true);
+    expect(addRes.ok).toBe(false);
+    expect(addRes.errorCode).toBe("tasks-retired");
 
     const getRes1 = parseResult(await server.call("get_tasks", {
       project: "integ-proj",
     }));
     expect(getRes1.ok).toBe(true);
-    const queueItems = getRes1.data.items?.Queue || [];
-    const found = queueItems.some((i: any) => (i.line || "").includes("xylophone"));
-    expect(found).toBe(true);
+    const activeItems = getRes1.data.items?.Active || [];
+    expect(activeItems.some((i: any) => (i.line || "").includes("xylophone"))).toBe(true);
 
     const completeRes = parseResult(await server.call("complete_task", {
       project: "integ-proj",
       item: "xylophone frequency",
     }));
-    expect(completeRes.ok).toBe(true);
+    expect(completeRes.ok).toBe(false);
+    expect(completeRes.errorCode).toBe("tasks-retired");
 
     const getRes2 = parseResult(await server.call("get_tasks", {
       project: "integ-proj",
@@ -160,12 +164,13 @@ describe("MCP integration: add_finding -> search_knowledge round-trip", () => {
     }));
     expect(getRes2.ok).toBe(true);
     const doneItems = getRes2.data.items?.Done || [];
-    const foundDone = doneItems.some((i: any) => (i.line || "").includes("xylophone"));
-    expect(foundDone).toBe(true);
+    expect(doneItems.some((i: any) => (i.line || "").includes("xylophone"))).toBe(false);
+    const stillActive = getRes2.data.items?.Active || [];
+    expect(stillActive.some((i: any) => (i.line || "").includes("xylophone"))).toBe(true);
   });
 });
 
-describe("MCP integration: tasks immediately searchable after add", () => {
+describe("MCP integration: retired task writes leave memory unchanged", () => {
   let tmp: { path: string; cleanup: () => void };
   let server: ReturnType<typeof makeMockServer>;
   let db: SqlJsDatabase;
@@ -203,14 +208,15 @@ describe("MCP integration: tasks immediately searchable after add", () => {
     tmp.cleanup();
   });
 
-  it("add_task is visible to search_knowledge after index refresh", async () => {
+  it("a retired add_task writes nothing and adds nothing to search", async () => {
     const addRes = parseResult(await server.call("add_task", {
       project: "search-proj",
       item: "Implement zymurgy fermentation tracking algorithm for brew optimization",
     }));
-    expect(addRes.ok).toBe(true);
+    expect(addRes.ok).toBe(false);
+    expect(addRes.errorCode).toBe("tasks-retired");
 
-    // Rebuild to guarantee visibility (tests the add → file write → index round-trip)
+    // Rebuild to prove the refused write never reached the file or the index.
     db.close();
     db = await buildIndex(tmp.path);
 
@@ -219,8 +225,8 @@ describe("MCP integration: tasks immediately searchable after add", () => {
       project: "search-proj",
     }));
     expect(searchRes.ok).toBe(true);
-    expect(searchRes.data.results.length).toBeGreaterThan(0);
-    const texts = searchRes.data.results.map((r: any) => r.snippet || r.text || "").join(" ");
-    expect(texts.toLowerCase()).toContain("zymurgy");
+    const texts = (searchRes.data.results ?? []).map((r: any) => r.snippet || r.text || "").join(" ");
+    expect(texts.toLowerCase()).not.toContain("zymurgy");
+    expect(fs.existsSync(path.join(tmp.path, "search-proj", "tasks.md"))).toBe(false);
   });
 });

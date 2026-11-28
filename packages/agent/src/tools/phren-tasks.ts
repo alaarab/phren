@@ -1,6 +1,7 @@
 import type { AgentTool } from "./types.js";
 import type { PhrenContext } from "../memory/context.js";
 import { readTasks, completeTasks } from "@phren/cli/data/tasks";
+import { TASKS_RETIRED, TASKS_RETIRED_MESSAGE } from "@phren/cli/task/retired";
 import { incrementSessionCounter } from "../memory/session.js";
 
 export function createPhrenGetTasksTool(ctx: PhrenContext): AgentTool {
@@ -40,7 +41,7 @@ export function createPhrenGetTasksTool(ctx: PhrenContext): AgentTool {
 export function createPhrenCompleteTaskTool(ctx: PhrenContext, sessionId?: string | null): AgentTool {
   return {
     name: "phren_complete_task",
-    description: "Mark a task as completed in phren by matching its text.",
+    description: "Deprecated: phren tasks are retired, so this returns the retirement message and writes nothing. Read tasks with phren_get_tasks; work lives in forge issues.",
     input_schema: {
       type: "object",
       properties: {
@@ -50,6 +51,8 @@ export function createPhrenCompleteTaskTool(ctx: PhrenContext, sessionId?: strin
       required: ["item"],
     },
     async execute(input) {
+      // tasks retired (0.4.0): completion is read-only work now; the read tool above still works.
+      if (TASKS_RETIRED) return { output: TASKS_RETIRED_MESSAGE, is_error: true };
       const item = input.item as string;
       const project = (input.project as string) || ctx.project;
       if (!project) return { output: "No project context. Specify a project name.", is_error: true };

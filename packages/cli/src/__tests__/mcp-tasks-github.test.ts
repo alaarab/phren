@@ -4,6 +4,7 @@ import * as path from "path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
 import { register } from "../tools/tasks.js";
 import { readTasks } from "../data/access.js";
+import { TASKS_RETIRED_CODE, TASKS_RETIRED_MESSAGE } from "../task/retired.js";
 import type { McpContext } from "../tools/types.js";
 
 describe("tasks-github helpers", () => {
@@ -87,7 +88,7 @@ function makeCtx(phrenPath: string): McpContext {
   };
 }
 
-describe("mcp-tasks GitHub issue tools", () => {
+describe("mcp-tasks GitHub issue tools are retired", () => {
   let tmp: { path: string; cleanup: () => void };
   let server: ReturnType<typeof makeMockServer>;
   const project = "phren";
@@ -108,52 +109,19 @@ describe("mcp-tasks GitHub issue tools", () => {
     tmp.cleanup();
   });
 
-  it("links an existing GitHub issue to a task via update_task", async () => {
-    const res = parseResult(await server.call("update_task", {
-      project,
-      item: "bid:deadbeef",
-      updates: {
-        github_issue: 14,
-        github_url: "https://github.com/alaarab/phren/issues/14",
-      },
-    }));
-    expect(res.ok).toBe(true);
-    expect(res.data.githubIssue).toBe(14);
+  const before = () => fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
 
-    const task = readTasks(tmp.path, project);
-    expect(task.ok).toBe(true);
-    if (!task.ok) return;
-    expect(task.data.items.Queue[0].githubIssue).toBe(14);
-    expect(task.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
-  });
-
-  it("says item is a top-level parameter when it is nested inside updates", async () => {
-    const res = parseResult(await server.call("update_task", {
-      project,
-      updates: { item: "bid:deadbeef", section: "Active" },
-    }));
+  it.each([
+    { name: "links an existing GitHub issue", updates: { github_issue: 14, github_url: "https://github.com/alaarab/phren/issues/14" } },
+    { name: "nests item inside updates", updates: { item: "bid:deadbeef", section: "Active" } },
+    { name: "creates and links an issue", updates: { create_issue: true } },
+  ])("update_task returns tasks-retired when it $name", async ({ updates }) => {
+    const source = before();
+    const res = parseResult(await server.call("update_task", { project, item: "bid:deadbeef", updates }));
     expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/item is a top-level parameter/);
-    const task = readTasks(tmp.path, project);
-    expect(task.ok && task.data.items.Queue).toHaveLength(1);
-  });
-
-  it("creates and links a GitHub issue via update_task", async () => {
-    const res = parseResult(await server.call("update_task", {
-      project,
-      item: "bid:deadbeef",
-      updates: {
-        create_issue: true,
-      },
-    }));
-    expect(res.ok).toBe(true);
-    expect(res.data.issue_number).toBe(14);
-    expect(res.data.issue_url).toBe("https://github.com/alaarab/phren/issues/14");
-
-    const task = readTasks(tmp.path, project);
-    expect(task.ok).toBe(true);
-    if (!task.ok) return;
-    expect(task.data.items.Queue[0].githubIssue).toBe(14);
-    expect(task.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
+    expect(res.errorCode).toBe(TASKS_RETIRED_CODE);
+    expect(res.error).toBe(TASKS_RETIRED_MESSAGE);
+    expect(before()).toBe(source);
+    expect(readTasks(tmp.path, project)).toMatchObject({ ok: true });
   });
 });

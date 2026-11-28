@@ -29,6 +29,7 @@ import {
   promoteTask,
 } from "../data/access.js";
 import { applyGravity, workNextTaskItem } from "../data/tasks.js";
+import { TASKS_RETIRED, tasksRetiredPayload } from "../task/retired.js";
 import { currentSessionId, recordSessionTask, sessionActiveCount, taskTitle, titleAdvice, TITLE_LIMIT, wipWarning } from "../task/session-tasks.js";
 import { captureTaskWrites } from "../data/task-receipts.js";
 import {
@@ -358,7 +359,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     "add_task",
     {
       title: "◆ phren · add task",
-      description: "Append one or more tasks to a project's tasks.md file. Adds to the Queue section. Pass a single string or an array of strings. Keep titles under 80 characters; move details to the task's context.",
+      description: "Deprecated: tasks are retired in 0.4.0, so this returns `tasks-retired` and writes nothing. Use `create_issue` for work and the owner Inbox for owner actions. (Retained description: append one or more tasks to a project's tasks.md file, to the Queue section; keep titles under 80 characters and move details to the task's context.)",
       inputSchema: z.object({
         project: z.string().describe("Project name (must match a directory in your phren)."),
         item: z.preprocess(
@@ -369,6 +370,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, item, scope }) => {
+      // tasks retired (0.4.0)
+      if (TASKS_RETIRED) return mcpResponse(tasksRetiredPayload());
       // Resolve store-qualified project names (e.g., "team/forge")
       let targetPhrenPath: string;
       let project: string;
@@ -422,6 +425,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, item, sessionId }) => {
+      // tasks retired (0.4.0)
+      if (TASKS_RETIRED) return mcpResponse(tasksRetiredPayload());
       const resolved = resolveStoreForProject(ctx, projectInput);
       const project = resolved.project;
       const targetPath = resolved.phrenPath;
@@ -493,6 +498,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, item }) => {
+      // tasks retired (0.4.0)
+      if (TASKS_RETIRED) return mcpResponse(tasksRetiredPayload());
       const resolved = resolveStoreForProject(ctx, projectInput);
       const project = resolved.project;
       const targetPath = resolved.phrenPath;
@@ -553,6 +560,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, item, updates: given }) => {
+      // tasks retired (0.4.0)
+      if (TASKS_RETIRED) return mcpResponse(tasksRetiredPayload());
       // A caller that nests item inside updates would otherwise hear only that item is missing.
       const { item: misplacedItem, ...updates } = given;
       if (misplacedItem !== undefined) {
@@ -728,6 +737,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, keep, dry_run }) => {
+      // tasks retired (0.4.0)
+      if (TASKS_RETIRED) return mcpResponse(tasksRetiredPayload());
       const resolved = resolveStoreForProject(ctx, projectInput);
       const project = resolved.project;
       const targetPath = resolved.phrenPath;
@@ -759,6 +770,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, item, session, release, force }) => {
+      // tasks retired (0.4.0)
+      if (TASKS_RETIRED) return mcpResponse(tasksRetiredPayload());
       const resolved = resolveStoreForProject(ctx, projectInput);
       const project = resolved.project;
       const targetPath = resolved.phrenPath;
@@ -799,6 +812,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, item, unpin: shouldUnpin }) => {
+      // tasks retired (0.4.0)
+      if (TASKS_RETIRED) return mcpResponse(tasksRetiredPayload());
       const resolved = resolveStoreForProject(ctx, projectInput);
       const project = resolved.project;
       const targetPath = resolved.phrenPath;

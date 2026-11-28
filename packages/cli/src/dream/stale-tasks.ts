@@ -6,6 +6,7 @@
 import { readTasks, updateTask } from "../data/tasks.js";
 import { taskWriteDenied } from "../task/write-access.js";
 import { isStale, taskLastTouched, taskStaleEnabled, taskTitle } from "../task/session-tasks.js";
+import { TASKS_RETIRED } from "../task/retired.js";
 
 /** A task this run returned to the Queue: its stable id and its line without metadata. */
 export interface RequeuedTask { stableId: string; title: string }
@@ -13,6 +14,8 @@ export interface RequeuedTask { stableId: string; title: string }
 const dayOf = (at: number) => new Date(at).toISOString().slice(0, 10);
 
 export function requeueStaleTasks(phrenPath: string, project: string, now: Date): { requeued: RequeuedTask[]; errors: number } {
+  // tasks retired (0.4.0): the nightly dream no longer moves tasks.
+  if (TASKS_RETIRED) return { requeued: [], errors: 0 };
   if (!taskStaleEnabled() || taskWriteDenied(phrenPath, project, "update_task")) return { requeued: [], errors: 0 };
   const doc = readTasks(phrenPath, project);
   if (!doc.ok) return { requeued: [], errors: 0 };

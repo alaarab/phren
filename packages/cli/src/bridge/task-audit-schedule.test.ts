@@ -103,11 +103,10 @@ describe("the audit command and its flag", () => {
     });
   });
 
-  it("is on unless PHREN_TASK_AUDIT=off", () => {
-    expect(taskAuditEnabled()).toBe(true);
-    expect(taskAuditEnabled({})).toBe(true);
+  it("is off now that tasks are retired, whatever the flag says", () => {
+    expect(taskAuditEnabled()).toBe(false);
+    expect(taskAuditEnabled({})).toBe(false);
+    expect(taskAuditEnabled({ PHREN_TASK_AUDIT: "on" })).toBe(false);
     expect(taskAuditEnabled({ PHREN_TASK_AUDIT: "off" })).toBe(false);
-    expect(taskAuditEnabled({ PHREN_TASK_AUDIT: "OFF " })).toBe(false);
-    expect(taskAuditEnabled({ PHREN_TASK_AUDIT: "on" })).toBe(true);
   });
 });

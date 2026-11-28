@@ -141,19 +141,12 @@ exit 2
       expect(fs.readFileSync(file, "utf8")).toBe(original);
       const firstCalls = fs.readFileSync(calls, "utf8");
       const applied = await reconcileTasks(temp.path, { apply: true });
-      expect(applied).toMatchObject({ dryRun: false, done: 3, review: 2, requests: 0 });
-      const doc = readTasks(temp.path, "library");
-      if (!doc.ok) throw new Error(doc.error);
-      expect(doc.data.items.Done.map(i => i.line)).toEqual(expect.arrayContaining(["Implement parser", "Branch work", "A1"]));
-      expect(doc.data.items.Done[0].links?.evidence?.[0]).toContain(`${"a".repeat(40)} 2026-10-30T12:00:00Z`);
-      expect(doc.data.items.Active.find(i => i.line === "Check result")?.links?.review).toBe("merged, verify");
-      expect(doc.data.items.Active.find(i => i.line === "Closed work")?.links?.review).toBe("closed, review");
-      expect(doc.data.items.Active.some(i => i.line === "Fork branch")).toBe(true);
-      expect(doc.data.items.Active.find(i => i.line === "Partially linked branches")?.links?.prs).toEqual([]);
-      expect(doc.data.items.Active.find(i => i.line === "Unlinked task")?.links).toBeUndefined();
-      expect(doc.data.items.Active.find(i => i.line.includes("needs owner"))?.links).toBeUndefined();
+      expect(applied).toMatchObject({ dryRun: true, done: 3, review: 2, requests: 0 });
+      // tasks retired: apply is refused, so nothing is written and no opt-in is saved.
+      expect(fs.readFileSync(file, "utf8")).toBe(original);
+      expect(fs.existsSync(path.join(temp.path, ".config", "task-reconcile.json"))).toBe(false);
       const after = fs.readFileSync(file, "utf8");
-      expect(await reconcileTasks(temp.path)).toMatchObject({ dryRun: false, done: 0, review: 0, requests: 0 });
+      expect(await reconcileTasks(temp.path)).toMatchObject({ dryRun: true, done: 3, review: 2, requests: 0 });
       expect(fs.readFileSync(file, "utf8")).toBe(after);
       expect(fs.readFileSync(calls, "utf8")).toBe(firstCalls);
       expect(firstCalls).not.toContain("1234abcd");
@@ -164,7 +157,7 @@ exit 2
       expect(fs.readFileSync(file, "utf8")).toBe(after);
       expect(await reconcileTasks(temp.path)).toMatchObject({ done: 0, requests: 0 });
       vi.stubEnv("TEST_GH_OFFLINE", "0"); vi.setSystemTime(Date.now() + 20 * 60 * 1000);
-      expect(await reconcileTasks(temp.path)).toMatchObject({ done: 0, errors: 0 });
+      expect(await reconcileTasks(temp.path)).toMatchObject({ done: 3, errors: 0 });
       // A nightly sweep must make progress beyond the same 100 open PRs.
       const lines = [];
       for (let n = 1000; n < 1102; n++) {
@@ -176,7 +169,49 @@ exit 2
       vi.setSystemTime(Date.now() + 24 * 60 * 60 * 1000);
       expect(await reconcileTasks(temp.path)).toMatchObject({ requests: 100, done: 1 });
       const progressed = readTasks(temp.path, "library");
-      expect(progressed.ok && progressed.data.items.Done.map(i => i.line)).toContain("Work 1101");
+      expect(progressed.ok && progressed.data.items.Active.map(i => i.line)).toContain("Work 1101");
+      expect(progressed.ok && progressed.data.items.Done).toEqual([]);
+    } finally { temp.cleanup(); }
+  });
+
+  it.skipIf(process.platform === "win32")("never writes after an earlier --apply persisted enabled: true", { timeout: 20_000 }, async () => {
+    const temp = makeTempDir("task-reconcile-enabled-");
+    try {
+      grantAdmin(temp.path);
+      const project = path.join(temp.path, "library");
+      fs.mkdirSync(project);
+      const file = path.join(project, "tasks.md");
+      const original = `# Tasks
+
+## Active
+
+- [ ] Implement parser <!-- bid:1234abcd -->
+  Context: example/library#7
+
+## Queue
+
+## Done
+`;
+      fs.writeFileSync(file, original);
+      fs.mkdirSync(path.join(temp.path, ".config"), { recursive: true });
+      const config = path.join(temp.path, ".config", "task-reconcile.json");
+      fs.writeFileSync(config, JSON.stringify({ enabled: true }));
+      const bin = path.join(temp.path, "bin"); fs.mkdirSync(bin);
+      const fixture = path.join(temp.path, "responses"); fs.mkdirSync(fixture);
+      fs.writeFileSync(path.join(fixture, "pr-7.json"), JSON.stringify(merged));
+      fs.writeFileSync(path.join(bin, "gh"), `#!/bin/sh
+case "$1:$2" in
+  pr:view) exec cat "$TEST_GH_FIXTURE/pr-$3.json" ;;
+esac
+exit 2
+`, { mode: 0o755 });
+      vi.stubEnv("PATH", `${bin}${path.delimiter}${process.env.PATH}`);
+      vi.stubEnv("TEST_GH_FIXTURE", fixture);
+
+      const summary = await reconcileTasks(temp.path);
+      expect(summary).toMatchObject({ dryRun: true, done: 1, review: 0 });
+      expect(fs.readFileSync(file, "utf8")).toBe(original);
+      expect(JSON.parse(fs.readFileSync(config, "utf8"))).toEqual({ enabled: true });
     } finally { temp.cleanup(); }
   });
 });

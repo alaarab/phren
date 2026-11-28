@@ -31,6 +31,7 @@ import {
   TASKS_FILENAME,
   FINDINGS_FILENAME,
 } from "../data/access.js";
+import { TASKS_RETIRED, TASKS_RETIRED_CODE, TASKS_RETIRED_MESSAGE } from "../task/retired.js";
 import { entryScoreKey } from "../governance/scores.js";
 import { isValidProjectName, errorMessage, safeProjectPath } from "../utils.js";
 import { readInstallPreferences, writeInstallPreferences, writeGovernanceInstallPreferences, type InstallPreferences } from "../init/preferences.js";
@@ -939,6 +940,8 @@ function handlePostTopicsUnpin(req: Req, res: Res, url: string, ctx: RouteCtx): 
 
 function handlePostTaskAction(req: Req, res: Res, url: string, ctx: RouteCtx, action: "complete" | "add" | "remove"): void {
   withPostBody(req, res, url, ctx, (parsed) => {
+    // tasks retired (0.4.0): the web UI shows the retired message and writes nothing.
+    if (TASKS_RETIRED) return jsonOk(res, { ok: false, error: TASKS_RETIRED_MESSAGE, errorCode: TASKS_RETIRED_CODE });
     const project = String(parsed.project || "");
     const item = String(parsed.item || "");
     if (!project || !item || !isValidProjectName(project)) return jsonErr(res, "Missing or invalid project/item", 400);
@@ -957,6 +960,8 @@ function handlePostTaskAction(req: Req, res: Res, url: string, ctx: RouteCtx, ac
 
 function handlePostTaskUpdate(req: Req, res: Res, url: string, ctx: RouteCtx): void {
   withPostBody(req, res, url, ctx, (parsed) => {
+    // tasks retired (0.4.0): the web UI shows the retired message and writes nothing.
+    if (TASKS_RETIRED) return jsonOk(res, { ok: false, error: TASKS_RETIRED_MESSAGE, errorCode: TASKS_RETIRED_CODE });
     const project = String(parsed.project || "");
     const item = String(parsed.item || "");
     if (!project || !item || !isValidProjectName(project)) return jsonErr(res, "Missing or invalid project/item", 400);

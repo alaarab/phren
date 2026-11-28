@@ -35,8 +35,8 @@ function task(stableId: string) {
   return [...doc.data.items.Active, ...doc.data.items.Queue, ...doc.data.items.Done].find(entry => entry.stableId === stableId)!;
 }
 
-describe("requeueStaleTasks", () => {
-  it("moves only stale Active tasks to the Queue, releasing their claim and noting why", () => {
+describe("requeueStaleTasks (retired)", () => {
+  it("never moves a stale Active task while tasks are retired", () => {
     project("app", [
       "## Active", "",
       `- [ ] Stale work <!-- bid:aaaaaaaa lastActivity:${OLD} -->`,
@@ -47,15 +47,12 @@ describe("requeueStaleTasks", () => {
       `- [ ] Waiting long <!-- bid:cccccccc lastActivity:${OLD} -->`,
       "",
     ].join("\n"));
-    expect(requeueStaleTasks(root, "app", NOW)).toEqual({ requeued: [{ stableId: "aaaaaaaa", title: "Stale work" }], errors: 0 });
-    const moved = task("aaaaaaaa");
-    expect(moved.section).toBe("Queue");
-    expect(moved.claim).toBeUndefined();
-    expect(moved.context).toBe("Original note; Returned to Queue by the nightly dream on 2026-11-27: Active and untouched since 2026-11-25.");
-    expect(fs.readFileSync(path.join(root, "app", "tasks.md"), "utf8")).not.toContain("Claimed:");
-    expect(task("bbbbbbbb").section).toBe("Active");
-    expect(task("cccccccc").section).toBe("Queue");
-    expect(task("cccccccc").context).toBeUndefined();
+    const before = fs.readFileSync(path.join(root, "app", "tasks.md"), "utf8");
+    expect(requeueStaleTasks(root, "app", NOW)).toEqual({ requeued: [], errors: 0 });
+    expect(fs.readFileSync(path.join(root, "app", "tasks.md"), "utf8")).toBe(before);
+    expect(task("aaaaaaaa").section).toBe("Active");
+    expect(task("aaaaaaaa").claim).toBeDefined();
+    expect(task("aaaaaaaa").context).toBe("Original note");
   });
 
   it("does nothing with PHREN_TASK_STALE=off", () => {
@@ -80,13 +77,13 @@ describe("the nightly dream", () => {
   // Built per test: `root` is reassigned by beforeEach.
   const opts = () => ({ phrenPath: root, now: NOW, runner, collect: { roots: [], projectDirs: [], gitLog: false as const }, config: { enabled: true } });
 
-  it("requeues stale tasks on the scheduled run, even when the dream itself is empty", async () => {
+  it("does not requeue stale tasks on the scheduled run while tasks are retired", async () => {
     project("app", `## Active\n\n- [ ] Stale work <!-- bid:aaaaaaaa lastActivity:${OLD} -->\n`);
     const result = await dream("app", { ...opts(), trigger: "scheduled" });
     expect(result.status).toBe("empty");
-    expect(result.requeued).toBe(1);
-    expect(result.message).toContain("Returned 1 stale task to the Queue.");
-    expect(task("aaaaaaaa").section).toBe("Queue");
+    expect(result.requeued).toBeUndefined();
+    expect(result.message).not.toContain("stale task");
+    expect(task("aaaaaaaa").section).toBe("Active");
   });
 
   it("never moves tasks on a manual dream or a dry run", async () => {

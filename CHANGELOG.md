@@ -13,6 +13,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Dispatches can bind to a forge issue, give workers its closing instructions, and post each reported PR link once per Hook.
 - `phren issue list|show|new|edit|claim|comment|close` and the `list_issues`, `get_issue`, `create_issue`, `update_issue`, `claim_issue`, `comment_issue` and `close_issue` MCP tools.
 
+### Changed
+
+- Phren tasks are retired and read-only. `get_tasks` and the read-only task views still work; `add_task`, every `manage_task` action and the full-profile task writers, `phren task` write subcommands and the Hook's `/v1/tasks/{create,update,save,launch}` routes return code `tasks-retired` (the routes as HTTP 410) with a message pointing to forge issues, the owner Inbox and `phren migrate tasks`. The Stop hook no longer nags about open tasks, the prompt hook no longer captures tasks, the weekly task audit and stale-task inbox source are off, and the conductor, fanout and docs now use forge issues (`phren issue` / `create_issue`, PRs say `Closes repo#N`). See [issues](docs/issues.md).
+
 ## [0.3.100] - 2026-11-27
 
 ### Added

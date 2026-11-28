@@ -8,6 +8,7 @@
 import { redactSecretsForLog } from "../content/secrets.js";
 import { detectProject } from "../shared/index.js";
 import { auditTasks, AUDIT_LIMIT_DEFAULT, type AuditTrigger } from "../task/audit.js";
+import { TASKS_RETIRED } from "../task/retired.js";
 import { isValidProjectName } from "../utils.js";
 
 export const TASK_AUDIT_USAGE = `phren task audit - audit a project's open tasks against its code (issue #934)
@@ -19,7 +20,10 @@ export const TASK_AUDIT_USAGE = `phren task audit - audit a project's open tasks
         touching a task; --scheduled marks a ticker-started run.
 
 The Hook starts this weekly for each project whose dreaming config is enabled
-and whose window is open; PHREN_TASK_AUDIT=off stops that ticker.`;
+and whose window is open; PHREN_TASK_AUDIT=off stops that ticker.
+
+Tasks are retired in 0.4.0: the ticker is off and this command always runs
+dry-run, so it reports verdicts and never changes a task.`;
 
 export const TASK_AUDIT_MAX_LIMIT = 500;
 
@@ -72,7 +76,9 @@ export async function handleTaskAudit(args: string[], phrenPath: string, profile
   const project = parsed.value.project ?? detectProject(phrenPath, process.cwd(), profile) ?? undefined;
   if (!project) return fail("Name the project with --project <name>; this folder is not one of your projects.");
   const trigger: AuditTrigger = parsed.value.scheduled ? "scheduled" : "manual";
-  const result = await auditTasks(project, { phrenPath, trigger, dryRun: parsed.value.dryRun,
+  // tasks retired (0.4.0): an audit may read and report, never change a task.
+  const dryRun = parsed.value.dryRun || TASKS_RETIRED;
+  const result = await auditTasks(project, { phrenPath, trigger, dryRun,
     ...(parsed.value.limit ? { limit: parsed.value.limit } : {}) });
 
   if (parsed.value.json) console.log(JSON.stringify(result, null, 2));
@@ -80,11 +86,11 @@ export async function handleTaskAudit(args: string[], phrenPath: string, profile
     const counts = result.counts && Object.keys(result.counts).length
       ? ` · ${Object.entries(result.counts).filter(([, n]) => n > 0).map(([key, n]) => `${key} ${n}`).join(", ")}` : "";
     const runId = result.runId ? ` ${result.runId}` : "";
-    console.log(`Task audit${runId} for ${project}: ${result.status}${parsed.value.dryRun ? " (dry run)" : ""}${counts}`);
+    console.log(`Task audit${runId} for ${project}: ${result.status}${dryRun ? " (dry run)" : ""}${counts}`);
     if (result.status === "busy") console.log("Another task audit for this project is running.");
     if (result.status === "empty") console.log("No open tasks with a stable ID; nothing to audit.");
     if (result.status === "failed") console.error(result.message);
-    if (parsed.value.dryRun && result.verdicts?.length) console.log(JSON.stringify(result.verdicts, null, 2));
+    if (dryRun && result.verdicts?.length) console.log(JSON.stringify(result.verdicts, null, 2));
   }
   if (result.status === "failed") process.exitCode = 1;
 }
