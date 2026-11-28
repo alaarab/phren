@@ -52,7 +52,7 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("GET /v1/projects/:project/memory", () => {
-  it("returns findings, truths and remote in the gitboy contract", () => {
+  it("returns the gitboy contract with empty task groups even for a legacy store", () => {
     write("app/FINDINGS.md", `# app Findings
 
 ## 2026-07-20
@@ -68,9 +68,10 @@ describe("GET /v1/projects/:project/memory", () => {
     write("app/truths.md", "# app truths\n\n- Ship from main only\n");
     write("app/phren.project.yaml", "remote: https://alice:hunter2@git.example.com/alice/app.git\n");
 
+    write("app/tasks.md", "# app tasks\n\n## Active\n\n- Legacy task\n");
     const memory = projectMemory(store, "app");
     expect(memory).toMatchObject({ project: "app", remote: "https://git.example.com/alice/app.git", truncated: false, truths: [{ text: "Ship from main only" }] });
-    expect(Object.keys(memory).sort()).toEqual(["findings", "project", "remote", "store_id", "truncated", "truths"]);
+    expect(memory.tasks).toEqual({ active: [], queue: [], done: [] });
     // Newest first; the tag becomes the type; the local repo path never leaves.
     expect(memory.findings.map(f => f.id)).toEqual(["fid:22222222", "fid:33333333", "fid:11111111"]);
     expect(memory.findings[2]).toEqual({ id: "fid:11111111", text: "Old cache key collides", type: "pitfall", status: "superseded", created: "2026-07-20",
@@ -84,7 +85,7 @@ describe("GET /v1/projects/:project/memory", () => {
     write("app/FINDINGS.md", "# app Findings\n\n## 2026-07-26\n\n- Served <!-- fid:44444444 -->\n");
     const served = await hookGet("/v1/projects/app/memory");
     expect(served.status).toBe(200);
-    expect(served.body).toMatchObject({ project: "app", findings: [{ id: "fid:44444444", text: "Served" }] });
+    expect(served.body).toMatchObject({ project: "app", tasks: { active: [], queue: [], done: [] }, findings: [{ id: "fid:44444444", text: "Served" }] });
     expect((await hookGet("/v1/projects/app/memory", "POST")).status).toBe(405);
     expect((await hookGet("/v1/projects/app/memory", "GET", false)).status).toBe(404);
     expect((await hookGet("/v1/projects/missing/memory")).status).toBe(404);

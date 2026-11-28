@@ -30,6 +30,7 @@ export interface MemoryFinding {
 export interface ProjectMemory {
   project: string; store_id: string | null; remote: string | null; truncated: boolean;
   findings: MemoryFinding[]; truths: { text: string }[];
+  tasks: { active: []; queue: []; done: [] };
 }
 
 const TAG = new RegExp(`^\\[(${FINDING_TAGS.join("|")})\\]\\s*`, "i");
@@ -91,12 +92,12 @@ export function projectMemory(base: string, rawProject: string): ProjectMemory {
   const allFindings = sortedFindings(root, project, opts);
   const truths = readTruths(root, project).map(text => ({ text: safe(text) }));
 
-
   const truncated = allFindings.length > MEMORY_LIMITS.findings;
   return {
     project, store_id: storeId, remote: opts.projectRemote ?? null, truncated,
     findings: allFindings.slice(0, MEMORY_LIMITS.findings).map(item => finding(item, opts)),
     truths,
+    tasks: { active: [], queue: [], done: [] },
   };
 }
 

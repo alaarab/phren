@@ -268,10 +268,11 @@ F = { "id": string, "text": string, "type": string|null,
 
 ```
 { "project": string, "store_id": string|null, "remote": string|null, "truncated": boolean,
-  "findings": [F], "truths": [{ "text": string }] }
+  "findings": [F], "truths": [{ "text": string }],
+  "tasks": { "active": [], "queue": [], "done": [] } }
 ```
 
-Findings come newest first and are capped at 500. `truncated` is true when the list was cut. `store_id` is the portable store ID when present.
+From 0.4.0, the task groups are always empty. Findings come newest first and are capped at 500. `truncated` is true when the list was cut. `store_id` is the portable store ID when present.
 
 **`GET /v1/projects/:project/memory/files?path=<p>&path=<p>…`** (1 to 500
 paths) returns the findings about those files, for PR annotations and gutter
