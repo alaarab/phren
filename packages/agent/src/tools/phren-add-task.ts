@@ -4,15 +4,14 @@
 import type { AgentTool } from "./types.js";
 import type { PhrenContext } from "../memory/context.js";
 import { addTasks } from "@phren/cli/data/tasks";
+import { TASKS_RETIRED, TASKS_RETIRED_MESSAGE } from "@phren/cli/task/retired";
 
 export function createPhrenAddTaskTool(ctx: PhrenContext, sessionId?: string | null): AgentTool {
   return {
     name: "phren_add_task",
     description:
-      "Add a new task to the phren task list for a project. " +
-      "Use this to track work items discovered during execution that should be addressed later. " +
-      "Good tasks: TODOs found in code, follow-up work, bugs to fix, tech debt. " +
-      "Bad tasks: obvious next steps, tasks you'll complete in this session.",
+      "Deprecated: phren tasks are retired, so this tool returns the retirement message and writes nothing. " +
+      "Use forge issues (`phren issue`, `create_issue`) for work and the owner Inbox for owner actions.",
     input_schema: {
       type: "object",
       properties: {
@@ -33,6 +32,8 @@ export function createPhrenAddTaskTool(ctx: PhrenContext, sessionId?: string | n
       required: ["item"],
     },
     async execute(input) {
+      // tasks retired (0.4.0): work belongs in forge issues, so this tool stops writing.
+      if (TASKS_RETIRED) return { output: TASKS_RETIRED_MESSAGE, is_error: true };
       const item = input.item as string;
       const project = (input.project as string) || ctx.project;
       const priority = (input.priority as string) || "medium";

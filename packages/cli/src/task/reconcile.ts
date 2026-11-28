@@ -11,6 +11,7 @@ import { permissionDeniedError } from "../governance/rbac.js";
 import { renameOverSync } from "../phren-paths.js";
 import { resolveProjectGithubRepo } from "./github.js";
 import { linksFromContext, parsePrLink, prUrl, uniqueLinks, type TaskLinks } from "./merge-links.js";
+import { TASKS_RETIRED } from "./retired.js";
 
 const exec = promisify(execFile);
 const prStateSchema = z.object({ number: z.number().int().positive(), url: z.string(), state: z.enum(["OPEN", "CLOSED", "MERGED"]),
@@ -48,7 +49,8 @@ export async function reconcileTasks(base: string, options: { dryRun?: boolean; 
   return withFileLock(runtime, async () => {
     const config = path.join(base, ".config", "task-reconcile.json");
     const enabled = (readJson(config) as { enabled?: boolean } | undefined)?.enabled === true;
-    const dryRun = options.dryRun === true || (!options.apply && !enabled);
+    // tasks retired (0.4.0): reconcile only previews, even when an earlier --apply persisted `enabled: true`.
+    const dryRun = TASKS_RETIRED || options.dryRun === true || (!options.apply && !enabled);
     const summary: ReconcileSummary = { dryRun, checked: 0, done: 0, review: 0, linked: 0, skipped: 0, errors: 0, requests: 0 };
     const cacheFile = `${runtime}.json`;
     const parsed = cacheSchema.safeParse(readJson(cacheFile));
@@ -147,7 +149,7 @@ export async function reconcileTasks(base: string, options: { dryRun?: boolean; 
     saveJson(progressFile, { offsets: { ...offsets, [scope]: resume } });
     // Runtime cache is bounded and local; a dry run never changes task files or opts in.
     saveJson(cacheFile, Object.fromEntries(Object.entries(cache).filter(([, value]) => Date.now() - value.at < TTL).slice(-2000)));
-    if (options.apply && !options.dryRun) saveJson(config, { enabled: true });
+    if (!dryRun) saveJson(config, { enabled: true });
     return summary;
   });
 }

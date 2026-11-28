@@ -7,6 +7,7 @@ import {
   type TaskItem,
 } from "../data/access.js";
 import { parseGithubIssueUrl, resolveProjectGithubRepo } from "./github.js";
+import { TASKS_RETIRED } from "./retired.js";
 import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, hasExecutionIntent, hasDiscoveryIntent, hasExplicitTaskSignal, hasSuppressTaskIntent, hasCodeChangeContext, type ProactivityLevel } from "../proactivity.js";
 import { getWorkflowPolicy, projectBudgets, type StoreBudgets } from "../shared/governance.js";
 import { debugLog, sessionMarker } from "../shared.js";
@@ -503,6 +504,8 @@ export function finalizeTaskSession(args: {
   }
 
   if (args.status === "error") {
+    // tasks retired (0.4.0): the Stop-hook error path no longer rewrites tasks.
+    if (TASKS_RETIRED) return;
     // Don't poison the task with transient git infrastructure failures. Common
     // observed pattern: git add -A failing because of file locks / permissions
     // on Windows mounts / sparse-checkout edge cases. The user's task is unrelated;

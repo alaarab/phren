@@ -71,6 +71,7 @@ import { TASK_WORK_TICK_MS, TaskWorkSweeper } from "./task-work-live.js";
 import { DREAM_TICK_MS, DreamScheduler, dreamProjectOf, effectiveDreamSessions, dreamStoreProjects, dreamTickerEnabled, readLastRun, runDreamChild } from "./dream-schedule.js";
 import { readAuditLastRun, TASK_AUDIT_TICK_MS, TaskAuditScheduler, runTaskAuditChild, taskAuditEnabled } from "./task-audit-schedule.js";
 import { getDreamingConfig } from "../config/dreaming.js";
+import { TASKS_RETIRED } from "../task/retired.js";
 import { dailyCanaryDue, runCanary } from "./canary.js";
 import { defaultPhrenPath } from "../shared.js";
 import { capabilitiesForModules, createRouteHandler, effectiveStatusRows, type HookInfo, requireRoute, selectedServer, workspacesReader } from "./server-routes.js";
@@ -427,7 +428,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const taskAuditTimer = taskAudits ? setInterval(() => { countTick("task-audit"); void taskAudits.tick().catch(() => {}); }, TASK_AUDIT_TICK_MS) : undefined;
   // Task work links (task-work.ts): pull requests that name a task are linked to it, and a
   // merged linked pull request or a closed linked issue moves the task to Done.
-  const taskWork = modules.has("tasks") && taskWorkEnabled() ? new TaskWorkSweeper(scheduleStore) : undefined;
+  // tasks retired (0.4.0): the sweeper no longer starts; dispatch links move to issues.
+  const taskWork = !TASKS_RETIRED && modules.has("tasks") && taskWorkEnabled() ? new TaskWorkSweeper(scheduleStore) : undefined;
   const taskWorkTimer = taskWork ? setInterval(() => { countTick("task-work"); void taskWork.tick().catch(() => {}); }, TASK_WORK_TICK_MS) : undefined;
   if (taskWork) setTimeout(() => { void taskWork.tick().catch(() => {}); }, 2 * 60_000).unref();
   // Off unless PHREN_CANARY_DAILY=1 or `phren canary --daily on`.

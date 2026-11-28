@@ -245,8 +245,7 @@ permission prompt: say so and point the owner to the phone or the terminal. A
 owner before giving its work to another agent. A `done` reply is the worker's
 own account; check its evidence before saying tests passed or work merged.
 
-A return's work names the issue the worker served and how it stands; a turn
-that ends with its issue still open returns needs-you naming it.
+A return's work names the issue the worker served.
 Briefs ask for ONE summary comment on the issue when the worker finishes, and
 a pull request body that says `Closes <repo>#N`: merging then closes the issue
 on GitHub and gitboy. After a merge, check the issue closed.

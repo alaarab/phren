@@ -57,7 +57,7 @@ import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { resolveFilePath } from "./file-resolve.js";
 import { isMediaPath, readMedia } from "./home-media.js";
 import { storeRoute } from "./memory-store.js";
-import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch, completeProjectTask } from "./project-memory.js";
+import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch } from "./project-memory.js";
 import { PROJECT_GIT_ROUTE, projectGit, projectHostToken } from "./project-git.js";
 import { availablePaneEvidence, childActivity, effectivePaneEvidence } from "./session-evidence.js";
 import { liveWork, markBackground, ownRecord, paneRecord, provisionalWork, recordTitle, replyExcerpt, resolveEffectiveStatus, turnCompletion } from "./session-activity.js";
@@ -557,7 +557,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         else if (route === "memory/files") result = await memoryForFiles(modules.store, project, url.searchParams.getAll("path"));
         else if (route === "memory/search") result = memorySearch(modules.store, project, url.searchParams.get("q") ?? "", Number(url.searchParams.get("limit") ?? "5"));
         else if (route === "tasks") result = tasksForBranch(modules.store, project, url.searchParams.get("branch") ?? "");
-        else if (route === "tasks/complete") result = completeProjectTask(modules.store, project, await body(request));
+        else if (route === "tasks/complete") taskWriteRetired();
         else result = await saveFinding(modules.store, project, await body(request));
       } else if (PROJECT_GIT_ROUTE.test(url.pathname)) {
         const [, project, tokenRoute] = PROJECT_GIT_ROUTE.exec(url.pathname)!;

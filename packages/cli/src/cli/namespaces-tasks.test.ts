@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { grantAdmin, makeTempDir, initTestPhrenRoot } from "../test-helpers.js";
 import { addStoreToRegistry, registerStoreIdentity, registeredStoreIdentity } from "../store-registry.js";
 import { taskFormatStatus } from "../data/task-format.js";
-import { TASKS_RETIRED_MESSAGE } from "../task/retired.js";
+import { TASKS_RETIRED_CODE, TASKS_RETIRED_MESSAGE } from "../task/retired.js";
 import { handleTaskNamespace } from "./namespaces-tasks.js";
 
 describe("phren task format", () => {
@@ -89,7 +89,7 @@ describe("phren task write subcommands are retired", () => {
     const errors: string[] = [];
     const errSpy = vi.spyOn(console, "error").mockImplementation((...a) => { errors.push(a.join(" ")); });
     try { await handleTaskNamespace(args as string[]); } finally { errSpy.mockRestore(); }
-    expect(process.exitCode).toBe(1);
-    expect(errors.join("\n")).toBe(TASKS_RETIRED_MESSAGE);
+    expect(process.exitCode).toBe(3);
+    expect(errors[0]).toBe(`${TASKS_RETIRED_CODE}: ${TASKS_RETIRED_MESSAGE}`);
   });
 });

@@ -9,13 +9,13 @@ import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import {
-  addTask,
+  addTask as addTaskStore,
   addFinding,
   addProjectToProfile,
   TaskItem,
-  completeTask,
+  completeTask as completeTaskStore,
   listProjectCards,
-  pinTask,
+  pinTask as pinTaskStore,
   readTasks,
   readFindings,
   readReviewQueue,
@@ -25,15 +25,16 @@ import {
   saveShellState,
   setMachineProfile,
   ShellState,
-  tidyDoneTasks,
+  tidyDoneTasks as tidyDoneTasksStore,
   canonicalTaskFilePath,
-  unpinTask,
-  updateTask,
-  workNextTask,
+  unpinTask as unpinTaskStore,
+  updateTask as updateTaskStore,
+  workNextTask as workNextTaskStore,
   loadShellState,
   resolveTaskFilePath,
   FINDINGS_FILENAME,
 } from "../data/access.js";
+import { TASKS_RETIRED, TASKS_RETIRED_CODE, TASKS_RETIRED_MESSAGE } from "../task/retired.js";
 import { runtimeFile } from "../shared.js";
 import { handleGovernMemories } from "../cli/govern.js";
 import { runSearch } from "../cli/search.js";
@@ -56,6 +57,30 @@ import {
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
 import type { GraphController } from "./graph/controller.js";
+
+// tasks retired (0.4.0): every task write in the shell reports the retirement and writes nothing.
+const retiredTaskError = () => ({ ok: false as const, error: `${TASKS_RETIRED_CODE}: ${TASKS_RETIRED_MESSAGE}` });
+function addTask(...args: Parameters<typeof addTaskStore>): ReturnType<typeof addTaskStore> {
+  return TASKS_RETIRED ? retiredTaskError() : addTaskStore(...args);
+}
+function completeTask(...args: Parameters<typeof completeTaskStore>): ReturnType<typeof completeTaskStore> {
+  return TASKS_RETIRED ? retiredTaskError() : completeTaskStore(...args);
+}
+function pinTask(...args: Parameters<typeof pinTaskStore>): ReturnType<typeof pinTaskStore> {
+  return TASKS_RETIRED ? retiredTaskError() : pinTaskStore(...args);
+}
+function unpinTask(...args: Parameters<typeof unpinTaskStore>): ReturnType<typeof unpinTaskStore> {
+  return TASKS_RETIRED ? retiredTaskError() : unpinTaskStore(...args);
+}
+function tidyDoneTasks(...args: Parameters<typeof tidyDoneTasksStore>): ReturnType<typeof tidyDoneTasksStore> {
+  return TASKS_RETIRED ? retiredTaskError() : tidyDoneTasksStore(...args);
+}
+function updateTask(...args: Parameters<typeof updateTaskStore>): ReturnType<typeof updateTaskStore> {
+  return TASKS_RETIRED ? retiredTaskError() : updateTaskStore(...args);
+}
+function workNextTask(...args: Parameters<typeof workNextTaskStore>): ReturnType<typeof workNextTaskStore> {
+  return TASKS_RETIRED ? retiredTaskError() : workNextTaskStore(...args);
+}
 
 /** Interface for the shell methods that executePalette needs */
 interface PaletteHost {

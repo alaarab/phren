@@ -9,7 +9,7 @@
 
 - Save knowledge → `add_finding(project, finding)`
 - Recall knowledge → `search_knowledge(query)`
-- Track tasks → `add_task()` / `get_tasks()` / `manage_task(action: "complete")`
+- Track work → create and claim forge issues (`create_issue`, `claim_issue`, `comment_issue`; a PR says `Closes repo#N`); owner actions → the owner Inbox. Phren tasks are retired: `get_tasks` still reads, every task write returns `tasks-retired`.
 - Track sessions → `session(action: "start")` / `session(action: "end")`
 - Anything else (skills, hooks, config, review queue) → `phren_admin(action: …)`; `phren_admin(action: "list_actions")` lists them
 
