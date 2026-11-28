@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 83 MCP tools across 18 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 90 MCP tools across 19 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the nine memory tools (`list_issues` and `get_issue` are among them) plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default twelve. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -11,6 +11,8 @@ Phren exposes 83 MCP tools across 18 modules in the bundled implementation catal
 | `get_project_summary` | A project's summary and counts | None |
 | `add_finding` | Save a finding; `kind: "note"` saves a daily note instead | `add_note` |
 | `revise_finding` | `action`: supersede, retract, edit, remove, link, resolve_contradiction, pin, feedback | `supersede_finding`, `retract_finding`, `edit_finding`, `remove_finding`, `link_findings`, `resolve_contradiction`, `pin_memory`, `memory_feedback` |
+| `list_issues` | List forge issues | None |
+| `get_issue` | Read one forge issue | None |
 | `get_tasks` | List tasks | None |
 | `add_task` | Add a task | None |
 | `manage_task` | `action`: complete, update, remove, pin, claim, tidy | `complete_task`, `update_task`, `remove_task`, `pin_task`, `claim_task`, `tidy_done_tasks` |
@@ -23,7 +25,7 @@ Most tools return structured JSON: `{ ok, message, data?, error? }`. The five co
 
 Responses are held well under the roughly 25,000-token limit Claude Code puts on a tool result. Search, task, findings and summary tools size their own output (see each tool). As a last resort, any response over 60,000 characters is replaced by its message cut short plus `data: { truncated: true, originalChars }` and a note on how to narrow the call. `export_project` is exempt, since an export is only useful whole.
 
-Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, code index, dispatch and hand-off.
+Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, code index, forge issues, dispatch and hand-off.
 
 ## Cross-computer dispatch
 
@@ -1112,6 +1114,98 @@ Copy a note into `FINDINGS.md` and mark the original as promoted without deletin
 | `project` | string | yes | Project name. |
 | `note` | string | yes | Stable `nid:xxxxxxxx` or unambiguous text match. |
 | `findingType` | enum | no | `decision`, `pitfall`, `pattern`, or `bug`. |
+
+---
+
+## Issues
+
+Work lives in forge issues: gitboy repositories and GitHub. Phren reads and writes them through the forge layer described in [Forge issues](issues.md): a repository reference (`owner/name`, `domain/owner/name` or a URL) or a Phren project whose `issues:` setting or checkout names one. `list_issues` and `get_issue` are in the core profile; the rest are full-profile tools. `assignee: "me"` and `claim_issue` use the signed-in forge user, and a claim's computer name is this computer's Phren name. Forge failures come back as `{ ok: false, error, errorCode }` with `errorCode` one of `AUTH`, `NOT_FOUND`, `FORBIDDEN`, `RATE_LIMITED`, `UNAVAILABLE` or `INVALID`; tokens never appear in the message.
+
+### `list_issues`
+
+List issues across one or more repositories, or a project's repository. Defaults to open issues, 50 results (maximum 200), newest update first. A repository that cannot be read is reported in `errors` while the others still return; `data` carries `repos`, `issues` and `errors`. With neither `repos` nor `project`, Phren reads every project that has a resolvable issue repository.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repos` | string[] | no | Repository references: `owner/name`, `domain/owner/name`, or a URL. |
+| `project` | string | no | A Phren project; its `issues:` setting or checkout origin names the repository. With `repos`, it supplies the forge domain for a bare `owner/name`. |
+| `state` | enum | no | `open` (default), `closed` or `all`. |
+| `assignee` | string | no | Only issues assigned to this user; `me` means the signed-in forge user. |
+| `label` | string | no | Only issues with this label. |
+| `search` | string | no | Only issues whose title or body contains this text. |
+| `limit` | number | no | Maximum issues to return (1-200, default 50). |
+
+### `get_issue`
+
+Read one issue by repository and number. Returns its title, body, state, labels, assignees, claim (`claimedBy`: user and computer) and every Markdown checkbox parsed from the body.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repo` | string | one of | Repository reference. |
+| `project` | string | one of | Phren project whose issue repository to use. |
+| `number` | number | yes | Issue number. |
+
+### `create_issue`
+
+Open an issue. `checklist` becomes the managed block between `<!-- phren:checklist -->` and `<!-- /phren:checklist -->` in the body; the rest of the body is kept exactly as given. Missing labels are created on demand.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repo` | string | one of | Repository reference. |
+| `project` | string | one of | Phren project whose issue repository to use. |
+| `title` | string | yes | Issue title. |
+| `body` | string | no | Markdown body. |
+| `checklist` | string[] | no | Steps to add as an unchecked checklist. |
+| `labels` | string[] | no | Labels to set. |
+
+### `update_issue`
+
+Change an issue's title, body, checklist, labels or state. `checklist` is the complete list and replaces the managed block; pass the current items plus your change (the same rule the CLI's `--check-done`/`--check-add` follow). `add_labels` and `remove_labels` change individual labels; use `claim_issue` for a `working-on:<computer>` claim.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repo` | string | one of | Repository reference. |
+| `project` | string | one of | Phren project whose issue repository to use. |
+| `number` | number | yes | Issue number. |
+| `title` | string | no | New title. |
+| `body` | string | no | New Markdown body. |
+| `checklist` | `{text, done?}[]` | no | The complete checklist. |
+| `add_labels` | string[] | no | Labels to add. |
+| `remove_labels` | string[] | no | Labels to remove. |
+| `state` | enum | no | `open` or `closed`. |
+
+### `claim_issue`
+
+Assign the issue to the signed-in user and label it `working-on:<this computer>`, replacing any other `working-on:*` label. `release: true` removes this computer's label and the matching assignment instead. Phren verifies both changes with a fresh read and retries once on a conflict; a claim that does not settle returns `INVALID`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repo` | string | one of | Repository reference. |
+| `project` | string | one of | Phren project whose issue repository to use. |
+| `number` | number | yes | Issue number. |
+| `release` | boolean | no | Release this computer's claim instead of taking one. |
+
+### `comment_issue`
+
+Post one comment on an issue and return its URL in `data.url`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repo` | string | one of | Repository reference. |
+| `project` | string | one of | Phren project whose issue repository to use. |
+| `number` | number | yes | Issue number. |
+| `body` | string | yes | Comment text. |
+
+### `close_issue`
+
+Close an issue, optionally posting one comment first. Closing an already closed issue returns it unchanged and still posts the comment.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `repo` | string | one of | Repository reference. |
+| `project` | string | one of | Phren project whose issue repository to use. |
+| `number` | number | yes | Issue number. |
+| `comment` | string | no | Comment to post as the issue closes. |
 
 ---
 

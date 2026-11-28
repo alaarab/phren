@@ -149,6 +149,16 @@ const TASK_SUBCOMMANDS: Subcommand[] = [
   { name: "audit", usage: "phren task audit [--project <p>] [--scheduled] [--dry-run] [--limit <n>] [--json]", summary: "Audit open tasks against the code (weekly, bounded)" },
 ];
 
+const ISSUE_SUBCOMMANDS: Subcommand[] = [
+  { name: "list", usage: "phren issue list [--repo <ref>]... [--project <p>] [--state open|closed|all] [--assignee me|<user>] [--label <label>] [--search <text>] [--limit <n>] [--json]", summary: "List open issues across one or more repositories" },
+  { name: "show", usage: "phren issue show <ref> [--json]", summary: "Show one issue with its body and checklist" },
+  { name: "new", usage: "phren issue new (--repo <ref>|--project <p>) --title <title> [--body <text>] [--check <step>]... [--label <label>]... [--json]", summary: "Open an issue, optionally with a checklist" },
+  { name: "edit", usage: "phren issue edit <ref> [--title <title>] [--body <text>] [--check-done <n>]... [--check-add <step>]... [--json]", summary: "Change an issue's title, body or checklist" },
+  { name: "claim", usage: "phren issue claim <ref> [--release] [--json]", summary: "Assign an issue to you for this computer, or release it" },
+  { name: "comment", usage: "phren issue comment <ref> <text> [--json]", summary: "Post one comment on an issue" },
+  { name: "close", usage: "phren issue close <ref> [--comment <text>] [--json]", summary: "Close an issue, optionally with a comment" },
+];
+
 const SKILLS_SUBCOMMANDS: Subcommand[] = [
   { name: "list", usage: "phren skills list", summary: "List installed skills" },
   { name: "add", usage: "phren skills add <project> <path>", summary: "Link a skill into a project" },
@@ -603,6 +613,15 @@ export const REGISTRY: Command[] = [
       const { handleTaskNamespace } = await import("./cli/namespaces.js");
       await handleTaskNamespace(args);
     },
+  },
+  {
+    name: "issue",
+    topic: "core",
+    usage: "phren issue <list|show|new|edit|claim|comment|close> [options]",
+    cheatUsage: "phren issue list --project <p>",
+    summary: "Read and update GitHub and gitboy issues",
+    subcommands: ISSUE_SUBCOMMANDS,
+    run: (args, ctx) => import("./cli/issues.js").then(mod => mod.handleIssueCommand(args, ctx.phrenPath(), ctx.profile())),
   },
   {
     name: "finding",

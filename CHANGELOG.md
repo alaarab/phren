@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Forge issues core for GitHub and gitboy, with project repository lookup, checklists, and computer claims.
+- `phren issue list|show|new|edit|claim|comment|close` and the `list_issues`, `get_issue`, `create_issue`, `update_issue`, `claim_issue`, `comment_issue` and `close_issue` MCP tools.
 
 ## [0.3.100] - 2026-11-27
 

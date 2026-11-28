@@ -14,7 +14,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
   {
     schemaVersion: 1, name: "memory", version: VERSION, defaultEnabled: true, requires: [],
     tools: [
-      ...core(["search_knowledge", "get_memory_detail", "get_project_summary", "add_finding", "revise_finding", "session", "phren_admin"]),
+      ...core(["search_knowledge", "get_memory_detail", "get_project_summary", "add_finding", "revise_finding", "session", "phren_admin", "list_issues", "get_issue"]),
       ...full([
         "list_projects", "get_findings", "store_list", "supersede_finding", "retract_finding",
         "resolve_contradiction", "get_contradictions", "edit_finding", "remove_finding", "push_changes",
@@ -26,11 +26,12 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
         "list_hooks", "toggle_hooks", "add_custom_hook", "remove_custom_hook", "get_config", "set_config",
         "get_notes", "add_note", "edit_note", "remove_note", "promote_note", "get_topic_summaries", "set_topic_summary",
         "dream_run", "dream_status", "dream_log", "dream_apply",
+        "create_issue", "update_issue", "claim_issue", "comment_issue", "close_issue",
       ]),
     ],
     cliCommands: [
       "init", "quickstart", "add", "agent", "projects", "search", "status", "doctor", "web-ui", "graph", "export", "shell", "heavy", "reap",
-      "add-finding", "pin", "review", "session-context", "sessions", "finding", "note", "notes",
+      "add-finding", "pin", "review", "session-context", "sessions", "finding", "note", "notes", "issue",
       "search-fragments", "related-docs", "truths", "promote", "skills", "detect-skills", "hooks", "config",
       "maintain", "dream", "consolidation-status", "quality-feedback", "mcp-mode", "hooks-mode", "preset", "snippet",
       "verify", "uninstall", "update", "profile", "store", "team", "modules list", "modules enable", "modules disable",

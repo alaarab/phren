@@ -81,7 +81,7 @@ descendants appear in help or dispatch.
 
 | Module | Default for a new store | Current contributions |
 | --- | --- | --- |
-| `memory` | Required | Findings, notes, truths, review, summaries, search, fragment graph, memory session continuity, skills, governance, project/store configuration, memory lifecycle integration and store sync |
+| `memory` | Required | Findings, notes, truths, review, summaries, search, fragment graph, memory session continuity, forge issues (`phren issue`, the issue MCP tools), skills, governance, project/store configuration, memory lifecycle integration and store sync |
 | `tasks` | Off | Seven task handlers plus `manage_task`; `task`/`tasks`; `tasks.md`, task checkpoints and task UI |
 | `hook` | Off | `bridge` service and phone transport, native agent chat, approvals, workspace control, transcript/subagent reading, files, web previews, usage and simulators |
 | `git` | Off | `auto_extract_findings`, `maintain extract`/`extract-memories`, repository diffs and `/v1/git/*`, change capture and Changes UI |

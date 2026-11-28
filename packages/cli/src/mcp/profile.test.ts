@@ -25,6 +25,8 @@ function fakeModules(register: (name: string, config: ToolConfig, handler: ToolH
   tool("supersede_finding", "Mark a finding superseded.", { project: z.string(), old: z.string(), new: z.string() });
   tool("retract_finding", "Retract a finding.", { project: z.string(), text: z.string() });
   tool("edit_finding", "Edit a finding.", { project: z.string(), id: z.string(), text: z.string() });
+  tool("list_issues", "List forge issues.", { repos: z.array(z.string()).optional(), project: z.string().optional(), state: z.enum(["open", "closed", "all"]).optional() });
+  tool("get_issue", "Read one forge issue.", { repo: z.string().optional(), project: z.string().optional(), number: z.number().int().min(1) });
   tool("get_tasks", "List tasks.", { project: z.string().optional() });
   tool("add_task", "Add a task.", { project: z.string(), text: z.string() });
   tool("complete_task", "Complete a task.", { project: z.string(), task: z.string() });

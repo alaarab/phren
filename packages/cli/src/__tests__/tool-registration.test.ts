@@ -17,6 +17,7 @@ import { register as registerExtract } from "../tools/extract.js";
 import { register as registerConfig } from "../tools/config.js";
 import { register as registerNotes } from "../tools/notes.js";
 import { register as registerSummaries } from "../tools/summaries.js";
+import { register as registerIssues } from "../tools/issues.js";
 import { register as registerCode } from "../tools/code.js";
 import { register as registerDispatch } from "../tools/dispatch.js";
 import { register as registerHelper } from "../tools/helper.js";
@@ -42,6 +43,7 @@ const ALL_REGISTER_FNS = [
   registerConfig,
   registerNotes,
   registerSummaries,
+  registerIssues,
   registerCode,
   registerDispatch,
   registerHelper,
@@ -140,9 +142,9 @@ describe("MCP module enablement", () => {
     rebuildIndex: async () => {}, updateFileInIndex: () => {}, withWriteQueue: async fn => fn(),
   };
   it.each([
-    { names: ["memory", "tasks"], core: 10 },
-    { names: ["memory"], core: 7 },
-    { names: ["memory", "git"], core: 7 },
+    { names: ["memory", "tasks"], core: 12 },
+    { names: ["memory"], core: 9 },
+    { names: ["memory", "git"], core: 9 },
   ])("filters both presentation profiles for $names", async ({ names, core }) => {
     const modules = BUILTIN_MODULES.filter(module => names.includes(module.name));
     for (const profile of ["core", "full"] as const) {

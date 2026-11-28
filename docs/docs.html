@@ -587,6 +587,7 @@
           <div class="sidebar-group-items" data-group="cli">
             <a href="#cli-general" class="sidebar-link sub">General</a>
             <a href="#cli-search" class="sidebar-link sub">Search</a>
+            <a href="#cli-issues" class="sidebar-link sub">Issues</a>
             <a href="#cli-tasks" class="sidebar-link sub">Tasks</a>
             <a href="#cli-findings" class="sidebar-link sub">Findings</a>
             <a href="#cli-projects" class="sidebar-link sub">Projects</a>
@@ -1402,6 +1403,43 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <div class="ref-card">
           <div class="ref-card-name">phren graph [--project &lt;n&gt;]</div>
           <div class="ref-card-desc">Show the fragment knowledge graph.</div>
+        </div>
+
+        <h2 id="cli-issues">Issues <a href="#cli-issues" class="anchor-link">#</a></h2>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue list [--repo &lt;ref&gt;]... [--project &lt;p&gt;] [--state open|closed|all] [--assignee me|&lt;user&gt;] [--label &lt;l&gt;] [--search &lt;q&gt;] [--json]</div>
+          <div class="ref-card-desc">List open issues from GitHub or gitboy repositories, or a project's repository. Without flags it uses the project around the working directory, then every project with a resolvable repository. <a href="issues.md">Forge issues</a></div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue show &lt;ref&gt;</div>
+          <div class="ref-card-desc">Show one issue with its body, labels, assignees, claim and checklist. <code>&lt;ref&gt;</code> is <code>repo#N</code>, a full issue URL, or <code>#N</code> with <code>--repo</code>/<code>--project</code>.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue new (--repo &lt;ref&gt;|--project &lt;p&gt;) --title &lt;t&gt; [--body &lt;b&gt;] [--check "step"]...</div>
+          <div class="ref-card-desc">Open an issue. Each <code>--check</code> adds an unchecked step to the managed checklist block.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue edit &lt;ref&gt; [--title &lt;t&gt;] [--body &lt;b&gt;] [--check-done &lt;n&gt;]... [--check-add "step"]...</div>
+          <div class="ref-card-desc">Change an issue. <code>--check-done</code> numbers the steps <code>show</code> prints; <code>--check-add</code> appends one.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue claim &lt;ref&gt; [--release]</div>
+          <div class="ref-card-desc">Assign the issue to you and label it <code>working-on:&lt;this computer&gt;</code>, or release this computer's claim.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue comment &lt;ref&gt; &lt;text&gt;</div>
+          <div class="ref-card-desc">Post one comment on an issue.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue close &lt;ref&gt; [--comment &lt;text&gt;]</div>
+          <div class="ref-card-desc">Close an issue, optionally with one comment.</div>
         </div>
 
         <h2 id="cli-tasks">Tasks <a href="#cli-tasks" class="anchor-link">#</a></h2>
