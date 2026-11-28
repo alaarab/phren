@@ -2,6 +2,11 @@
   "name": "@phren/code",
   "version": "0.2.15",
   "description": "Optional symbol index for phren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alaarab/phren.git",
+    "directory": "packages/code"
+  },
   "type": "module",
   "exports": {
     ".": {
