@@ -5,7 +5,7 @@ import { object, provider, targetSchema, type Json, type Provider, type Target }
 import { hookOutput, STOP_TASKS_SENT, TOOL_HOOK_BUDGET_MS } from "./hook-fast.js";
 import { underCodexDaemon } from "./codex-daemon.js";
 import { codexAutoReview } from "./codex-review-mode.js";
-import { claudeHeadlessThread, codexForeignThread } from "./thread-origin.js";
+import { claudeHeadlessThread, codexForeignThread, headlessClaudeEnv } from "./thread-origin.js";
 import { terminalPaneFromEnv } from "./terminal.js";
 import { briefId, DISPATCH_ID_ENV } from "./launch-brief.js";
 import { CODEX_SERVER_ENV, codexServerId } from "./codex-servers.js";
@@ -51,8 +51,8 @@ export async function agentHook(source: Provider, elapsed: () => number = () => 
   if (value.agent_id || value.agentId || value.isSidechain || value.is_sidechain) return;
   // A `codex exec` or a subagent inside a Codex pane is not the pane's conversation.
   if (source === "codex" && await codexForeignThread(value.transcript_path).catch(() => false)) return;
-  // So is a headless `claude -p` run inside a Claude pane.
-  if (source === "claude" && await claudeHeadlessThread(value.transcript_path).catch(() => false)) return;
+  // So is a headless `claude -p` run (a helper, a fan-out worker) inside a Claude pane.
+  if (source === "claude" && (headlessClaudeEnv(process.env) || await claudeHeadlessThread(value.transcript_path).catch(() => false))) return;
   const target = targetSchema.parse({ server: place.server, workspace: place.workspace, tab: place.tab,
     pane: place.pane, source, session: value.session_id || value.sessionId });
   const event = String(value.hook_event_name || "SessionStart");

@@ -14,6 +14,7 @@
 import path from "node:path";
 import { claudePromptEntryId } from "./prompt-identity.js";
 import { claudeCallbackFacts, classifyClaudePromptText } from "./input-classification.js";
+import { headlessClaudeEnv, headlessEntrypoint } from "./thread-origin.js";
 
 /** The script's file name in a version's folder, beside `bridge-hook.mjs`. */
 export const FAST_HOOK_FILE = "claude-hook.mjs";
@@ -51,12 +52,27 @@ export function hookOutput(event: string, result: string): string {
 
 /** The forwarder's source, with the ToolUse budget written in. */
 export const fastHookSource = (toolBudgetMs = TOOL_HOOK_BUDGET_MS) => `// Installed by Phren Hook: Claude Code's hook events, forwarded to the running Hook.
+import { open } from "node:fs/promises";
 import { request } from "node:http";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 const env = process.env, source = process.argv[2];
 const hookOutput = ${hookOutput.toString()};
+// A headless run (a helper's or a fan-out worker's \`claude -p\`) inherits the
+// pane's variables; its callbacks are not the pane's conversation (#909), as
+// the bundle's agentHook already decides.
+const headlessClaudeEnv = ${headlessClaudeEnv.toString()};
+const headlessEntrypoint = ${headlessEntrypoint.toString()};
+async function headlessTranscript(file) {
+  if (typeof file !== "string" || !path.isAbsolute(file) || !file.endsWith(".jsonl")) return false;
+  const handle = await open(file, "r").catch(() => undefined);
+  if (!handle) return false;
+  try {
+    const buffer = Buffer.alloc(32768), { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return headlessEntrypoint(buffer.subarray(0, bytesRead).toString("utf8"));
+  } finally { await handle.close(); }
+}
 const claudePromptEntryId = ${claudePromptEntryId.toString()};
 // The same classification the full callback forwards; embedded so this small
 // script never needs the bundle to name a notification as owner input.
@@ -81,6 +97,7 @@ async function forward(place) {
   for await (const chunk of process.stdin) { input += chunk.toString(); if (input.length > 1_048_576) return; }
   const value = plain(JSON.parse(input));
   if (value.agent_id || value.agentId || value.isSidechain || value.is_sidechain) return;
+  if (headlessClaudeEnv(env) || await headlessTranscript(value.transcript_path).catch(() => false)) return;
   const target = { ...place, source, session: value.session_id || value.sessionId };
   const event = String(value.hook_event_name || "SessionStart");
   const dispatchId = (event === "SessionStart" || event === "UserPromptSubmit") && /^[A-Za-z0-9_-]{8,64}$/.test(env.PHREN_DISPATCH_ID ?? "") ? env.PHREN_DISPATCH_ID : undefined;

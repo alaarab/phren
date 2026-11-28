@@ -60,6 +60,10 @@ function sandboxHomeDir(): void {
   // `systemctl --user stop phren-hook.service`. Unset, each falls back to
   // the sandbox home, as on a clean machine.
   for (const name of ["PHREN_BRIDGE_HOME", "PHREN_HERDR_HOME", "PHREN_PROFILE", "PHREN_DISPATCH_ID", "PHREN_CODEX_SERVER"]) delete process.env[name];
+  // A run inside a headless Claude (`claude -p`, a fan-out worker) carries its
+  // markers, and the hook callbacks the tests spawn would then drop every event
+  // as a headless run's rather than the pane's own (thread-origin.ts).
+  for (const name of ["CLAUDE_CODE_ENTRYPOINT", "PHREN_FANOUT_JOB", "PHREN_FANOUT_DIR"]) delete process.env[name];
 }
 
 export async function teardown(): Promise<void> {

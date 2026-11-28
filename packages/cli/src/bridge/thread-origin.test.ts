@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { claudeHeadlessThread, codexForeignThread, foreignMeta, headlessEntrypoint } from "./thread-origin.js";
+import { claudeHeadlessThread, codexForeignThread, foreignMeta, headlessClaudeEnv, headlessEntrypoint } from "./thread-origin.js";
 
 const meta = (fields: string) => `{"timestamp":"2026-10-04T18:38:33Z","type":"session_meta","payload":{"id":"01a10973","cwd":"/tmp/x",${fields},"base_instructions":"${"x".repeat(8000)}"}}\n`;
 
@@ -45,5 +45,14 @@ describe("Claude callbacks from headless runs inside a pane", () => {
       expect(await claudeHeadlessThread(path.join(root, "missing.jsonl"))).toBe(false);
       expect(await claudeHeadlessThread(undefined)).toBe(false);
     } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("are told apart by their environment before any transcript exists", () => {
+    for (const entrypoint of ["sdk-cli", "sdk-ts", "sdk-py"]) expect(headlessClaudeEnv({ CLAUDE_CODE_ENTRYPOINT: entrypoint })).toBe(true);
+    expect(headlessClaudeEnv({ PHREN_FANOUT_JOB: "claude-0123" })).toBe(true);
+    expect(headlessClaudeEnv({ PHREN_FANOUT_DIR: "/store/.runtime/agent-fanouts/claude-0123" })).toBe(true);
+    expect(headlessClaudeEnv({ CLAUDE_CODE_ENTRYPOINT: "cli" })).toBe(false);
+    expect(headlessClaudeEnv({ CLAUDE_CODE_ENTRYPOINT: "claude-desktop" })).toBe(false);
+    expect(headlessClaudeEnv({})).toBe(false);
   });
 });

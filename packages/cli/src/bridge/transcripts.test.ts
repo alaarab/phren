@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -182,6 +182,35 @@ describe("child agent relationships", () => {
       state: "running" as const, startedAt: "2026-09-19T19:00:01.000Z", children: [] };
     expect(publicChildAgents([worker])[0]).toMatchObject({ startedAt: worker.startedAt });
     expect(publicChildAgents([{ ...worker, startedAt: undefined }])[0]).not.toHaveProperty("startedAt");
+  });
+
+  // #909: a lead's workers waiting for a worker slot have only a queue ticket,
+  // and a lead whose transcript the Hook cannot find still has its workers.
+  it("lists a lead's queued workers under it, even without its transcript", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-queued-"));
+    const lead = "eeeeeeee-5555-4555-8555-555555555555";
+    vi.stubEnv("PHREN_SLOTS_DIR", root); vi.stubEnv("PHREN_PATH", path.join(root, "store")); vi.stubEnv("CLAUDE_CONFIG_DIR", path.join(root, "claude"));
+    await mkdir(path.join(root, "workers"));
+    await writeFile(path.join(root, "workers", "1795000000001-aaaaaaaaaaaa.json"), JSON.stringify({ id: "1795000000001-aaaaaaaaaaaa", pid: process.pid,
+      priority: 1, createdAt: 1_795_000_000_000, label: "ios issues (sol)", state: "waiting",
+      worker: { parent: { provider: "claude", session: lead }, provider: "codex", model: "gpt-6.2-sol" } }));
+    await writeFile(path.join(root, "workers", "1795000000002-bbbbbbbbbbbb.json"), JSON.stringify({ id: "1795000000002-bbbbbbbbbbbb", pid: process.pid,
+      priority: 1, createdAt: 1_795_000_000_500, label: "picker job", state: "waiting", worker: { parent: { provider: "claude", session: lead } } }));
+    try {
+      const tree = await childAgentTree("claude", lead);
+      expect(publicChildAgents(tree)).toEqual([
+        { id: expect.stringMatching(/^[a-f0-9]{32}$/), provider: "codex", model: "gpt-6.2-sol", path: "ios issues (sol)", callId: expect.stringMatching(/^fanout:/),
+          state: "running", queued: true, queuedAt: new Date(1_795_000_000_000).toISOString(), children: [] },
+        // The picker has not chosen a harness: Phren's queue holds it.
+        { id: expect.stringMatching(/^[a-f0-9]{32}$/), provider: "phren", path: "picker job", callId: expect.stringMatching(/^fanout:/),
+          state: "running", queued: true, queuedAt: new Date(1_795_000_000_500).toISOString(), children: [] },
+      ]);
+      // Nothing to open yet: a queued worker has no transcript.
+      expect(childAgent(tree, tree[0].id)).toBeUndefined();
+      // With no workers at all, a missing transcript is still the error it was.
+      await rm(path.join(root, "workers"), { recursive: true });
+      await expect(childAgentTree("claude", lead)).rejects.toThrow();
+    } finally { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
   });
 
   it("builds a bounded tree from explicit Codex start/completion events", async () => {

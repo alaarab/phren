@@ -13,7 +13,7 @@ import { BridgeError, object, objects, sessionId, type Json, type Provider, type
 import { materializeCodexThread, materializedRoot } from "./codex-threads.js";
 import { materializeOpencodeSession, opencodeSessionsRoot } from "./opencode-service.js";
 import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./changes.js";
-import { fanoutChildren } from "./fanouts.js";
+import { fanoutChildren, queuedFanouts } from "./fanouts.js";
 import { claudeChildAgents, claudePromptIdentity, visibleClaudeEvent, type ClaudeQueueState } from "./transcript-claude.js";
 import { childTranscriptBelongsTo, codeModeOutputCall, directChildAgents, findCodeModeCall, projectCodeModeOutput, projectCodexRow,
   rewriteProjectedOutput, visibleCodexEvent } from "./transcript-codex.js";
@@ -32,6 +32,10 @@ export interface ChildAgentRelation {
   /** Present only when a source supplies a validated worker launch time. */
   startedAt?: string;
   finishedAt?: string;
+  /** A fan-out worker waiting for this computer's worker budget: `state` is
+   * `running` for older phones, which have no queued state. */
+  queued?: true;
+  queuedAt?: string;
   /** Fan-out manifests and Claude child transcripts can name a model. */
   model?: string;
   fanout?: { resumable: boolean };
@@ -58,12 +62,21 @@ export async function childAgentTree(source: Provider, session: string, depth = 
   const identity = `${computer}\0${source}\0${session}`;
   if (depth >= 4 || seen.size >= 128 || seen.has(identity)) return [];
   seen.add(identity);
-  const fanouts: ChildAgentRelation[] = (await fanoutChildren(source, session, process.env,
-    computer === "local" ? undefined : computer)).map(child => ({
-    ...child, session: child.session ?? child.id, cwd: child.cwd, children: [],
-  }));
+  const [started, waiting] = await Promise.all([
+    fanoutChildren(source, session, process.env, computer === "local" ? undefined : computer),
+    // Only the lead's own tree: a worker's workers queue under the worker.
+    depth === 0 ? queuedFanouts(source, session).catch(() => []) : [],
+  ]);
+  const fanouts: ChildAgentRelation[] = [
+    ...started.map(child => ({ ...child, session: child.session ?? child.id, cwd: child.cwd, children: [] })),
+    // No harness yet when the picker decides at start; Phren's queue holds it.
+    ...waiting.map(job => ({ id: job.id, provider: job.provider ?? "phren" as const, path: job.label, callId: `fanout:${job.id}`,
+      state: "running" as const, queued: true as const, queuedAt: job.queuedAt, ...(job.model ? { model: job.model } : {}), children: [] })),
+  ];
   if (!["codex", "claude"].includes(source)) return fanouts;
-  const file = await transcriptPath(source, session);
+  // A lead whose transcript is not found still has its workers (#909).
+  const file = await transcriptPath(source, session).catch(error => { if (fanouts.length) return undefined; throw error; });
+  if (!file) return fanouts;
   if (source === "claude") return [...await claudeChildAgents(file, session), ...fanouts];
   const relations = await directChildAgents(file), verified: ChildAgentRelation[] = [];
   for (const relation of relations) {
@@ -79,11 +92,13 @@ export async function childAgentTree(source: Provider, session: string, depth = 
 /** Explicit wire projection prevents a provider's private transcript identity
  * from being returned if relation internals grow later. */
 export function publicChildAgents(tree: ChildAgentRelation[]): Json[] {
-  return tree.map(({ id, provider, path: agentPath, callId, state, reason, startedAt, finishedAt, model, worktreeName, branch, computer, remote, fanout, children }) =>
+  return tree.map(({ id, provider, path: agentPath, callId, state, reason, startedAt, finishedAt, queued, queuedAt, model, worktreeName, branch, computer, remote, fanout, children }) =>
     // A blocked worker is finished; the phone's relation contract has no failed
     // state, so the reason carries what happened without breaking old clients.
+    // A queued one is likewise `running` with `queued: true`.
     ({ id, provider, path: agentPath, callId, state: state === "failed" || state === "gone" ? "completed" : state,
       ...(state === "failed" || state === "gone" ? { failed: true } : {}),
+      ...(queued && state === "running" ? { queued: true, ...(queuedAt ? { queuedAt } : {}) } : {}),
       ...(startedAt ? { startedAt } : {}), ...(finishedAt ? { finishedAt } : {}),
       ...(reason !== undefined ? { reason } : {}), ...(model !== undefined ? { model } : {}),
       ...(worktreeName !== undefined ? { worktreeName } : {}), ...(branch !== undefined ? { branch } : {}),

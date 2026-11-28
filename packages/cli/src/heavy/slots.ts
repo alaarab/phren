@@ -16,7 +16,37 @@ import { type Budget, type Pressure, pressureReason } from "./budget.js";
 export const PRIORITIES = { release: 2, normal: 1, low: 0 } as const;
 export type PriorityName = keyof typeof PRIORITIES;
 
-export interface Ticket { id: string; pid: number; priority: number; createdAt: number; label: string; state: "waiting" | "running"; startedAt?: number }
+/** What a `workers` ticket says about the fan-out worker it holds a place for,
+ * so the Hook can show a queued worker under the agent that launched it before
+ * the worker has a manifest. `provider` is absent until a picker chooses it. */
+export interface WorkerTag {
+  parent: { provider: "codex" | "claude"; session: string };
+  provider?: "codex" | "opencode" | "claude";
+  model?: string;
+}
+export interface Ticket { id: string; pid: number; priority: number; createdAt: number; label: string; state: "waiting" | "running"; startedAt?: number; worker?: WorkerTag }
+
+const SESSION_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PROVIDERS = new Set(["codex", "opencode", "claude"]);
+
+/** The worker a queued command will start, read from the launcher's own
+ * environment and command line the way the fan-out wrappers and `phren fanout
+ * run` choose a manifest's parent: Codex's thread id unless the nearest agent
+ * process above is Claude, then Claude's session id. The provider comes from
+ * `--provider` or a wrapper named `<provider>.sh`, the model from `--model`. */
+export function workerTag(command: readonly string[], env: NodeJS.ProcessEnv, nearest: () => "codex" | "claude" | undefined,
+  known: { provider?: string; model?: string } = {}): WorkerTag | undefined {
+  const codex = [env.CODEX_THREAD_ID, env.CODEX_SESSION_ID].find(value => value && SESSION_UUID.test(value));
+  const claude = env.CLAUDE_CODE_SESSION_ID && SESSION_UUID.test(env.CLAUDE_CODE_SESSION_ID) ? env.CLAUDE_CODE_SESSION_ID : undefined;
+  const parent = codex && !(claude && nearest() === "claude") ? { provider: "codex" as const, session: codex.toLowerCase() }
+    : claude ? { provider: "claude" as const, session: claude.toLowerCase() } : undefined;
+  if (!parent) return undefined;
+  const flag = (name: string) => { const at = command.indexOf(name); return at >= 0 ? command[at + 1] : undefined; };
+  const script = /^(codex|opencode|claude)\.sh$/.exec(path.basename(command[0] ?? ""))?.[1];
+  const provider = [known.provider, flag("--provider"), script].find(value => value && PROVIDERS.has(value)) as WorkerTag["provider"];
+  const model = (known.model ?? flag("--model"))?.trim().slice(0, 200);
+  return { parent, ...(provider ? { provider } : {}), ...(model ? { model } : {}) };
+}
 
 export function slotsRoot(env: NodeJS.ProcessEnv = process.env): string {
   return env.PHREN_SLOTS_DIR || path.join(env.XDG_STATE_HOME || path.join(homedir(), ".local", "state"), "phren", "slots");
@@ -83,6 +113,8 @@ export interface AcquireOptions {
   report: (message: string) => void;
   pollMs?: number; timeoutMs?: number; root?: string; pid?: number; now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /** The fan-out worker this ticket holds a place for (the `workers` pool). */
+  worker?: WorkerTag;
 }
 
 export interface Held { id: string; release: () => void; waitedMs: number }
@@ -93,7 +125,8 @@ export async function acquire(options: AcquireOptions): Promise<Held> {
   const dir = path.join(options.root ?? slotsRoot(), options.pool), now = options.now ?? Date.now;
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const id = `${now()}-${randomBytes(6).toString("hex")}`, file = path.join(dir, `${id}.json`), began = now();
-  const ticket: Ticket = { id, pid: options.pid ?? process.pid, priority: options.priority, createdAt: began, label: options.label.slice(0, 120), state: "waiting" };
+  const ticket: Ticket = { id, pid: options.pid ?? process.pid, priority: options.priority, createdAt: began, label: options.label.slice(0, 120), state: "waiting",
+    ...(options.worker ? { worker: options.worker } : {}) };
   const write = () => { const tmp = `${file}.tmp`; fs.writeFileSync(tmp, JSON.stringify(ticket), { mode: 0o600 }); fs.renameSync(tmp, file); };
   const release = () => { fs.rmSync(file, { force: true }); };
   write();
