@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseChecklist } from "../forge/checklist.js";
 import { ForgeError, IssueListError, type Issue, type IssueEdit, type NewIssue } from "../forge/issues.js";
 import { BUILTIN_MODULES } from "../modules/registry.js";
 import { ISSUES_RESPONSE_LIMIT, LIST_BODY_LIMIT, resetIssueRouteCache, resetIssueRouteDeps, setIssueRouteDeps, type IssueRouteDeps } from "./issue-routes.js";
@@ -216,6 +217,42 @@ describe("list bodies stay small", () => {
     expect(String(rows[1].body)).toHaveLength(LIST_BODY_LIMIT);
     expect(rows[1].truncated).toBeUndefined();
     expect(answer.body.truncated).toBe(false);
+  });
+
+  it("trims a checklist that would exceed the cap in the first row", async () => {
+    const body = "- [ ] 🏷️\n".repeat(10_000);
+    const checklist = parseChecklist(body);
+    expect(Buffer.byteLength(JSON.stringify(checklist))).toBeGreaterThan(ISSUES_RESPONSE_LIMIT);
+    restore = setIssueRouteDeps({ list: async () => ({ issues: [issue(1, { body, checklist })], errors: [] }) });
+    const answer = await request("GET", "/v1/issues?repos=github.com/example/widgets", undefined, {}, store);
+    const [row] = answer.body.issues as Json[];
+    expect(answer.status).toBe(200);
+    expect(row).toMatchObject({ number: 1, truncated: true });
+    expect(row.checklist).toEqual(expect.arrayContaining([{ text: "🏷️", done: false }]));
+    expect((row.checklist as unknown[]).length).toBeLessThan(checklist.length);
+    expect(Buffer.byteLength(JSON.stringify(answer.body))).toBeLessThanOrEqual(ISSUES_RESPONSE_LIMIT);
+  });
+
+  it("skips a first row whose other fields exceed the cap", async () => {
+    const labels = Array.from({ length: 1_000 }, (_, index) => `${index}${"字".repeat(100)}`);
+    restore = setIssueRouteDeps({ list: async () => ({ issues: [issue(1, { labels }), issue(2)], errors: [] }) });
+    const answer = await request("GET", "/v1/issues?repos=github.com/example/widgets", undefined, {}, store);
+    expect(answer.body).toMatchObject({ issues: [{ number: 2 }], truncated: true });
+  });
+
+  it.each([false, true])("bounds the error envelope (total failure: %s)", async total => {
+    const failure = { repo: "github.com/example/widgets", code: "rate-limited" as const, error: "\\字".repeat(500) };
+    const failures = Array.from({ length: 1_000 }, (_, index) => ({ ...failure, repo: `${failure.repo}-${index}` }));
+    restore = setIssueRouteDeps({ list: async () => {
+      if (total) throw new IssueListError([failures[0], ...failures.slice(1)]);
+      return { issues: [issue(1)], errors: failures };
+    } });
+    const answer = await request("GET", "/v1/issues?repos=github.com/example/widgets", undefined, {}, store);
+    expect(answer.status).toBe(total ? 429 : 200);
+    expect(answer.body).toMatchObject({ issues: total ? [] : [{ number: 1 }], truncated: true });
+    expect((answer.body.errors as unknown[]).length).toBeGreaterThan(0);
+    expect((answer.body.errors as unknown[]).length).toBeLessThan(failures.length);
+    expect(Buffer.byteLength(JSON.stringify(answer.body))).toBeLessThanOrEqual(ISSUES_RESPONSE_LIMIT);
   });
 
   it("drops rows past the 256 KB cap and says so", async () => {

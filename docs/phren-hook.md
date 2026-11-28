@@ -1995,10 +1995,11 @@ code index); that set is cached for five minutes. A project takes its
 repository from `issues:` in its `phren.project.yaml`, else its checkout's
 `origin`, preferring a `gitboy` remote for a GitHub origin.
 
-The phone drops off Tailscale on big bursts, so a list answer stays under 256 KB:
-each list body is cut to 2,000 characters and marked `truncated: true` (the
-whole body comes from `/v1/issues/item`), and whole rows are dropped, with the
-top-level `truncated: true`, when the answer would still exceed the cap.
+List responses, including errors, are capped at 256 KiB of serialized JSON.
+Bodies show up to 2,000 characters and checklists show up to 16 KiB per row.
+A row carries `truncated: true` when either was shortened. Use
+`/v1/issues/item` for the full body and checklist. The top-level
+`truncated: true` indicates that rows or error details were cut.
 
 Forge failures carry a stable status and a `forge-<code>` code: `auth` is 502,
 `not-found` 404, `forbidden` 403, `rate-limited` 429, `unavailable` 503 and

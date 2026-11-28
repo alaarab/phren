@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { listAcross, ForgeError, IssueListError, parseRepo, providerFor, repoForProject, type Issue, type IssueEdit, type IssueList, type IssueQuery, type IssueRef, type NewIssue, type RepoRef } from "../forge/issues.js";
+import { listAcross, ForgeError, IssueListError, parseRepo, providerFor, repoForProject, type Issue, type IssueEdit, type IssueList, type IssueListFailure, type IssueQuery, type IssueRef, type NewIssue, type RepoRef } from "../forge/issues.js";
 import { listAllProjects } from "../store-routing.js";
 import { BridgeError, type Json } from "./protocol.js";
 
@@ -13,6 +13,8 @@ import { BridgeError, type Json } from "./protocol.js";
 export const LIST_BODY_LIMIT = 2_000;
 /** The phone drops off Tailscale on big bursts, so one list answer stays under this. */
 export const ISSUES_RESPONSE_LIMIT = 256 * 1024;
+const LIST_CHECKLIST_BYTES = 16 * 1024;
+const LIST_ERRORS_BYTES = 32 * 1024;
 const DEFAULT_REPO_TTL_MS = 5 * 60_000;
 
 const issueNumber = z.number().int().min(1).max(2_147_483_647);
@@ -61,11 +63,16 @@ const FORGE_STATUS: Record<ForgeError["code"], number> = {
 };
 
 function forgeBridgeError(error: unknown): never {
-  if (error instanceof ForgeError) throw new BridgeError(FORGE_STATUS[error.code], error.message, {
-    code: `forge-${error.code}`,
-    ...(error instanceof IssueListError ? { issues: [], errors: error.errors } : {}),
-  });
-  throw error;
+  if (!(error instanceof ForgeError)) throw error;
+  const code = `forge-${error.code}`;
+  if (error instanceof IssueListError) {
+    const { errors, truncated } = boundedErrors(error.errors);
+    const message = error.message.slice(0, 500);
+    throw new BridgeError(FORGE_STATUS[error.code], message, {
+      code, issues: [], errors, truncated: truncated || message !== error.message,
+    });
+  }
+  throw new BridgeError(FORGE_STATUS[error.code], error.message, { code });
 }
 
 async function mapped<T>(run: () => Promise<T>): Promise<T> {
@@ -137,26 +144,61 @@ export async function defaultIssueRepos(store: string): Promise<RepoRef[]> {
   return repos;
 }
 
-/** One list row: the body capped, and marked when it was cut. */
+function jsonBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value));
+}
+
+/** Count brackets and separators against the same UTF-8 budget as each entry. */
+function takeWithin<T>(entries: Iterable<T>, budget: number): T[] {
+  const kept: T[] = [];
+  let bytes = 2;
+  for (const entry of entries) {
+    const size = jsonBytes(entry);
+    if (size + 2 > budget) continue;
+    const separator = kept.length ? 1 : 0;
+    if (bytes + size + separator > budget) break;
+    kept.push(entry);
+    bytes += size + separator;
+  }
+  return kept;
+}
+
+function boundedErrors(failures: IssueListFailure[]) {
+  let clipped = false;
+  function* previews() {
+    for (const { repo, code, error } of failures) {
+      clipped ||= repo.length > 300 || error.length > 500;
+      yield { repo: repo.slice(0, 300), code, error: error.slice(0, 500) };
+    }
+  }
+  const errors = takeWithin(previews(), LIST_ERRORS_BYTES);
+  return { errors, truncated: clipped || errors.length < failures.length };
+}
+
+/** Full bodies and checklists are available on the item route. */
 function listIssue(issue: Issue): Json {
-  if (issue.body.length <= LIST_BODY_LIMIT) return issue as unknown as Json;
-  return { ...issue, body: issue.body.slice(0, LIST_BODY_LIMIT), truncated: true };
+  let clipped = false;
+  function* previews() {
+    for (const { text, done } of issue.checklist) {
+      clipped ||= text.length > 1_000;
+      yield { text: text.slice(0, 1_000), done };
+    }
+  }
+  const checklist = takeWithin(previews(), LIST_CHECKLIST_BYTES);
+  const body = issue.body.slice(0, LIST_BODY_LIMIT);
+  const truncated = body !== issue.body || clipped || checklist.length < issue.checklist.length;
+  return { ...issue, body, checklist, ...(truncated ? { truncated: true } : {}) };
 }
 
 function boundedList(result: IssueList): Json {
-  const rows = result.issues.map(listIssue);
-  // The envelope and errors are paid for first, so the whole answer, not just
-  // the rows, stays under the cap.
-  const reserve = Buffer.byteLength(JSON.stringify({ issues: [], errors: result.errors, truncated: true }));
-  const kept: Json[] = [];
-  let bytes = 0;
-  for (const row of rows) {
-    const size = Buffer.byteLength(JSON.stringify(row)) + 1;
-    if (kept.length > 0 && reserve + bytes + size > ISSUES_RESPONSE_LIMIT) break;
-    kept.push(row);
-    bytes += size;
+  const { errors, truncated } = boundedErrors(result.errors);
+  // The empty issues array already contributes two bytes to the envelope.
+  const budget = ISSUES_RESPONSE_LIMIT - jsonBytes({ issues: [], errors, truncated: false }) + 2;
+  function* rows() {
+    for (const issue of result.issues) yield listIssue(issue);
   }
-  return { issues: kept, errors: result.errors, truncated: kept.length < rows.length };
+  const issues = takeWithin(rows(), budget);
+  return { issues, errors, truncated: truncated || issues.length < result.issues.length };
 }
 
 function reposFrom(url: URL): string[] {
