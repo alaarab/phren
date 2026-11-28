@@ -1317,7 +1317,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else {
         if (url.pathname === "/v1/workspaces/launch") {
           result = await launches.run(async () => {
-            if (data.role === "conductor" && !ownerRequest(request, data)) throw new BridgeError(403, "Only the owner can change the conductor.");
+            const owner = ownerRequest(request, data);
+            if (data.role === "conductor" && !owner) throw new BridgeError(403, "Only the owner can change the conductor.");
             if (data.role === "conductor" && !modules.has("conductor")) throw new BridgeError(404, disabledHint("conductor"));
             if (data.agentFolder === true && (data.role === "conductor" || data.project !== undefined || (data.cwd !== undefined && data.cwd !== "") || data.worktree != null)) {
               throw new BridgeError(400, "An agent folder is for a projectless agent without cwd or worktree.");
@@ -1329,8 +1330,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             const cwd = data.agentFolder === true ? undefined : storeRooted ? await launchDirectory(defaultPhrenPath(), [], [defaultPhrenPath()])
               : data.project !== undefined ? await dispatchProjectDirectory(data.project)
               : await launchDirectory(data.cwd, await journal.recent(), locatedDirectories);
-            // A project the Hook resolved (a dispatch) is a folder it may trust; a folder the phone named is not.
-            return launchSession(selectedServer(url), { ...data, cwd }, { trustFolder: data.project !== undefined });
+            // Enrolled peers can dispatch into a project the Hook resolves.
+            // An explicit cwd needs the owner gateway's authority.
+            const projectTrust = data.project !== undefined
+              && (owner || (data.origin === undefined && request.headers["x-phren-origin"] === "peer"));
+            const phoneFolder = owner && typeof data.cwd === "string" && data.cwd !== ""
+              && (data.kind === "claude" || data.kind === "codex");
+            return launchSession(selectedServer(url), { ...data, cwd }, { trustFolder: phoneFolder ? "folder chosen on the phone" : projectTrust });
           });
         } else if (url.pathname.startsWith("/v1/workspaces/")) {
           const operation = url.pathname.split("/").at(-1)!;

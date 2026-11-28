@@ -3081,6 +3081,37 @@ schedules:
       }
     });
 
+    it.each(["claude", "codex"])("trusts the resolved folder of an owner launch for %s", async kind => {
+      const cwd = await realpathAsync(await mkdtemp(path.join(root, "chosen-")));
+      const linked = path.join(root, "phone-folder");
+      await symlink(cwd, linked, "junction");
+      if (kind === "claude") {
+        await writeFile(path.join(root, "bin/claude"), `#!/bin/sh
+printf '%s\\n' '{"loggedIn":true,"subscriptionType":"max"}'
+`, { mode: 0o755 });
+      }
+      const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: kind === "claude" ? linked : "~/phone-folder", label: "Phone chat", kind });
+      expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+      expect(commands.find(c => c.method === "workspace.create")?.params).toMatchObject({ cwd });
+      if (kind === "claude") {
+        const config = JSON.parse(await readFile(path.join(root, "claude-config/.claude.json"), "utf8"));
+        expect(config.projects).toEqual({ [claudeProjectKey(cwd)]: expect.objectContaining({ hasTrustDialogAccepted: true }) });
+      } else {
+        const config = await readFile(path.join(root, "codex/config.toml"), "utf8");
+        expect(config).toBe(`[projects.${JSON.stringify(cwd)}]\ntrust_level = "trusted"\n`);
+      }
+    });
+
+    it("leaves phone folder trust unset for home and launches with non-owner origins", async () => {
+      const cwd = await mkdtemp(path.join(root, "untrusted-"));
+      const launch = (folder: string, extra = {}, headers = {}) => api("/v1/workspaces/launch?mux=herdr:default",
+        { cwd: folder, label: "Chat", kind: "codex", ...extra }, "POST", headers);
+      for (const result of [await launch(root), await launch(cwd, {}, asPeer), await launch(cwd, { origin: "claude" })]) {
+        expect(result.status, JSON.stringify(result.data)).toBe(200);
+      }
+      await expect(readFile(path.join(root, "codex/config.toml"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
     it("hands back an agent held at a first-run screen so the chat can answer it", async () => {
       blockAgentStart = true;
       try {

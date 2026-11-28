@@ -10,10 +10,9 @@ import { atomic } from "./protocol.js";
  * screen is "No, exit", so a dispatched worker would otherwise sit there
  * until the owner answers it (the brief is never sent; see dispatch.ts).
  *
- * Only callers that picked the folder themselves use this: a dispatched or
- * scheduled project's resolved source folder and a worktree the Hook just
- * created. Never a parent, never a folder the phone typed in. Each harness
- * gets exactly one key for exactly that path:
+ * The Hook uses this for folders it picks or creates, and for a folder the
+ * owner explicitly selects for Claude or Codex. Trust is scoped to the launch
+ * directory and excludes the home directory and filesystem roots:
  *
  * - Claude: `projects[<dir>].hasTrustDialogAccepted = true` in its global
  *   config (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`; a
@@ -212,6 +211,7 @@ export async function pretrustFolder(harness: string, dir: string, why: string, 
   // harness keys trust by whichever one its working directory reports.
   const real = await realpath(dir).catch(() => undefined);
   if (!real || !(await stat(real).then(info => info.isDirectory(), () => false))) return "skipped";
+  if (real === path.parse(real).root || real === await realpath(homeDir(env)).catch(() => undefined)) return "skipped";
   let outcome: TrustResult = "already";
   for (const folder of [...new Set([dir, real])]) {
     try {

@@ -326,10 +326,9 @@ export interface LaunchOptions {
   /** Persist a newly created pane before starting or prompting its harness. */
   onPlaced?: (paneTarget: Json) => Promise<void>;
   canary?: boolean;
-  /** `data.cwd` is a folder the Hook resolved itself (a dispatched or
-   * scheduled project's source folder), so it may be marked trusted for the
-   * harness before the launch. Never set for a folder the phone chose. */
-  trustFolder?: boolean;
+  /** The caller authorizes pretrust for the resolved launch folder. Pass a
+   * string to override the default "project folder" reason in the log. */
+  trustFolder?: boolean | string;
   /** Start the agent in this existing pane, at its shell prompt, instead of a
    * new one: a session moved to another harness (session-move.ts). Herdr
    * gives a pane its variables only when it is created, so the caller uses
@@ -564,8 +563,10 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const envVariables = keyedEnv ?? { ...variables };
   const env = Object.keys(envVariables).length ? envVariables : undefined;
   // Claude's folder-trust screen defaults to "No, exit" and Codex's holds the
-  // agent too; a folder the Hook picked or just created is trusted up front.
-  if (scratch || worktree || options.trustFolder) await pretrustFolder(kind, cwd, scratch ? "new agent folder" : worktree ? `new worktree for ${worktree.branch}` : "project folder",
+  // agent too. Trust the actual launch directory, including a newly created worktree.
+  const trustReason = scratch ? "new agent folder" : worktree ? `new worktree for ${worktree.branch}`
+    : options.trustFolder === true ? "project folder" : options.trustFolder;
+  if (trustReason) await pretrustFolder(kind, cwd, trustReason,
     home ? { ...process.env, ...claudeLaunchEnv(home) } : process.env);
   if (!options.into) {
     try { await terminalProvider().create(server, { workspace, label, cwd, ...(env ? { env } : {}) }); }
