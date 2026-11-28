@@ -1991,6 +1991,42 @@ retain ids across retries, and refresh after actions. On upgrade, stale automati
 items resolve with `stale: source gone`; an unreachable worker is hidden as
 unverified rather than resolved. No phone UI changes are included here.
 
+## Issues from the phone
+
+With `capabilities.issues: 1` the Hook serves the owner's forge issues from its
+memory stores. All routes are owner-only: a peer computer and an agent's MCP
+call are refused with 403, and the five writes also require the paired phone's
+owner-proof signature once it has signed one (`owner-proof.ts`). The service
+behind them is `packages/cli/src/forge/`; the Hook only shapes requests and
+answers. See [Issues](issues.md) for repository selection, Gitboy and GitHub
+credentials, and claims.
+
+| Route | Inputs | Answer |
+| --- | --- | --- |
+| `GET /v1/issues` | `repos` (repeatable or comma-separated), `state` (`open` default, `closed`, `all`), `assignee` (`me` or a user), `label`, `search`, `limit` (1-200, default 50) | `{issues, errors, truncated}` through the same bounded fan-out as the CLI: up to four repositories at a time, a per-repository failure in `errors`, and never a pull request. |
+| `GET /v1/issues/item` | `repo`, `number` | `{issue}`, with the full body. |
+| `POST /v1/issues/create` | `repo`, `title`, optional `body`, `checklist` (strings), `labels` | `{ok:true, issue}`. |
+| `POST /v1/issues/edit` | `repo`, `number`, optional `title`, `body`, `checklist` (`{text,done}`), `addLabels`, `removeLabels`, `state` | `{ok:true, issue}`. |
+| `POST /v1/issues/comment` | `repo`, `number`, `body` | `{ok:true, url}`. |
+| `POST /v1/issues/claim` | `repo`, `number`, optional `computer` (defaults to this computer) and `release` | `{ok:true, issue}`. |
+| `POST /v1/issues/close` | `repo`, `number`, optional `comment` | `{ok:true, issue}`. |
+
+Without `repos`, a list covers every project in every store this Hook reads
+whose repository resolves (`repoForProject`, the same checkout lookup as the
+code index); that set is cached for five minutes. A project takes its
+repository from `issues:` in its `phren.project.yaml`, else its checkout's
+`origin`, preferring a `gitboy` remote for a GitHub origin.
+
+The phone drops off Tailscale on big bursts, so a list answer stays under 256 KB:
+each list body is cut to 2,000 characters and marked `truncated: true` (the
+whole body comes from `/v1/issues/item`), and whole rows are dropped, with the
+top-level `truncated: true`, when the answer would still exceed the cap.
+
+Forge failures carry a stable status and a `forge-<code>` code: `auth` is 502,
+`not-found` 404, `forbidden` 403, `rate-limited` 429, `unavailable` 503 and
+`invalid` 400. A malformed body or query is 400. The route never returns a
+token or a forge response body.
+
 ## Schedule editing
 
 All schedule routes use authenticated JSON `POST` requests:
