@@ -22,7 +22,6 @@ import {
   type QueueItem,
 } from "@phren/cli/data/access";
 import { listNotes, removeNote } from "@phren/cli/data/notes";
-import { readTasks } from "@phren/cli/data/tasks";
 import { readProjectTopics } from "@phren/cli/client/project-topics";
 import { buildGraph } from "@phren/cli/client/graph-data";
 import { findPhrenPath, getProjectDirs } from "@phren/cli/paths";
@@ -43,7 +42,7 @@ export class MemoryHttpError extends Error {
 
 /** The store paths the Memory section mirrors. */
 const MEMORY_PATTERNS = [
-  /^[^/]+\/(?:FINDINGS|tasks|review|summary|truths)\.md$/,
+  /^[^/]+\/(?:FINDINGS|review|summary|truths)\.md$/,
   /^[^/]+\/(?:notes|reference|journal)\//,
   /^[^/]+\/phren\.project\.yaml$/,
   /^[^/]+\/schedules\.yaml$/,
@@ -166,7 +165,7 @@ interface RemoteState {
 }
 
 export interface MemoryService {
-  projects(computer: Computer): Promise<{ projects: Array<{ name: string; findings: number; tasks: number; review: number; notes: number }> }>;
+  projects(computer: Computer): Promise<{ projects: Array<{ name: string; findings: number; review: number; notes: number }> }>;
   findings(computer: Computer, project: string | null): Promise<{ items: unknown[] }>;
   review(computer: Computer, project: string | null): Promise<{ items: Array<QueueItem | ProjectQueueItem> }>;
   addFinding(computer: Computer, body: { project?: unknown; text?: unknown }): Promise<{ ok: true; uploaded?: unknown }>;
@@ -350,12 +349,6 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
       .sort();
   }
 
-  function countTasks(dir: string, project: string): number {
-    const result = readTasks(dir, project);
-    if (!result.ok) return 0;
-    const items = result.data.items;
-    return (items.Active?.length ?? 0) + (items.Queue?.length ?? 0) + (items.Done?.length ?? 0);
-  }
 
   async function changedMirrorFiles(dir: string, prev: Map<string, string>): Promise<string[]> {
     const changed: string[] = [];
@@ -424,7 +417,6 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
         return {
           name,
           findings,
-          tasks: countTasks(dir, name),
           review: review.ok ? review.data.length : 0,
           notes: notes.ok ? notes.data.length : 0,
         };

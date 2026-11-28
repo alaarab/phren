@@ -77,8 +77,7 @@ describe("local dispatch", () => {
       ? { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 0 }
       : route.startsWith("/v1/workspaces/launch") ? { ok: true, target: session } : { ok: true });
     const issue = { repo: "gitboy.example/example/widgets", number: 42 };
-    const task = { storeId: "12345678", project: "phren", stableId: "12345678" };
-    const result = await service().dispatch({ ...brief, issue, task });
+    const result = await service().dispatch({ ...brief, issue });
     expect(result).toMatchObject({ ok: true, state: "accepted", target: session });
     const saved = JSON.parse(await readFile(path.join(root, "dispatches", `${result.id}.json`), "utf8"));
     expect(legacyReceipt.parse(saved)).toMatchObject({ id: result.id, target: session });

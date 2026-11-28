@@ -88,8 +88,6 @@ function formatValue(value: unknown): string {
 function toSetConfig(key: string, value: unknown): { domain: string; settings: Record<string, unknown> } | null {
   if (key === "proactivity.base") return { domain: "proactivity", settings: { level: value, scope: "base" } };
   if (key === "proactivity.findings") return { domain: "proactivity", settings: { level: value, scope: "findings" } };
-  if (key === "proactivity.tasks") return { domain: "proactivity", settings: { level: value, scope: "tasks" } };
-  if (key === "taskMode") return { domain: "taskMode", settings: { mode: value } };
   if (key === "findingSensitivity") return { domain: "findingSensitivity", settings: { level: value } };
   if (key.startsWith("retention.decay.")) {
     return { domain: "retention", settings: { decay: { [key.slice("retention.decay.".length)]: value } } };

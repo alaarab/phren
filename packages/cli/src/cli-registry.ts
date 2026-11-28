@@ -144,11 +144,6 @@ const DREAM_SUBCOMMANDS: Subcommand[] = [
   { name: "eval", usage: "phren dream eval [--real] [--model <m>] [--json]", summary: "Score the dream engine on its fixture store" },
 ];
 
-// The task namespace's other subcommands document themselves through bare `phren task`.
-const TASK_SUBCOMMANDS: Subcommand[] = [
-  { name: "audit", usage: "phren task audit [--project <p>] [--scheduled] [--dry-run] [--limit <n>] [--json]", summary: "Audit open tasks against the code (weekly, bounded)" },
-];
-
 const ISSUE_SUBCOMMANDS: Subcommand[] = [
   { name: "list", usage: "phren issue list [--repo <ref>]... [--project <p>] [--state open|closed|all] [--assignee me|<user>] [--label <label>] [--search <text>] [--limit <n>] [--json]", summary: "List open issues across one or more repositories" },
   { name: "show", usage: "phren issue show <ref> [--json]", summary: "Show one issue with its body and checklist" },
@@ -184,10 +179,8 @@ const CONFIG_SUBCOMMANDS: Subcommand[] = [
   { name: "show", usage: "phren config show [--project <name>]", summary: "Show current config" },
   { name: "policy", usage: "phren config policy [get|set ...]", summary: "Retention, TTL, confidence, decay" },
   { name: "workflow", usage: "phren config workflow [get|set ...]", summary: "Risky-memory thresholds" },
-  { name: "proactivity", usage: "phren config proactivity [level] [--scope base|findings|tasks]", summary: "Auto-capture level; --scope limits it to findings or tasks" },
+  { name: "proactivity", usage: "phren config proactivity [level] [--scope base|findings]", summary: "Auto-capture level; --scope limits it to findings" },
   { name: "proactivity.findings", usage: "phren config proactivity.findings [level]", summary: "Findings-only auto-capture level" },
-  { name: "proactivity.tasks", usage: "phren config proactivity.tasks [level]", summary: "Task-only auto-capture level" },
-  { name: "task-mode", usage: "phren config task-mode [mode]", summary: "Set task automation mode" },
   { name: "finding-sensitivity", usage: "phren config finding-sensitivity [lvl]", summary: "Set finding capture sensitivity" },
   { name: "index", usage: "phren config index [get|set ...]", summary: "Indexer include/exclude globs" },
   { name: "synonyms", usage: "phren config synonyms [list|add|remove]", summary: "Manage learned synonyms" },
@@ -328,7 +321,7 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./bridge/mac-windows-command.js")).runMacWindows(args),
   },
   {
-    name: "owner-inbox", topic: "core", usage: "phren owner-inbox [list [--all] [--computer <name>] | add <title> [--computer <name>] [--project <slug>] [--id <uuid>] [--command <text>] [--task bid:xxxxxxxx] [--pr <url>] [--issue domain/owner/name#N] [--key <key>] | resolve <id> [--computer <name>] [--resolution <text>] [--if-updated-at <timestamp>]]",
+    name: "owner-inbox", topic: "core", usage: "phren owner-inbox [list [--all] [--computer <name>] | add <title> [--computer <name>] [--project <slug>] [--id <uuid>] [--command <text>] [--pr <url>] [--issue domain/owner/name#N] [--key <key>] | resolve <id> [--computer <name>] [--resolution <text>] [--if-updated-at <timestamp>]]",
     summary: "List, add and resolve what waits on the owner",
     run: async args => (await import("./bridge/dispatch-command.js")).runOwnerInbox(args),
   },
@@ -436,7 +429,7 @@ export const REGISTRY: Command[] = [
     },
   },
 
-  // Core (featured: search, status, doctor, web-ui, tasks, graph, shell)
+  // Core (featured: search, status, doctor, web-ui, issue, graph, shell)
   {
     name: "search",
     topic: "core",
@@ -479,17 +472,6 @@ export const REGISTRY: Command[] = [
     run: async (args) => {
       const { handleMemoryUi } = await import("./cli/actions.js");
       await handleMemoryUi(args);
-    },
-  },
-  {
-    name: "tasks",
-    topic: "core",
-    usage: "phren tasks [profile|reconcile [project] [--dry-run | --apply]] [--responsibility=human|agent] [--readiness=ready|waiting-on-human|waiting-on-task]",
-    summary: "Cross-project task view",
-    featured: true,
-    run: async (args, ctx) => {
-      const { handleTaskListArgs } = await import("./cli/namespaces-tasks.js");
-      await handleTaskListArgs(args, ctx.profile());
     },
   },
   {
@@ -596,22 +578,6 @@ export const REGISTRY: Command[] = [
     run: async (args) => {
       const { handleSessionsView } = await import("./cli/ops.js");
       await handleSessionsView(args);
-    },
-  },
-  {
-    name: "task",
-    topic: "core",
-    usage: "phren task <subcommand>",
-    summary: "Manage tasks",
-    subcommands: TASK_SUBCOMMANDS,
-    run: async (args, ctx) => {
-      if (args[0] === "audit") {
-        const { handleTaskAudit } = await import("./cli/task-audit.js");
-        await handleTaskAudit(args.slice(1), ctx.phrenPath(), ctx.profile());
-        return;
-      }
-      const { handleTaskNamespace } = await import("./cli/namespaces.js");
-      await handleTaskNamespace(args);
     },
   },
   {
@@ -1130,7 +1096,6 @@ export function commandTopics(): readonly Topic[] {
 }
 
 export function disabledCommand(command: string, snapshot: ModuleSnapshot): string | undefined {
-  if (!snapshot.has("tasks") && /^config proactivity .*--scope(?:=|\s+)(?:tasks|task)(?:\s|$)/.test(command)) return disabledHint("tasks");
   const owner = commandOwner(command);
   return owner && !snapshot.has(owner.name) ? disabledHint(owner.name) : undefined;
 }
@@ -1142,8 +1107,7 @@ export function commandsForModules(snapshot?: ModuleSnapshot): Command[] {
     usage: command.usage.replace(/<([^<>]*\|[^<>]*)>/g, (_match, choices: string) =>
       `<${choices.split("|").filter(choice => !disabledCommand(`${command.name} ${choice}`, snapshot)).join("|")}>`),
     aliases: command.aliases?.filter(alias => !disabledCommand(alias, snapshot)),
-    subcommands: command.subcommands?.filter(sub => !disabledCommand(`${command.name} ${sub.name}`, snapshot))
-      .map(sub => snapshot.has("tasks") ? sub : { ...sub, usage: sub.usage.replace("base|findings|tasks", "base|findings"), summary: sub.summary?.replace("findings or tasks", "findings") }),
+    subcommands: command.subcommands?.filter(sub => !disabledCommand(`${command.name} ${sub.name}`, snapshot)),
     run: async (args, ctx) => {
       const unavailable = disabledCommand([command.name, ...args].join(" "), snapshot);
       if (unavailable) { console.error(unavailable); return 1; }

@@ -11,7 +11,6 @@ import {
 } from "../shared.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
-import { TASK_FILE_ALIASES } from "../data/tasks.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import {
   PROJECT_OWNERSHIP_MODES,
@@ -121,7 +120,7 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
       console.error(`Project "${name}" not found.`);
       process.exit(1);
     }
-    const { readFindings, readTasks, resolveTaskFilePath } = await import("../data/access.js");
+    const { readFindings } = await import("../data/access.js");
     const exported: Record<string, unknown> = { project: name, exportedAt: new Date().toISOString(), version: 1 };
     const summaryPath = path.join(projectDir, "summary.md");
     if (fs.existsSync(summaryPath)) exported.summary = fs.readFileSync(summaryPath, "utf8");
@@ -129,12 +128,6 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
     if (learningsResult.ok) exported.learnings = learningsResult.data;
     const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
     if (fs.existsSync(findingsPath)) exported.findingsRaw = fs.readFileSync(findingsPath, "utf8");
-    const taskResult = readTasks(storePath, name);
-    if (taskResult.ok) {
-      exported.task = taskResult.data.items;
-      const taskRawPath = resolveTaskFilePath(storePath, name);
-      if (taskRawPath && fs.existsSync(taskRawPath)) exported.taskRaw = fs.readFileSync(taskRawPath, "utf8");
-    }
     const agentsPath = path.join(projectDir, "AGENTS.md");
     const legacyPath = path.join(projectDir, "CLAUDE.md");
     const instructionsPath = fs.existsSync(agentsPath) ? agentsPath : legacyPath;
@@ -176,7 +169,6 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
       console.error("Invalid import payload: missing project field.");
       process.exit(1);
     }
-    const { TASKS_FILENAME } = await import("../data/access.js");
     const phrenPath = getPhrenPath();
     const projectName = normalizeProjectNameForCreate(String(decoded.project));
     if (!isValidProjectName(projectName)) {
@@ -219,10 +211,6 @@ export async function handleProjectsNamespace(args: string[], profile: string) {
         lines.push("");
         fs.writeFileSync(path.join(stagedProjectDir, FINDINGS_FILENAME), lines.join("\n"));
         imported.push(FINDINGS_FILENAME);
-      }
-      if (typeof decoded.taskRaw === "string") {
-        fs.writeFileSync(path.join(stagedProjectDir, TASKS_FILENAME), decoded.taskRaw);
-        imported.push(TASKS_FILENAME);
       }
       fs.renameSync(stagedProjectDir, projectDir);
       fs.rmSync(stagingRoot, { recursive: true, force: true });
@@ -330,7 +318,6 @@ function handleProjectsList(profile: string) {
     }
     const tags: string[] = [];
     if (dirFiles.has(FINDINGS_FILENAME)) tags.push("findings");
-    if (TASK_FILE_ALIASES.some((filename) => dirFiles.has(filename))) tags.push("tasks");
     const tagStr = tags.length ? `  [${tags.join(", ")}]` : "";
     console.log(`  ${name}${tagStr}`);
   }

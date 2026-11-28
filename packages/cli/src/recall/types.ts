@@ -11,7 +11,7 @@ export type RecallAbstainReason =
   | "no-keywords" // nothing left after stop words
   | "no-query" // no FTS query could be built from the keywords
   | "no-search-results" // search returned nothing
-  | "trust-filtered" // the trust, notes and tasks filters dropped every row
+  | "trust-filtered" // the trust and notes filters dropped every row
   | "ranked-empty" // ranking dropped every row
   | "below-floor" // the relevance floor dropped every row
   | "nothing-selected" // selection produced no snippet
@@ -89,7 +89,7 @@ export interface RecallResult {
   intent: "debug" | "review" | "build" | "docs" | "skill" | "general";
   detectedProject: string | null;
   abstained: RecallAbstainReason | null;
-  /** Rows that survived the trust, notes and tasks filters (the hook's auto-extract runs when > 0). */
+  /** Rows that survived the trust and notes filters (the hook's auto-extract runs when > 0). */
   trustSurvivors: number;
   candidates: RecallCandidate[];
   floor: RecallFloorDecision[];

@@ -22,7 +22,7 @@
             "type": "string"
           },
           "type": {
-            "description": "Filter by document type: claude, findings, reference, summary, task, skill",
+            "description": "Filter by document type: claude, findings, reference, summary, skill",
             "type": "string",
             "enum": [
               "claude",
@@ -31,7 +31,6 @@
               "reference",
               "skills",
               "summary",
-              "task",
               "changelog",
               "canonical",
               "review-queue",
@@ -78,36 +77,6 @@
         },
         "required": [
           "query"
-        ]
-      }
-    },
-    {
-      "name": "add_task",
-      "description": "Append one or more tasks to a project's tasks.md file. Adds to the Queue section. Pass a single string or an array of strings.",
-      "inputSchema": {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "type": "object",
-        "properties": {
-          "project": {
-            "type": "string",
-            "description": "Project name (must match a directory in your phren)."
-          },
-          "item": {
-            "description": "The task(s) to add. Always pass as an array of strings \u2014 use a single-element array for one task.",
-            "minItems": 1,
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "scope": {
-            "description": "Optional memory scope label. Defaults to 'shared'. Example: 'researcher' or 'builder'.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "project",
-          "item"
         ]
       }
     },
@@ -162,10 +131,6 @@
               },
               "supersedes": {
                 "description": "First 60 chars of the old finding this one replaces. The old entry will be marked as superseded.",
-                "type": "string"
-              },
-              "task_item": {
-                "description": "Task item stable ID like bid:abcd1234, positional ID like A1, or item text to link this finding to.",
                 "type": "string"
               }
             }

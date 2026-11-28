@@ -1,4 +1,3 @@
-import { mergeTaskIdentitySchema } from "../task/merge-links.js";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
@@ -26,7 +25,6 @@ import { atomic, BridgeError, bridgeRoot, targetSchema, type Target } from "./pr
 export const briefId = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
 export const launchBriefSchema = z.object({
   id: briefId,
-  task: mergeTaskIdentitySchema.optional().describe("Deprecated task identity, accepted and ignored."),
   text: z.string().min(1).max(32768).refine(value => !!value.trim() && !/[\x00-\x08\x0b-\x1f\x7f]/.test(value)),
 }).strict();
 export type LaunchBrief = z.infer<typeof launchBriefSchema>;

@@ -1205,7 +1205,7 @@ export function createTimelineView(container, ctx = {}) {
   function phrenFoldedSummary(phren) {
     if (phren.status === "failed" && phren.issues.length) return phren.issues[0];
     if (phren.conductor && phren.conductor.kind === "handOff" && phren.status !== "failed") return `→ ${phren.conductor.target}`;
-    if (phren.items.length) return `${phren.items.length} ${/finding/i.test(phren.verb) ? "findings" : "tasks"}`;
+    if (phren.items.length) return `${phren.items.length} findings`;
     return phren.resultSummary ?? (phren.body.split("\n")[0] || phren.titles[0] || "");
   }
 

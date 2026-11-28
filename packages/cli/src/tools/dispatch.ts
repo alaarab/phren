@@ -1,4 +1,3 @@
-import { mergeTaskIdentitySchema } from "../task/merge-links.js";
 import { prsSchema } from "../bridge/return-contract.js";
 import { ownerInboxSchema } from "../bridge/owner-inbox.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -34,8 +33,7 @@ export function register(server: McpServer): void {
   server.registerTool("dispatch_report", {
     title: "◆ phren · report PRs",
     description: "Report PR evidence to this worker's own Hook before finishing the turn. The done return carries prs (url, repo, branch, tests summary, notes), and the Hook queues it to the configured integrator. The Hook posts each PR link on the dispatch's issue or the issue named here. Check issueLinks for the result.",
-    inputSchema: { prs: prsSchema, issue: dispatchIssueSchema.optional(),
-      task: mergeTaskIdentitySchema.optional().describe("Deprecated task identity, accepted and ignored.") },
+    inputSchema: { prs: prsSchema, issue: dispatchIssueSchema.optional() },
   }, async input => {
     try {
       const origin = await terminalPaneFromEnv();
@@ -51,7 +49,7 @@ export function register(server: McpServer): void {
   });
   server.registerTool("owner_inbox", {
     title: "◆ phren · owner inbox",
-    description: "One owner inbox on this conductor's Hook for everything that waits on the owner. Post each owner-only action as a title and a paste-able command, with task (bid), pr and issue (domain/owner/name#N) links where available. The paste resolves that revision of the item after the command succeeds. Resolve can also supply ifUpdatedAt to require the item's current updatedAt. Open actions resolve automatically when their GitHub or gitboy PR merges or closes, or when the linked task is Done. GitLab merge requests can be linked for reference. A PR or key matches an open item, and conflicting identifiers are rejected. Re-adding a resolved manual id with changed fields reopens it. Automatic needs-you and blocked items are deduplicated by pane, session and question, and resolve when their source stops waiting or disappears. Lists show verified live automatic items. Resolving an inbox item leaves any worker prompt awaiting its own answer. Use operation add, list or resolve (also through phren_admin action owner_inbox). Set includeResolved to list history.",
+    description: "One owner inbox on this conductor's Hook for everything that waits on the owner. Post each owner-only action as a title and a paste-able command, with PR and issue (domain/owner/name#N) links where available. The paste resolves that revision of the item after the command succeeds. Resolve can also supply ifUpdatedAt to require the item's current updatedAt. Open actions resolve automatically when their GitHub or gitboy PR merges or closes. GitLab merge requests can be linked for reference. A PR or key matches an open item, and conflicting identifiers are rejected. Re-adding a resolved manual id with changed fields reopens it. Automatic needs-you and blocked items are deduplicated by pane, session and question, and resolve when their source stops waiting or disappears. Lists show verified live automatic items. Resolving an inbox item leaves any worker prompt awaiting its own answer. Use operation add, list or resolve (also through phren_admin action owner_inbox). Set includeResolved to list history.",
     inputSchema: ownerInboxSchema.omit({ action: true, issues: true }).extend({ operation: ownerInboxSchema.shape.action }),
   }, async input => {
     try {
@@ -65,25 +63,14 @@ export function register(server: McpServer): void {
   });
   server.registerTool("dispatch_returns", {
     title: "◆ phren · dispatch returns",
-    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), is parked waiting on something that is not the owner (waiting: CI, background work or a queue, with waitingOn ci|background|queue|other and waitingFor, the sentence its turn ended on), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. Resume a parked worker with hand_off when the work it awaits is ready. A blocked row with an `approval` field (actionId, tool, request) is a permission request the worker is waiting on, forwarded from its computer: answer it with dispatch_approve. A worker that ended its turn with background tasks pending is waited on for up to two hours; a row has `waited` (the most tasks it waited on) or, if some were still running after that, `background`. A stalled row flags an unchanged working screen and transcript. A done row can include structured prs and integratorDelivery. A done, waiting, needs-you or failed row can also carry tasks: every task the worker's session took on (project, bid, resolution, title); resolution open means it still owes the work, and a return whose turn left one open reads needs-you with the bids in its question unless the worker is waiting. Reading a done return closes its finished pane unless closeOnFinish:false was specified, after rechecking new and queued work. Each row has the dispatch id, computer, project, label, the worker's target for hand_off, and phase (working, waiting, needs-owner or done) folding the worker's own state into one word. When the owner has turned on `phren config account-failover on` (off by default), a Claude worker that stopped at its usage limit is continued on another signed-in account with room (same computer first, never the same login before its window resets): its row comes back with continued (the new dispatch id, computer and account, or why none could) and the error says \"Continued on account X\".",
+    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), is parked waiting on something that is not the owner (waiting: CI, background work or a queue, with waitingOn ci|background|queue|other and waitingFor, the sentence its turn ended on), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. Resume a parked worker with hand_off when the work it awaits is ready. A blocked row with an `approval` field (actionId, tool, request) is a permission request the worker is waiting on, forwarded from its computer: answer it with dispatch_approve. A worker that ended its turn with background tasks pending is waited on for up to two hours; a row has `waited` (the most tasks it waited on) or, if some were still running after that, `background`. A stalled row flags an unchanged working screen and transcript. A done row can include structured prs and integratorDelivery. Reading a done return closes its finished pane unless closeOnFinish:false was specified, after rechecking new and queued work. Each row has the dispatch id, computer, project, label, the worker's target for hand_off, and phase (working, waiting, needs-owner or done) folding the worker's own state into one word. When the owner has turned on `phren config account-failover on` (off by default), a Claude worker that stopped at its usage limit is continued on another signed-in account with room (same computer first, never the same login before its window resets): its row comes back with continued (the new dispatch id, computer and account, or why none could) and the error says \"Continued on account X\".",
     inputSchema: {},
   }, async () => {
     try {
       const origin = await terminalPaneFromEnv();
       const result = await hookRequest("/v1/dispatch/returns", { ...(origin ? { origin } : {}) });
       const returns = Array.isArray(result.returns) ? result.returns : [];
-      // The worker session's task ledger (session-tasks.ts): one line per task under its return.
-      const blocks = returns.flatMap(raw => {
-        const row = object(raw), tasks: unknown[] = Array.isArray(row.tasks) ? row.tasks : [];
-        return tasks.length ? [`- ${String(row.computer)} ${String(row.label)} ${String(row.state)}`,
-          ...tasks.map(task => {
-            const entry = object(task);
-            const title = String(entry.title ?? "");
-            return `  - ${String(entry.project)} bid:${String(entry.stableId)} ${String(entry.resolution)}${title ? `: ${title}` : ""}`;
-          })] : [];
-      });
-      return mcpResponse({ ok: true, data: result, message: returns.length
-        ? [`${returns.length} unread returns.`, ...blocks].join("\n") : "No unread returns." });
+      return mcpResponse({ ok: true, data: result, message: returns.length ? `${returns.length} unread returns.` : "No unread returns." });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not read dispatch returns." });
     }

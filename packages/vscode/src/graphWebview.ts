@@ -63,7 +63,6 @@ interface ProjectSummaryData {
   summary: string;
   files: ProjectSummaryFile[];
   findingCount: number;
-  taskCount: number;
 }
 
 interface FindingData {
@@ -80,13 +79,6 @@ interface FindingPage {
   total: number;
 }
 
-interface TaskData {
-  id: string;
-  line: string;
-  section: string;
-  checked: boolean;
-  priority?: string;
-}
 
 interface EntityData {
   id?: string;
@@ -98,7 +90,7 @@ interface EntityData {
 
 interface GraphNode {
   id: string;
-  kind: "project" | "finding" | "task" | "entity" | "reference";
+  kind: "project" | "finding" | "entity" | "reference";
   projectName: string;
   label: string;
   subtype: string;
@@ -119,11 +111,9 @@ interface GraphNode {
   topicSlug?: string;
   topicLabel?: string;
   scoreKey?: string;
-  taskItemId?: string;
   checked?: boolean;
   store?: string;
   findingCount?: number;
-  taskCount?: number;
 }
 
 interface GraphEdge {
@@ -199,7 +189,7 @@ export function computeMtimeKey(storePath: string): string {
     const parts: string[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-      for (const file of ["FINDINGS.md", "tasks.md", "summary.md"]) {
+      for (const file of ["FINDINGS.md", "summary.md"]) {
         const fp = path.join(storePath, entry.name, file);
         try {
           const stat = fs.statSync(fp);
@@ -341,116 +331,9 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       return;
     }
 
-    if (command === "saveTaskEdit") {
-      const projectName = asString(message.projectName);
-      const item = asString(message.item);
-      const nextText = asString(message.text);
-      const section = asString(message.section);
-      const priority = asString(message.priority);
-      const nodeId = asString(message.nodeId);
-      if (!projectName || !item || !nextText) return;
-      if (!isValidProjectName(projectName)) return;
 
-      try {
-        await mutate(() => client.updateTask(projectName, item, {
-          text: nextText,
-          section,
-          priority,
-        }));
-        if (nodeId) {
-          panel.webview.postMessage({
-            type: "nodeUpdated",
-            id: nodeId,
-            changes: { text: nextText, section, priority },
-          });
-        } else {
-          await refreshGraph();
-        }
-      } catch (err) {
-        vscode.window.showErrorMessage(`Failed to update task: ${toErrorMessage(err)}`);
-      }
-      return;
-    }
 
-    if (command === "completeTask") {
-      const projectName = asString(message.projectName);
-      const item = asString(message.item);
-      const nodeId = asString(message.nodeId);
-      if (!projectName || !item) return;
-      if (!isValidProjectName(projectName)) return;
 
-      try {
-        await mutate(() => client.completeTask(projectName, item));
-        if (nodeId) {
-          panel.webview.postMessage({
-            type: "nodeUpdated",
-            id: nodeId,
-            changes: { section: "Done" },
-          });
-        } else {
-          await refreshGraph();
-        }
-      } catch (err) {
-        vscode.window.showErrorMessage(`Failed to complete task: ${toErrorMessage(err)}`);
-      }
-      return;
-    }
-
-    if (command === "moveTask") {
-      const projectName = asString(message.projectName);
-      const item = asString(message.item);
-      const section = asString(message.section);
-      const nodeId = asString(message.nodeId);
-      if (!projectName || !item || !section) return;
-      if (!isValidProjectName(projectName)) return;
-
-      try {
-        await mutate(() => client.updateTask(projectName, item, { section }));
-        if (nodeId) {
-          panel.webview.postMessage({
-            type: "nodeUpdated",
-            id: nodeId,
-            changes: { section },
-          });
-        } else {
-          await refreshGraph();
-        }
-      } catch (err) {
-        vscode.window.showErrorMessage(`Failed to move task: ${toErrorMessage(err)}`);
-      }
-      return;
-    }
-
-    if (command === "deleteTask") {
-      const projectName = asString(message.projectName);
-      const item = asString(message.item);
-      const nodeId = asString(message.nodeId);
-      if (!projectName || !item) return;
-      if (!isValidProjectName(projectName)) return;
-
-      const confirmed = await vscode.window.showWarningMessage(
-        `Delete this task from ${projectName}?`,
-        { modal: true },
-        "Delete",
-      );
-      if (confirmed !== "Delete") return;
-
-      try {
-        await mutate(() => client.removeTask(projectName, item));
-        if (nodeId) {
-          panel.webview.postMessage({
-            type: "nodeRemoved",
-            id: nodeId,
-            undo: { kind: "task", projectName, item, label: "Task deleted" },
-          });
-        } else {
-          await refreshGraph();
-        }
-      } catch (err) {
-        vscode.window.showErrorMessage(`Failed to delete task: ${toErrorMessage(err)}`);
-      }
-      return;
-    }
 
     if (command === "deleteBatch") {
       const items = asArray(message.items)
@@ -476,10 +359,6 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
               const text = asString(it.text) ?? "";
               await client.removeFinding(projectName, text);
               deleted.push({ kind, projectName, text, item: "" });
-            } else if (kind === "task") {
-              const item = asString(it.item) ?? asString(it.text) ?? "";
-              await client.removeTask(projectName, item);
-              deleted.push({ kind, projectName, text: asString(it.text) ?? "", item });
             }
           } catch {
             // Skip failures; the refresh below reflects whatever succeeded.
@@ -560,7 +439,6 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
           if (!projectName || !isValidProjectName(projectName)) continue;
           try {
             if (kind === "finding") await client.addFinding(projectName, asString(it.text) ?? "");
-            else if (kind === "task") await client.addTask(projectName, asString(it.item) ?? asString(it.text) ?? "");
           } catch {
             // best-effort restore
           }
@@ -570,27 +448,14 @@ export async function showGraphWebview(client: PhrenClient, context: vscode.Exte
       return;
     }
 
-    if (command === "undoDeleteTask") {
-      const projectName = asString(message.projectName);
-      const item = asString(message.item);
-      if (!projectName || !item) return;
-      if (!isValidProjectName(projectName)) return;
-      try {
-        await mutate(() => client.addTask(projectName, item));
-        await refreshGraph();
-      } catch (err) {
-        vscode.window.showErrorMessage(`Failed to restore task: ${toErrorMessage(err)}`);
-      }
-      return;
-    }
 
   });
 
-  // Watch FINDINGS.md / tasks.md under the phren store and refresh on external edits.
+  // Watch FINDINGS.md under the phren store and refresh on external edits.
   let watcher: vscode.FileSystemWatcher | null = null;
   let refreshDebounce: NodeJS.Timeout | null = null;
   try {
-    const pattern = new vscode.RelativePattern(storePath, "**/{FINDINGS,tasks}.md");
+    const pattern = new vscode.RelativePattern(storePath, "**/FINDINGS.md");
     watcher = vscode.workspace.createFileSystemWatcher(pattern);
     const onExternalChange = () => {
       if (Date.now() < suppressWatcherUntil) return;
@@ -677,12 +542,11 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
       async (p) => {
         try {
           const topicConfig = await fetchTopicConfig(client, p.name);
-          const [summary, findings, tasks] = await Promise.all([
+          const [summary, findings] = await Promise.all([
             fetchProjectSummary(client, p.name),
             fetchFindings(client, p.name, topicConfig),
-            fetchTasks(client, p.name),
           ]);
-          return { projectName: p.name, summary, findings, tasks, topicConfig, store: p.store };
+          return { projectName: p.name, summary, findings, topicConfig, store: p.store };
         } catch (error) {
           projectErrors.set(p.name, toErrorMessage(error));
           return null;
@@ -716,15 +580,14 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
   const edges: GraphEdge[] = [];
   const summaryMap: Record<string, ProjectSummaryData> = {};
   // Build project nodes (skip empty orphans)
-  for (const { projectName, summary, findings: findingPage, tasks, topicConfig, store } of perProjectResults) {
+  for (const { projectName, summary, findings: findingPage, store } of perProjectResults) {
     const findings = findingPage.findings;
-    if (findingPage.total === 0 && tasks.length === 0) continue;
+    if (findingPage.total === 0) continue;
 
+    summaryMap[projectName] = summary;
     const projectNodeId = `project:${projectName}`;
     // Show what the project holds, not the page of findings drawn here.
     const findingTotal = summary.findingCount || findingPage.total;
-    const taskTotal = summary.taskCount || tasks.length;
-    summaryMap[projectName] = { ...summary, findingCount: findingTotal, taskCount: taskTotal };
 
     nodes.push({
       id: projectNodeId,
@@ -733,11 +596,10 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
       label: projectName,
       subtype: "project",
       text: summary.summary,
-      radius: Math.min(14 + Math.sqrt(findingPage.total + tasks.length) * 1.5, 30),
+      radius: Math.min(14 + Math.sqrt(findingPage.total) * 1.5, 30),
       color: "#7B68AE",
       store,
       findingCount: findingTotal,
-      taskCount: taskTotal,
     });
 
     // Finding nodes
@@ -767,34 +629,6 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
       edges.push({ source: projectNodeId, target: findingId });
     }
 
-    // Task nodes
-    for (const task of tasks) {
-      const taskId = `task:${projectName}:${task.id}`;
-      const taskScoreKey = buildScoreKey(projectName, "tasks.md", task.line);
-      const taskScore = scoreLookup.get(taskScoreKey);
-      const sectionLower = task.section.toLowerCase();
-      const taskColorMap: Record<string, string> = { active: "#10b981", queue: "#00E5FF", done: "#6b7280" };
-      nodes.push({
-        id: taskId,
-        kind: "task",
-        projectName,
-        label: task.line.slice(0, 40) + (task.line.length > 40 ? "..." : ""),
-        subtype: sectionLower,
-        text: task.line,
-        radius: 7,
-        color: taskColorMap[sectionLower] || "#00E5FF",
-        section: task.section,
-        priority: task.priority,
-        scoreKey: taskScoreKey,
-        qualityMultiplier: qualityMultiplierFromEntry(taskScore),
-        lastUsedAt: taskScore?.lastUsedAt,
-        helpful: taskScore?.helpful,
-        taskItemId: task.id,
-        checked: task.checked,
-        store,
-      });
-      edges.push({ source: projectNodeId, target: taskId });
-    }
   }
 
   // Fragment nodes and edges
@@ -889,13 +723,13 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
     const plural = total === 1 ? "" : "s";
     if (count === total) {
       // Every project failed to load — an empty answer here is a failure, not
-      // an empty store, so say so instead of "no findings or tasks yet".
+      // an empty store, so say so instead of "no findings yet".
       const first = failedProjects[0];
       payload.emptyReason = `Could not load memory for ${total} project${plural} in ${storePath}; see Phren: Show Log. First error (${first.name}): ${projectErrors.get(first.name)}`;
     } else if (count > 0) {
-      payload.emptyReason = `Could not load memory for ${count} of ${total} project${plural} in ${storePath}; the rest have no findings or tasks. See Phren: Show Log.`;
+      payload.emptyReason = `Could not load memory for ${count} of ${total} project${plural} in ${storePath}; the rest have no findings. See Phren: Show Log.`;
     } else {
-      payload.emptyReason = `No findings or tasks yet for the ${total} project${plural} in ${storePath}.`;
+      payload.emptyReason = `No findings yet for the ${total} project${plural} in ${storePath}.`;
     }
   }
   return payload;
@@ -945,7 +779,6 @@ export async function fetchProjectSummary(client: PhrenClient, project: string):
     summary: asString(data?.summary) ?? "No summary.md found.",
     files,
     findingCount: typeof counts?.findings === "number" ? counts.findings : 0,
-    taskCount: typeof counts?.openTasks === "number" ? counts.openTasks : 0,
   };
 }
 
@@ -993,43 +826,6 @@ export async function fetchTopicConfig(client: PhrenClient, project: string): Pr
   } catch {
     return [];
   }
-}
-
-export async function fetchTasks(client: PhrenClient, project: string): Promise<TaskData[]> {
-  const raw = await client.getTasks(project, { status: "all", done_limit: 10 });
-  const data = responseData(raw);
-  const items = asRecord(data?.items);
-  const parsed: TaskData[] = [];
-
-  for (const section of ["Active", "Queue"]) {
-    for (const entry of asArray(items?.[section])) {
-      const record = asRecord(entry);
-      if (!record) continue;
-      parsed.push({
-        id: asString(record.id) ?? String(parsed.length),
-        line: asString(record.line) ?? asString(record.item) ?? "",
-        section,
-        checked: record.checked === true,
-        priority: asString(record.priority),
-      });
-    }
-  }
-
-  // Include up to 10 done items
-  const doneItems = asArray(items?.Done).slice(0, 10);
-  for (const entry of doneItems) {
-    const record = asRecord(entry);
-    if (!record) continue;
-    parsed.push({
-      id: asString(record.id) ?? String(parsed.length),
-      line: asString(record.line) ?? asString(record.item) ?? "",
-      section: "Done",
-      checked: true,
-      priority: asString(record.priority),
-    });
-  }
-
-  return parsed;
 }
 
 export async function fetchEntities(client: PhrenClient): Promise<EntityData[]> {
@@ -1604,7 +1400,6 @@ ${graphScript}
   function nodeKindLabel(node) {
     if (node.kind === 'entity') return node.entityType ? 'Fragment · ' + node.entityType : 'Fragment';
     if (node.kind === 'finding') return node.topicLabel ? 'Finding · ' + node.topicLabel : 'Finding';
-    if (node.kind === 'task') return 'Task';
     if (node.kind === 'reference') return 'Reference';
     if (node.kind === 'project') return 'Project';
     return node.kind || 'Node';
@@ -1625,13 +1420,12 @@ ${graphScript}
   }
 
   function projectCounts(node) {
-    var counts = { finding: 0, task: 0, entity: 0, reference: 0 };
+    var counts = { finding: 0, entity: 0, reference: 0 };
     var ids = neighbors(node.id);
     for (var index = 0; index < ids.length; index++) {
       var neighbor = nodeLookup[ids[index]];
       if (!neighbor) continue;
       if (neighbor.kind === 'finding') counts.finding++;
-      else if (neighbor.kind === 'task') counts.task++;
       else if (neighbor.kind === 'entity') counts.entity++;
       else if (neighbor.kind === 'reference') counts.reference++;
     }
@@ -1686,7 +1480,7 @@ ${graphScript}
     else if (n.kind === 'finding') {
       group = n.topicSlug ? 'topic:' + n.topicSlug : 'topic:general';
       if (n.topicSlug && !topicMap[n.topicSlug]) topicMap[n.topicSlug] = n.topicLabel || n.topicSlug;
-    } else if (n.kind === 'task') group = 'task-' + (n.subtype || 'queue');
+    }
     else if (n.kind === 'entity') group = 'entity';
     else if (n.kind === 'reference') group = 'reference';
 
@@ -1709,7 +1503,6 @@ ${graphScript}
       tagged: n.kind === 'finding',
       store: n.store || '',
       findingCount: typeof n.findingCount === 'number' ? n.findingCount : undefined,
-      taskCount: typeof n.taskCount === 'number' ? n.taskCount : undefined
     });
   }
 
@@ -1719,16 +1512,14 @@ ${graphScript}
   for (var totalsIdx = 0; totalsIdx < graphNodes.length; totalsIdx++) {
     var totalsNode = graphNodes[totalsIdx];
     if (totalsNode.group === 'project' || !totalsNode.project) continue;
-    var totals = projectTotals[totalsNode.project] || (projectTotals[totalsNode.project] = { findings: 0, tasks: 0 });
+    var totals = projectTotals[totalsNode.project] || (projectTotals[totalsNode.project] = { findings: 0 });
     if (totalsNode.group.indexOf('topic:') === 0) totals.findings++;
-    else if (totalsNode.group.indexOf('task-') === 0) totals.tasks++;
   }
   for (var projIdx = 0; projIdx < graphNodes.length; projIdx++) {
     var projNode = graphNodes[projIdx];
     if (projNode.group !== 'project') continue;
-    var projTotals = projectTotals[projNode.project || projNode.id] || { findings: 0, tasks: 0 };
+    var projTotals = projectTotals[projNode.project || projNode.id] || { findings: 0 };
     if (typeof projNode.findingCount !== 'number') projNode.findingCount = projTotals.findings;
-    if (typeof projNode.taskCount !== 'number') projNode.taskCount = projTotals.tasks;
   }
 
   var topics = [];
@@ -1963,21 +1754,19 @@ ${graphScript}
     var chips = [];
     if (node.projectName) chips.push(chip(node.projectName));
     if (node.store) chips.push(chip(node.store));
-    if (node.kind === 'task' && node.section) chips.push(chip(node.section));
-    if (node.kind === 'task' && node.priority) chips.push(chip('Priority ' + node.priority));
 
     var body = '';
     var actions = [];
 
     if (node.kind === 'project') {
       var counts = projectCounts(node);
-      // Compact stat line — the detailed findings/tasks browser lives in the
+      // Compact stat line — the detailed findings browser lives in the
       // contents pane on the right, so the bulky metric grid was redundant.
       var pstat = function(n, label) {
         return '<span style="display:inline-flex;align-items:baseline;gap:5px"><b style="font-size:14px;font-weight:700;color:var(--ink)">' + n + '</b><span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">' + label + '</span></span>';
       };
       body += '<div style="display:flex;flex-wrap:wrap;gap:14px;padding:4px 0 2px">'
-        + pstat(counts.finding, 'findings') + pstat(counts.task, 'tasks')
+        + pstat(counts.finding, 'findings')
         + pstat(counts.entity, 'fragments') + pstat(counts.reference, 'refs')
         + '</div>';
       if (node.text) body += '<div class="node-copy">' + esc(node.text) + '</div>';
@@ -1988,13 +1777,6 @@ ${graphScript}
       if (dateInfo.length) body += '<div class="node-date">' + esc(dateInfo.join(' \u00b7 ')) + '</div>';
       body += '<div class="node-copy">' + esc(node.text || title) + '</div>';
       actions.push('<button type="button" class="btn" data-node-action="edit">Edit</button>');
-      actions.push('<button type="button" class="btn btn-danger" data-node-action="delete">Delete</button>');
-    } else if (node.kind === 'task') {
-      body += '<div class="node-copy">' + esc(node.text || title) + '</div>';
-      actions.push('<button type="button" class="btn" data-node-action="edit">Edit</button>');
-      if ((node.section || '').toLowerCase() !== 'done') actions.push('<button type="button" class="btn" data-node-action="complete">Done</button>');
-      if ((node.section || '').toLowerCase() !== 'active') actions.push('<button type="button" class="btn" data-node-action="move-active">Move to Active</button>');
-      if ((node.section || '').toLowerCase() !== 'queue') actions.push('<button type="button" class="btn" data-node-action="move-queue">Move to Queue</button>');
       actions.push('<button type="button" class="btn btn-danger" data-node-action="delete">Delete</button>');
     } else if (node.kind === 'entity') {
       if (node.connectedProjects && node.connectedProjects.length) {
@@ -2015,34 +1797,23 @@ ${graphScript}
   }
 
   function renderEdit(node) {
-    var title = node.kind === 'task' ? 'Edit task' : 'Edit finding';
+    var title = 'Edit finding';
     var itemTitle = node.label || node.text || node.id;
-    var section = node.section || 'Queue';
-    var priority = node.priority || '';
     return '<div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(title) + '</div>'
       + '<div style="font-size:14px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + esc(itemTitle) + '">' + esc(itemTitle) + '</div>'
       + (node.projectName ? '<div class="node-date">' + esc(node.projectName) + '</div>' : '')
       + '<textarea id="node-editor" class="node-editor">' + esc(node.text || node.label || '') + '</textarea>'
-      + (node.kind === 'task'
-        ? '<div class="node-select-grid">'
-          + '<label class="node-select-wrap">Status<select id="node-section"><option value="Queue"' + (section === 'Queue' ? ' selected' : '') + '>Queue</option><option value="Active"' + (section === 'Active' ? ' selected' : '') + '>Active</option><option value="Done"' + (section === 'Done' ? ' selected' : '') + '>Done</option></select></label>'
-          + '<label class="node-select-wrap">Priority<select id="node-priority"><option value=""' + (!priority ? ' selected' : '') + '>None</option><option value="high"' + (priority === 'high' ? ' selected' : '') + '>High</option><option value="medium"' + (priority === 'medium' ? ' selected' : '') + '>Medium</option><option value="low"' + (priority === 'low' ? ' selected' : '') + '>Low</option></select></label>'
-          + '</div>'
-        : '')
       + '<div class="node-actions"><button type="button" class="btn" data-node-action="save">Save</button><button type="button" class="btn" data-node-action="cancel">Cancel</button></div>';
   }
 
   function bindActions() {
     if (popoverClose) popoverClose.onclick = function() { hidePopover(false); };
-    function taskItemKey() {
-      return (currentNode && (currentNode.taskItemId || currentNode.text)) || '';
-    }
     document.querySelectorAll('[data-node-action]').forEach(function(button) {
       button.addEventListener('click', function() {
         if (!currentNode) return;
         var action = button.getAttribute('data-node-action');
         if (action === 'edit') {
-          editMode = currentNode.kind === 'task' ? 'task' : 'finding';
+          editMode = 'finding';
           renderPopover(currentNode, lastAnchorPoint.x, lastAnchorPoint.y);
           return;
         }
@@ -2055,19 +1826,6 @@ ${graphScript}
           var editor = document.getElementById('node-editor');
           var nextText = editor ? editor.value.trim() : '';
           if (!nextText) return;
-          if (editMode === 'task') {
-            var sectionEl = document.getElementById('node-section');
-            var priorityEl = document.getElementById('node-priority');
-            vscode.postMessage({
-              command: 'saveTaskEdit',
-              projectName: currentNode.projectName,
-              item: taskItemKey(),
-              nodeId: currentNode.id,
-              text: nextText,
-              section: sectionEl ? sectionEl.value : currentNode.section,
-              priority: priorityEl ? priorityEl.value : currentNode.priority
-            });
-          } else {
             vscode.postMessage({
               command: 'saveFindingEdit',
               projectName: currentNode.projectName,
@@ -2075,29 +1833,12 @@ ${graphScript}
               oldText: currentNode.text,
               newText: nextText
             });
-          }
           editMode = null;
           return;
         }
         if (action === 'delete') {
-          if (currentNode.kind === 'task') {
-            vscode.postMessage({ command: 'deleteTask', projectName: currentNode.projectName, item: taskItemKey(), nodeId: currentNode.id });
-          } else if (currentNode.kind === 'finding') {
-            vscode.postMessage({ command: 'deleteFinding', projectName: currentNode.projectName, text: currentNode.text, nodeId: currentNode.id });
-          }
+          vscode.postMessage({ command: 'deleteFinding', projectName: currentNode.projectName, text: currentNode.text, nodeId: currentNode.id });
           hidePopover(true);
-          return;
-        }
-        if (action === 'complete') {
-          vscode.postMessage({ command: 'completeTask', projectName: currentNode.projectName, item: taskItemKey(), nodeId: currentNode.id });
-          return;
-        }
-        if (action === 'move-active') {
-          vscode.postMessage({ command: 'moveTask', projectName: currentNode.projectName, item: taskItemKey(), section: 'Active', nodeId: currentNode.id });
-          return;
-        }
-        if (action === 'move-queue') {
-          vscode.postMessage({ command: 'moveTask', projectName: currentNode.projectName, item: taskItemKey(), section: 'Queue', nodeId: currentNode.id });
           return;
         }
       });
@@ -2164,16 +1905,11 @@ ${graphScript}
 
     if (isEditableTarget(event.target) || editMode) return;
 
-    // Delete / Backspace on a selected finding or task → fire delete action
+    // Delete / Backspace on a selected finding → fire delete action
     if ((event.key === 'Delete' || event.key === 'Backspace') && currentNode) {
       if (currentNode.kind === 'finding') {
         event.preventDefault();
         vscode.postMessage({ command: 'deleteFinding', projectName: currentNode.projectName, text: currentNode.text, nodeId: currentNode.id });
-        hidePopover(true);
-      } else if (currentNode.kind === 'task') {
-        event.preventDefault();
-        var taskItem = (currentNode.taskItemId || currentNode.text) || '';
-        vscode.postMessage({ command: 'deleteTask', projectName: currentNode.projectName, item: taskItem, nodeId: currentNode.id });
         hidePopover(true);
       }
     }
@@ -2294,8 +2030,6 @@ ${graphScript}
         showUndoToast(undo.label || 'Deleted', function() {
           if (undo.kind === 'finding') {
             vscode.postMessage({ command: 'undoDeleteFinding', projectName: undo.projectName, text: undo.text });
-          } else if (undo.kind === 'task') {
-            vscode.postMessage({ command: 'undoDeleteTask', projectName: undo.projectName, item: undo.item });
           }
         });
       }
@@ -2326,8 +2060,6 @@ ${graphScript}
     if (!node) return;
     if (node.kind === 'finding') {
       vscode.postMessage({ command: 'deleteFinding', projectName: node.projectName, text: node.text || node.fullLabel || '', nodeId: node.id });
-    } else if (node.kind === 'task') {
-      vscode.postMessage({ command: 'deleteTask', projectName: node.projectName, item: (node.taskItemId || node.text || node.fullLabel || ''), nodeId: node.id });
     }
   }
   if (window.phrenGraph && window.phrenGraph.onItemAction) {
@@ -2337,17 +2069,6 @@ ${graphScript}
       } else if (action === 'save-inline' && payload && !Array.isArray(payload)) {
         var nextText = (payload.editedText || '').trim();
         if (!nextText) return;
-        if (payload.kind === 'task') {
-          vscode.postMessage({
-            command: 'saveTaskEdit',
-            projectName: payload.projectName,
-            item: payload.taskItemId || payload.text || payload.fullLabel || '',
-            nodeId: payload.id,
-            text: nextText,
-            section: payload.editedSection || payload.section || 'Queue',
-            priority: typeof payload.editedPriority === 'string' ? payload.editedPriority : (payload.priority || '')
-          });
-        } else if (payload.kind === 'finding') {
           vscode.postMessage({
             command: 'saveFindingEdit',
             projectName: payload.projectName,
@@ -2355,7 +2076,6 @@ ${graphScript}
             oldText: payload.text || payload.fullLabel || '',
             newText: nextText
           });
-        }
       } else if (action === 'merge' && Array.isArray(payload) && payload.length === 2) {
         vscode.postMessage({
           command: 'mergeFindings',
@@ -2366,7 +2086,7 @@ ${graphScript}
       } else if (action === 'delete-batch' && Array.isArray(payload)) {
         // One message → one confirm on the extension side (not N modals).
         vscode.postMessage({ command: 'deleteBatch', items: payload.map(function(n) {
-          return { kind: n.kind, projectName: n.projectName, text: n.text || n.fullLabel || '', item: (n.taskItemId || n.text || n.fullLabel || '') };
+          return { kind: n.kind, projectName: n.projectName, text: n.text || n.fullLabel || '' };
         }) });
       }
     });

@@ -588,7 +588,7 @@
             <a href="#cli-general" class="sidebar-link sub">General</a>
             <a href="#cli-search" class="sidebar-link sub">Search</a>
             <a href="#cli-issues" class="sidebar-link sub">Issues</a>
-            <a href="#cli-tasks" class="sidebar-link sub">Tasks</a>
+            <a href="#cli-issues" class="sidebar-link sub">Issues</a>
             <a href="#cli-findings" class="sidebar-link sub">Findings</a>
             <a href="#cli-projects" class="sidebar-link sub">Projects</a>
             <a href="#cli-skills" class="sidebar-link sub">Skills</a>
@@ -615,7 +615,6 @@
             <a href="#mcp-search" class="sidebar-link sub">Search &amp; Browse</a>
             <a href="#mcp-notes" class="sidebar-link sub">Daily Notes</a>
             <a href="#mcp-issues" class="sidebar-link sub">Issues</a>
-            <a href="#mcp-tasks" class="sidebar-link sub">Task Management</a>
             <a href="#mcp-findings" class="sidebar-link sub">Finding Capture</a>
             <a href="#mcp-memory" class="sidebar-link sub">Memory Quality</a>
             <a href="#mcp-data" class="sidebar-link sub">Data Management</a>
@@ -671,7 +670,6 @@
             <a href="#vs-tree" class="sidebar-link sub">Tree View</a>
             <a href="#vs-search" class="sidebar-link sub">Search</a>
             <a href="#vs-findings" class="sidebar-link sub">Findings</a>
-            <a href="#vs-tasks" class="sidebar-link sub">Tasks</a>
             <a href="#vs-settings" class="sidebar-link sub">Settings</a>
             <a href="#vs-commands" class="sidebar-link sub">Commands</a>
           </div>
@@ -881,7 +879,6 @@ phren add ~/my-project</code></pre>
             <ul>
               <li><code>AGENTS.md</code>: project-specific agent instructions</li>
               <li><code>FINDINGS.md</code>: captured insights and patterns</li>
-              <li><code>tasks.md</code>: task queue (active, queued, done)</li>
               <li><code>summary.md</code>: project summary for context injection</li>
             </ul>
           </div>
@@ -897,7 +894,7 @@ phren add ~/my-project</code></pre>
             <ul>
               <li>Every session start pulls the latest state from git</li>
               <li>Every prompt gets relevant context injected from your knowledge store</li>
-              <li>Every finding and task is persisted back to git after each response</li>
+              <li>Every finding is persisted back to git after each response</li>
             </ul>
           </div>
         </div>
@@ -931,7 +928,7 @@ phren add ~/my-project</code></pre>
         <ol>
           <li><strong>Retrieval</strong>: keyword extraction from your prompt, synonym expansion, FTS5 search, and snippet injection into agent context.</li>
           <li><strong>Governance</strong>: citation validity checks, confidence decay, policy thresholds to filter low-quality memories.</li>
-          <li><strong>Persistence</strong>: MCP tools write findings/tasks, the Stop hook auto-commits and pushes to git.</li>
+          <li><strong>Persistence</strong>: MCP tools write findings, the Stop hook auto-commits and pushes to git.</li>
         </ol>
         <p>Hooks run at lifecycle points:</p>
         <ul>
@@ -963,7 +960,7 @@ flowchart LR
         </pre>
 
         <h2 id="gs-multi-repo">Multi-Repo Setup <a href="#gs-multi-repo" class="anchor-link">#</a></h2>
-        <p>Add as many projects as you want. Each gets its own findings, tasks, and config:</p>
+        <p>Add as many projects as you want. Each gets its own findings and config:</p>
         <pre><code>phren add ~/frontend-app
 phren add ~/backend-api
 phren add ~/shared-lib</code></pre>
@@ -1053,7 +1050,7 @@ phren hooks errors --limit 5</code></pre>
         <p class="docs-subtitle">Read your memory and talk to your running agents from your phone. Nothing goes through a phren server.</p>
 
         <h2 id="ios-app">phren for iPhone and Android <a href="#ios-app" class="anchor-link">#</a></h2>
-        <p>The app shows findings, notes, tasks, and the review queue from your store, and lets you chat with the agent sessions on your computers. The iPhone app is in TestFlight testing and the Android app is in early testing; neither is in a store yet. <a href="get-started.html">Get started</a> walks through setup step by step. <a href="apps.html">Phren apps</a> shows each app with screenshots. The <a href="ios.html">iPhone</a> and <a href="android.html">Android</a> pages cover each app, and <a href="privacy.html">the privacy policy</a> covers both.</p>
+        <p>The app shows findings, notes, and the review queue from your store, and lets you chat with the agent sessions on your computers. The iPhone app is in TestFlight testing and the Android app is in early testing; neither is in a store yet. <a href="get-started.html">Get started</a> walks through setup step by step. <a href="apps.html">Phren apps</a> shows each app with screenshots. The <a href="ios.html">iPhone</a> and <a href="android.html">Android</a> pages cover each app, and <a href="privacy.html">the privacy policy</a> covers both.</p>
         <p>It needs:</p>
         <ul>
           <li><strong>Phren Hook</strong> on each computer that runs your agents. <code>npx --yes @phren/cli@latest pair</code> installs it and pairs the phone.</li>
@@ -1234,21 +1231,16 @@ sequenceDiagram
     Agent->>Phren: session(action: start, project: my-app)
     Phren->>Files: Read last session summary
     Phren->>Files: Read recent findings
-    Phren->>Files: Read task checkpoints
-    Phren-->>Agent: Summary + findings + active task + hints
+    Phren-->>Agent: Summary + findings + preferences
 
     Note over Agent,Phren: Agent works...
 
     Agent->>Phren: add_finding(...)
-    Agent->>Phren: manage_task(action: complete)
 
     Agent->>Phren: session(action: end, summary)
     Phren->>Files: Write session summary
-    Phren->>Files: Save task checkpoints
         </pre>
 
-        <h3 id="c-checkpoints">Task Checkpoints</h3>
-        <p>Checkpoints record the state of in-progress work so an agent can pick up where the last one stopped. Each captures the task ID, edited files, failing tests, and next-step hints. Stored in <code>.sessions/</code> and cleared on task completion.</p>
       </section>
 
       <!-- ============================================================ -->
@@ -1309,7 +1301,7 @@ sequenceDiagram
         <p>Policy is configured via JSON files in <code>~/.phren/.config/</code>. Use <code>phren config</code> subcommands to read and write these safely.</p>
         <pre><code>phren config policy get
 phren config policy set memoryTTLDays=90 decayMultiplier=0.8
-phren config workflow set taskMode=auto findingSensitivity=high</code></pre>
+phren config workflow set findingSensitivity=high</code></pre>
 
         <h2 id="cfg-hooks">Hook Configuration <a href="#cfg-hooks" class="anchor-link">#</a></h2>
         <p>Four built-in hooks fire automatically for Claude Code:</p>
@@ -1329,11 +1321,11 @@ phren hooks disable codex
 phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
 
         <h2 id="cfg-proactivity">Proactivity <a href="#cfg-proactivity" class="anchor-link">#</a></h2>
-        <p>Controls how aggressively phren captures findings and tasks:</p>
+        <p>Controls how aggressively phren captures findings:</p>
         <div class="table-scroll"><table class="docs-table">
           <thead><tr><th>Level</th><th>Behavior</th></tr></thead>
           <tbody>
-            <tr><td><code>high</code></td><td>Always auto-capture findings and tasks</td></tr>
+            <tr><td><code>high</code></td><td>Always auto-capture findings</td></tr>
             <tr><td><code>medium</code></td><td>Capture only on explicit signals</td></tr>
             <tr><td><code>low</code></td><td>Fully manual. The agent never captures on its own.</td></tr>
             <tr><td><code>off</code></td><td>Passive MCP server only</td></tr>
@@ -1443,42 +1435,8 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
           <div class="ref-card-desc">Close an issue, optionally with one comment.</div>
         </div>
 
-        <h2 id="cli-tasks">Tasks <a href="#cli-tasks" class="anchor-link">#</a></h2>
-
-        <div class="ref-card">
-          <div class="ref-card-name">phren tasks</div>
-          <div class="ref-card-desc">Cross-project task view. Shows all active and queued tasks.</div>
-        </div>
-
-        <div class="ref-card">
-          <div class="ref-card-name">phren task add &lt;project&gt; "..."</div>
-          <div class="ref-card-desc">Add a task to a project's queue.</div>
-        </div>
-
-        <div class="ref-card">
-          <div class="ref-card-name">phren task complete &lt;project&gt; "..."</div>
-          <div class="ref-card-desc">Complete a task by matching its text.</div>
-        </div>
-
-        <div class="ref-card">
-          <div class="ref-card-name">phren task next [project]</div>
-          <div class="ref-card-desc">Pick the next highest-priority task.</div>
-        </div>
-
-        <div class="ref-card">
-          <div class="ref-card-name">phren task promote &lt;project&gt; "..." [--active]</div>
-          <div class="ref-card-desc">Promote a task to a higher priority section.</div>
-        </div>
-
-        <div class="ref-card">
-          <div class="ref-card-name">phren task tidy [project] [--keep=&lt;n&gt;]</div>
-          <div class="ref-card-desc">Archive completed tasks.</div>
-        </div>
-
-        <div class="ref-card">
-          <div class="ref-card-name">phren task create-issue &lt;project&gt; "..." [--repo &lt;owner/name&gt;]</div>
-          <div class="ref-card-desc">Create a GitHub issue from a task and link it back.</div>
-        </div>
+        <h2 id="cli-issues">Forge Issues</h2>
+        <p>Use <code>phren issue</code> to list, show, create, edit, claim, comment on, or close issues in GitHub and gitboy. <a href="issues.md">Forge issues</a></p>
 
         <h2 id="cli-findings">Findings <a href="#cli-findings" class="anchor-link">#</a></h2>
 
@@ -1733,7 +1691,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
 
         <div class="ref-card">
           <div class="ref-card-name">phren modules enable|disable &lt;name&gt; [--profile &lt;name&gt;]</div>
-          <div class="ref-card-desc">Enable or disable a module: <code>tasks</code>, <code>hook</code>, <code>git</code>, <code>schedules</code>, <code>conductor</code>, <code>fanout</code>, <code>code</code>.</div>
+          <div class="ref-card-desc">Enable or disable a module: <code>hook</code>, <code>git</code>, <code>schedules</code>, <code>conductor</code>, <code>fanout</code>, <code>code</code>.</div>
         </div>
 
         <div class="ref-card">
@@ -1748,7 +1706,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
 
         <div class="ref-card">
           <div class="ref-card-name">phren config clanker [on|off]</div>
-          <div class="ref-card-desc">Clanker mode: the prompt hook, <code>search_knowledge</code>, <code>get_tasks</code> and <code>get_findings</code> return one row per hit (id, title, keywords, score) and agents fetch the text by id with <code>get_memory_detail</code>. On for new installs; <code>phren init --clanker off</code> skips it.</div>
+          <div class="ref-card-desc">Clanker mode: the prompt hook, <code>search_knowledge</code> and <code>get_findings</code> return one row per hit (id, title, keywords, score) and agents fetch the text by id with <code>get_memory_detail</code>. On for new installs; <code>phren init --clanker off</code> skips it.</div>
         </div>
 
         <h2 id="cli-maintenance">Maintenance <a href="#cli-maintenance" class="anchor-link">#</a></h2>
@@ -1814,16 +1772,13 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
             <tr><th>Tool</th><th>Use</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>search_knowledge</code></td><td>Search findings, docs, and tasks</td></tr>
+            <tr><td><code>search_knowledge</code></td><td>Search findings and docs</td></tr>
             <tr><td><code>get_memory_detail</code></td><td>Fetch one memory by id</td></tr>
             <tr><td><code>get_project_summary</code></td><td>A project's summary and docs</td></tr>
             <tr><td><code>add_finding</code></td><td>Save findings. Pass <code>kind: "note"</code> for a daily note.</td></tr>
             <tr><td><code>revise_finding</code></td><td>Actions: supersede, retract, edit, remove, link, resolve_contradiction, pin, feedback</td></tr>
             <tr><td><code>list_issues</code></td><td>List GitHub or gitboy issues</td></tr>
             <tr><td><code>get_issue</code></td><td>Read one issue with its checklist</td></tr>
-            <tr><td><code>get_tasks</code></td><td>Read tasks</td></tr>
-            <tr><td><code>add_task</code></td><td>Add tasks to the queue</td></tr>
-            <tr><td><code>manage_task</code></td><td>Actions: complete, update, remove, pin, tidy</td></tr>
             <tr><td><code>session</code></td><td>Actions: start, end, context, history</td></tr>
             <tr><td><code>phren_admin</code></td><td>Every other tool by name. <code>action: "list_actions"</code> lists them with their parameters.</td></tr>
           </tbody>
@@ -1834,7 +1789,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <h2 id="mcp-search">Search &amp; Browse <span class="cat-badge cat-search">10 tools</span> <a href="#mcp-search" class="anchor-link">#</a></h2>
 
         <details class="ref-card"><summary><span class="ref-card-name">search_knowledge</span><span class="ref-card-desc">FTS5 search with synonym expansion</span></summary><div class="ref-card-details"><div class="ref-card-params">(query, type?, limit?, project?)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">get_memory_detail</span><span class="ref-card-desc">Fetch full content by id: a fid:/bid: finding or task, or a mem: document</span></summary><div class="ref-card-details"><div class="ref-card-params">(id, offset?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">get_memory_detail</span><span class="ref-card-desc">Fetch full content by id: a fid: for a finding, or a mem: document</span></summary><div class="ref-card-details"><div class="ref-card-params">(id, offset?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">get_project_summary</span><span class="ref-card-desc">Project summary + file list</span></summary><div class="ref-card-details"><div class="ref-card-params">(name)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">list_projects</span><span class="ref-card-desc">All projects in active profile</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">get_findings</span><span class="ref-card-desc">Read recent findings without a search query</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, limit?, status?)</div></div></details>
@@ -1861,16 +1816,6 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <details class="ref-card"><summary><span class="ref-card-name">claim_issue</span><span class="ref-card-desc">Assign the issue to you for this computer, or release it</span></summary><div class="ref-card-details"><div class="ref-card-params">(repo?, project?, number, release?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">comment_issue</span><span class="ref-card-desc">Post one comment and return its URL</span></summary><div class="ref-card-details"><div class="ref-card-params">(repo?, project?, number, body)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">close_issue</span><span class="ref-card-desc">Close an issue, optionally with one comment</span></summary><div class="ref-card-details"><div class="ref-card-params">(repo?, project?, number, comment?)</div></div></details>
-
-        <h2 id="mcp-tasks">Task Management <span class="cat-badge cat-task">7 tools</span> <a href="#mcp-tasks" class="anchor-link">#</a></h2>
-
-        <details class="ref-card"><summary><span class="ref-card-name">get_tasks</span><span class="ref-card-desc">Read tasks, or fetch a single item by ID/text</span></summary><div class="ref-card-details"><div class="ref-card-params">(project?, id?, item?)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">add_task</span><span class="ref-card-desc">Add one or more tasks to queue</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, item: string | string[])</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">complete_task</span><span class="ref-card-desc">Move task(s) to done by text match</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, item: string | string[])</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">update_task</span><span class="ref-card-desc">Update text, priority, context, section, pin, promote, work_next, or GitHub link</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, item?, updates)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">remove_task</span><span class="ref-card-desc">Remove one or more tasks by matching text</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, item: string | string[])</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">tidy_done_tasks</span><span class="ref-card-desc">Archive completed tasks</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, keep?, dry_run?)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">pin_task</span><span class="ref-card-desc">Pin or unpin a task</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, item, unpin?)</div></div></details>
 
         <h2 id="mcp-findings">Finding Capture <span class="cat-badge cat-finding">9 tools</span> <a href="#mcp-findings" class="anchor-link">#</a></h2>
 
@@ -2037,12 +1982,12 @@ tags: [devops, deploy]
           <thead><tr><th>Command</th><th>What it does</th></tr></thead>
           <tbody>
             <tr><td><code>/phren-sync</code></td><td>Pull your store onto this machine or push local changes back</td></tr>
-            <tr><td><code>/phren-init</code></td><td>Set up a new project with a summary, AGENTS.md, tasks, and skill templates</td></tr>
+            <tr><td><code>/phren-init</code></td><td>Set up a new project with a summary, AGENTS.md and skill templates</td></tr>
             <tr><td><code>/phren-discover</code></td><td>Audit your store and say what needs attention</td></tr>
             <tr><td><code>/phren-consolidate</code></td><td>Find patterns across projects and surface ones that apply everywhere</td></tr>
             <tr><td><code>/phren-profiles</code></td><td>Change which profile a machine uses and which projects a profile holds</td></tr>
             <tr><td><code>/phren-summarize</code></td><td>Write the summary paragraph for each topic archive with the model you are already running</td></tr>
-            <tr><td><code>/conductor</code></td><td>Coordinate a project's tasks across your enrolled computers and integrate the returns</td></tr>
+            <tr><td><code>/conductor</code></td><td>Coordinate a project's issues across your enrolled computers and integrate the returns</td></tr>
             <tr><td><code>/fanout</code></td><td>Hand bounded work to headless agent workers</td></tr>
           </tbody>
         </table></div>
@@ -2071,14 +2016,7 @@ phren skills remove my-project deploy         # Delete</code></pre>
         <h3 id="sh-projects">Projects <kbd>p</kbd></h3>
         <div class="shell-view-card">
           <div class="shell-view-desc">
-            <p>The landing screen. Dashboard showing profile-wide counts for projects, tasks, findings, and sync state. All indexed projects listed with per-project workload counts.</p>
-          </div>
-        </div>
-
-        <h3 id="sh-tasks">Tasks <kbd>b</kbd></h3>
-        <div class="shell-view-card">
-          <div class="shell-view-desc">
-            <p>Shows <code>tasks.md</code> parsed into Active, Queue, and Done sections. Use <code>:work next</code> to promote, <code>:complete &lt;id&gt;</code> to mark done, <code>:tidy</code> to archive.</p>
+            <p>The landing screen. Dashboard showing profile-wide counts for projects, findings, and sync state. All indexed projects listed with per-project workload counts.</p>
           </div>
         </div>
 
@@ -2120,7 +2058,6 @@ phren skills remove my-project deploy         # Delete</code></pre>
         <h2 id="sh-keybindings">Keybindings <a href="#sh-keybindings" class="anchor-link">#</a></h2>
         <div class="keybind-grid">
           <div class="keybind-item"><span class="keybind-key"><kbd>p</kbd></span> Projects</div>
-          <div class="keybind-item"><span class="keybind-key"><kbd>b</kbd></span> Tasks</div>
           <div class="keybind-item"><span class="keybind-key"><kbd>l</kbd></span> Findings</div>
           <div class="keybind-item"><span class="keybind-key"><kbd>m</kbd></span> Review Queue</div>
           <div class="keybind-item"><span class="keybind-key"><kbd>s</kbd></span> Skills</div>
@@ -2136,8 +2073,6 @@ phren skills remove my-project deploy         # Delete</code></pre>
           <thead><tr><th>Command</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>:open &lt;project&gt;</code></td><td>Set active project context</td></tr>
-            <tr><td><code>:add &lt;task&gt;</code></td><td>Add a task to Queue</td></tr>
-            <tr><td><code>:complete &lt;id&gt;</code></td><td>Mark a task done</td></tr>
             <tr><td><code>:work next</code></td><td>Promote top Queue item to Active</td></tr>
             <tr><td><code>:tidy [keep]</code></td><td>Archive Done items</td></tr>
             <tr><td><code>:find add &lt;text&gt;</code></td><td>Add a finding</td></tr>
@@ -2160,11 +2095,10 @@ phren skills remove my-project deploy         # Delete</code></pre>
 
         <h2 id="vs-overview">Overview <a href="#vs-overview" class="anchor-link">#</a></h2>
         <ul>
-          <li><strong>Activity bar</strong> tree view of projects, findings, tasks, skills, hooks, sessions</li>
+          <li><strong>Activity bar</strong> tree view of projects, findings, skills, hooks, sessions</li>
           <li><strong>Full-text search</strong> via quick pick (<kbd>Ctrl+Shift+K</kbd>)</li>
           <li>Interactive <strong>fragment graph</strong> webview</li>
           <li><strong>Inline finding capture</strong> from editor selections</li>
-          <li><strong>Task management</strong> from the tree view</li>
           <li><strong>Session overview</strong> panels</li>
         </ul>
 
@@ -2185,16 +2119,13 @@ pnpm --filter phren-vscode run compile</code></pre>
         </div>
 
         <h2 id="vs-tree">Tree View <a href="#vs-tree" class="anchor-link">#</a></h2>
-        <p>The activity bar icon opens a hierarchical view: Projects, Findings, Tasks, Skills, Hooks, Sessions, and Review Queue. Title bar buttons provide Search, Graph, Refresh, and Sync.</p>
+        <p>The activity bar icon opens a hierarchical view: Projects, Findings, Skills, Hooks, Sessions, and Review Queue. Title bar buttons provide Search, Graph, Refresh, and Sync.</p>
 
         <h2 id="vs-search">Search <a href="#vs-search" class="anchor-link">#</a></h2>
         <p>Press <kbd>Ctrl+Shift+K</kbd> to search across all indexed content. Also available from the command palette: <code>Phren: Search Knowledge</code>.</p>
 
         <h2 id="vs-findings">Findings <a href="#vs-findings" class="anchor-link">#</a></h2>
         <p>Capture findings from editor selections (right-click), the command palette, or the tree view. Right-click findings for lifecycle actions: remove, supersede, retract, resolve contradictions.</p>
-
-        <h2 id="vs-tasks">Tasks <a href="#vs-tasks" class="anchor-link">#</a></h2>
-        <p>Add, complete, update, pin, and remove tasks from the tree view. Right-click for GitHub integration: link issues or create new ones from tasks.</p>
 
         <h2 id="vs-settings">Settings <a href="#vs-settings" class="anchor-link">#</a></h2>
         <div class="table-scroll"><table class="docs-table">
@@ -2204,7 +2135,6 @@ pnpm --filter phren-vscode run compile</code></pre>
             <tr><td><code>phren.nodePath</code></td><td>node</td><td>Path to Node.js binary (must be real node, not Electron)</td></tr>
             <tr><td><code>phren.findingSensitivity</code></td><td>balanced</td><td>Capture aggressiveness: minimal, conservative, balanced, aggressive</td></tr>
             <tr><td><code>phren.proactivity</code></td><td>high</td><td>Global proactivity: high, medium, low</td></tr>
-            <tr><td><code>phren.taskMode</code></td><td>auto</td><td>Task mode: off, manual, suggest, auto</td></tr>
             <tr><td><code>phren.hooksEnabled</code></td><td>true</td><td>Master switch for phren hooks</td></tr>
           </tbody>
         </table></div>
@@ -2217,8 +2147,6 @@ pnpm --filter phren-vscode run compile</code></pre>
             <tr><td><code>Phren: Search Knowledge</code></td><td>FTS5 search quick pick</td></tr>
             <tr><td><code>Phren: Show Fragment Graph</code></td><td>Interactive graph webview</td></tr>
             <tr><td><code>Phren: Add Finding</code></td><td>Capture a new finding</td></tr>
-            <tr><td><code>Phren: Add Task</code></td><td>Add a task to queue</td></tr>
-            <tr><td><code>Phren: Complete Task</code></td><td>Mark a task done</td></tr>
             <tr><td><code>Phren: Sync</code></td><td>Commit and push changes</td></tr>
             <tr><td><code>Phren: Doctor</code></td><td>Run health checks</td></tr>
             <tr><td><code>Phren: Toggle Hooks</code></td><td>Global hooks enable/disable</td></tr>
@@ -2257,7 +2185,6 @@ flowchart TB
 
     subgraph "MCP Tools"
         I["add_finding"] --> J["~/.phren/project/FINDINGS.md"]
-        K["add_task"] --> L["~/.phren/project/tasks.md"]
         M["search_knowledge"] --> N["FTS5 Index"]
     end
 
@@ -2329,7 +2256,7 @@ sequenceDiagram
           <tbody>
             <tr><td><code>~/.phren/</code></td><td>Root store (git repo)</td></tr>
             <tr><td><code>~/.phren/global/</code></td><td>Global skills, AGENTS.md, FINDINGS.md</td></tr>
-            <tr><td><code>~/.phren/&lt;project&gt;/</code></td><td>Per-project AGENTS.md, FINDINGS.md, tasks.md, summary.md, skills/</td></tr>
+            <tr><td><code>~/.phren/&lt;project&gt;/</code></td><td>Per-project AGENTS.md, FINDINGS.md, summary.md, skills/</td></tr>
             <tr><td><code>~/.phren/profiles/</code></td><td>YAML files mapping project sets to profiles</td></tr>
             <tr><td><code>~/.phren/machines.yaml</code></td><td>Machine-to-profile mapping</td></tr>
             <tr><td><code>~/.phren/.config/</code></td><td>Retention/workflow/index policy JSON, access-control.json</td></tr>
@@ -2343,7 +2270,6 @@ sequenceDiagram
         <ul>
           <li><code>@import shared/file.md</code> resolves to <code>global/</code> dir, with cycle detection and depth cap</li>
           <li><code>reference/</code> subdirectories classified as reference type</li>
-          <li>Task Done sections stripped to reduce noise</li>
           <li>Archived findings (inside <code>&lt;details&gt;</code> blocks) stripped from index</li>
           <li>Configurable include/exclude globs via <code>phren config index</code></li>
         </ul>
@@ -2356,7 +2282,7 @@ sequenceDiagram
           <li>Node resolved-path in hooks (not npx) avoids cold-start timeout</li>
           <li>Hook detection uses path segments (not substring) to avoid false positives</li>
           <li>Stop hook fires after every response including subagents</li>
-          <li>File locking prevents concurrent writes to FINDINGS.md and tasks.md</li>
+          <li>File locking prevents concurrent writes to FINDINGS.md</li>
         </ul>
       </section>
 
@@ -2393,7 +2319,7 @@ pnpm test</code></pre>
             <tr><td><code>packages/cli/src/utils.ts</code></td><td>FTS5 sanitization, synonym expansion, keyword extraction</td></tr>
             <tr><td><code>packages/cli/src/init/init.ts</code></td><td><code>phren init</code>: configures MCP and hooks for detected agents</td></tr>
             <tr><td><code>packages/cli/src/link/</code></td><td>Reconciles machine and profile wiring, hooks, and local context</td></tr>
-            <tr><td><code>packages/cli/src/data/access.ts</code></td><td>Task CRUD, machine and profile listing, finding management</td></tr>
+            <tr><td><code>packages/cli/src/data/access.ts</code></td><td>Machine and profile listing, finding management</td></tr>
             <tr><td><code>packages/cli/src/governance/</code></td><td>Policy, RBAC, review queue, audit log, locks</td></tr>
             <tr><td><code>packages/cli/src/ui/</code></td><td>Web UI server and pages</td></tr>
             <tr><td><code>packages/cli/src/bridge/</code></td><td>Phren Hook: the phone and computer bridge, dispatch, schedules</td></tr>
@@ -2534,7 +2460,7 @@ refactor: extract keyword logic from hook-prompt</code></pre>
         <h2 id="data-storage">Data Storage <a href="#data-storage" class="anchor-link">#</a></h2>
         <p>Phren stores all state as local files under <code>~/.phren</code> (shared mode) or <code>&lt;repo&gt;/.phren</code> (project-local mode). The data is:</p>
         <ul>
-          <li><strong>Plain text:</strong> markdown files for findings, tasks, summaries, and skills</li>
+          <li><strong>Plain text:</strong> markdown files for findings, summaries, and skills</li>
           <li><strong>Structured JSON:</strong> governance policies, session data, runtime state</li>
           <li><strong>Git-backed:</strong> changes are committed locally and optionally pushed to a remote you control</li>
         </ul>
@@ -2691,7 +2617,6 @@ refactor: extract keyword logic from hook-prompt</code></pre>
         <h3 id="faq-automatic">Automatic</h3>
         <ul>
           <li>Findings added via <code>add_finding</code> MCP tool</li>
-          <li>Task items via <code>add_task</code></li>
           <li>Session state committed and pushed by the Stop hook after every response</li>
         </ul>
         <h3 id="faq-manual">Manual</h3>
@@ -2707,7 +2632,7 @@ phren add</code></pre>
         <p>Phren bootstraps <code>~/.phren/my-project/</code> and adds it to your active profile. For a brand-new scaffold: <code>/phren-init my-project</code></p>
 
         <h2 id="mcp-required">Does phren require MCP? <a href="#mcp-required" class="anchor-link">#</a></h2>
-        <p>No. MCP is recommended because it lets the agent save findings and tasks. Without it, phren runs in hooks-only mode and the prompt hook still injects context.</p>
+        <p>No. MCP is recommended because it lets the agent save findings. Without it, phren runs in hooks-only mode and the prompt hook still injects context.</p>
         <pre><code>phren init --mcp off    # Install without MCP
 phren mcp-mode on       # Toggle anytime</code></pre>
 
@@ -2762,7 +2687,7 @@ ci-server: minimal</code></pre>
           <li>The <strong>SessionStart</strong> hook runs <code>git pull</code> on <code>~/.phren</code> at the beginning of every session</li>
           <li>The <strong>Stop</strong> hook auto-commits and pushes <code>~/.phren</code> changes after every response</li>
         </ul>
-        <p>Findings, tasks, and skills sync automatically as you work. Use profiles plus <code>machines.yaml</code> to scope which projects are active on each machine, then run <code>phren init</code> after profile changes to refresh local config.</p>
+        <p>Findings and skills sync automatically as you work. Use profiles plus <code>machines.yaml</code> to scope which projects are active on each machine, then run <code>phren init</code> after profile changes to refresh local config.</p>
         <p>Phren Hook syncs stores every five minutes by default, even without an active agent session. Separate periodic remote checks while an MCP server runs are off by default. Clients sharing a store coordinate one check per interval. These checks save pending local edits before pulling and can combine changes from both computers. A conflict phren cannot resolve cancels the attempted combination and names the files. Checks wait if another Git operation is running. Failed remote checks back off, up to 30 minutes or the configured interval if longer.</p>
         <pre><code>phren config pull-interval       # show this machine's effective setting
 phren config pull-interval 60    # enable checks every minute
@@ -2792,8 +2717,8 @@ phren graph link web-app "Turbo builds avoid dist races" "build-system"</code></
           <thead><tr><th>Role</th><th>Permissions</th></tr></thead>
           <tbody>
             <tr><td><code>admin</code></td><td>Full access. Can modify governance, access control, workflow policies, and all project data.</td></tr>
-            <tr><td><code>maintainer</code></td><td>Can add/edit/remove findings, tasks, and skills. Cannot modify governance or access control.</td></tr>
-            <tr><td><code>contributor</code></td><td>Can add findings and tasks. Cannot remove or edit existing entries.</td></tr>
+            <tr><td><code>maintainer</code></td><td>Can add/edit/remove findings and skills. Cannot modify governance or access control.</td></tr>
+            <tr><td><code>contributor</code></td><td>Can add findings. Cannot remove or edit existing entries.</td></tr>
             <tr><td><code>viewer</code></td><td>Read-only access.</td></tr>
           </tbody>
         </table></div>
@@ -2860,7 +2785,7 @@ phren init              # machine: bob-desktop, profile: fullstack
         </div>
 
         <h3>Write Routing</h3>
-        <p>When you add a finding or task, phren resolves which store receives the write:</p>
+        <p>When you add a finding, phren resolves which store receives the write:</p>
         <ol>
           <li>If store-qualified (e.g. <code>forge-team/forge</code>), use the explicit store</li>
           <li>If a team store claims the project in its registry, route to that store</li>

@@ -31,26 +31,26 @@ describe("module enablement", () => {
   });
 
   it("supports a memory-only store", () => {
-    configure("version: 1\nenabled:\n  tasks: false\n");
+    configure("version: 1\nenabled:\n  code: false\n");
     expect(names()).toEqual(["memory"]);
   });
 
   it("overlays the selected store profile on store settings and defaults", () => {
     configure(`version: 1
 enabled:
-  tasks: false
+  code: false
   hook: true
 profiles:
   work:
     enabled:
-      tasks: true
+      code: true
       hook: false
   personal:
     enabled:
       git: true
 `);
     expect(names()).toEqual(["memory", "hook"]);
-    expect(names("work")).toEqual(["memory", "tasks"]);
+    expect(names("work")).toEqual(["memory", "code"]);
     expect(names("personal")).toEqual(["memory", "hook", "git"]);
     expect(names("unlisted")).toEqual(["memory", "hook"]);
   });
@@ -58,12 +58,12 @@ profiles:
   it("accepts a version-only config and reads changes on the next call", () => {
     configure("version: 1\n");
     expect(names()).toEqual(["memory"]);
-    configure("version: 1\nenabled:\n  tasks: false\n");
+    configure("version: 1\nenabled:\n  code: false\n");
     expect(names()).toEqual(["memory"]);
   });
 
   it("treats a store profile named full as a literal profile name", () => {
-    configure("version: 1\nprofiles:\n  full:\n    enabled:\n      tasks: false\n");
+    configure("version: 1\nprofiles:\n  full:\n    enabled:\n      code: false\n");
     expect(names()).toEqual(["memory"]);
     expect(names("full")).toEqual(["memory"]);
   });
@@ -122,7 +122,7 @@ describe("built-in registration declarations", () => {
       .flatMap(file => [...fs.readFileSync(path.join(toolsDir, file), "utf8").matchAll(/registerTool\(\s*"([^"]+)"/g)].map(match => match[1]));
     const declared = BUILTIN_MODULES.flatMap(module => module.tools.map(tool => tool.name));
     expect(new Set(declared).size).toBe(declared.length);
-    expect([...declared].sort()).toEqual([...registered, "revise_finding", "manage_task", "session", "phren_admin"].sort());
+    expect([...declared].sort()).toEqual([...registered, "revise_finding", "session", "phren_admin"].sort());
     expect(BUILTIN_MODULES.flatMap(module => module.tools.filter(tool => tool.profiles.includes("core")).map(tool => tool.name)).sort())
       .toEqual([...CORE_TOOLS].sort());
     expect(BUILTIN_MODULES.every(module => module.version === VERSION)).toBe(true);
@@ -153,7 +153,7 @@ describe("built-in registration declarations", () => {
     const store = source("bridge/memory-store.ts");
     const storeRoutes = (method: string) => [...store.matchAll(new RegExp(`method === "${method}" && url.pathname === STORE_ROUTES\\.(\\w+)`, "g"))]
       .map(match => `/v1/store/${match[1]}`);
-    const currentGets = [...[...getBlock.matchAll(/case "(\/v1\/[^\"]+)"/g)].map(match => match[1]), ...storeRoutes("GET"), "/v1/browsers", "/v1/browsers/recordings", "/v1/browsers/recordings/index", "/v1/browsers/recordings/frame"];
+    const currentGets = [...[...getBlock.matchAll(/case "(\/v1\/[^\"]+)"/g)].map(match => match[1]), ...storeRoutes("GET"), "/v1/store/directory", "/v1/browsers", "/v1/browsers/recordings", "/v1/browsers/recordings/index", "/v1/browsers/recordings/frame"];
     expect(declared.filter(route => route.method === "GET").map(route => route.path).sort()).toEqual(currentGets.sort());
     const postBlock = server.slice(server.indexOf('} else if (request.method === "POST")'), server.indexOf('} else throw new BridgeError(405'))
       + source("bridge/server-pane-routes.ts");
@@ -172,9 +172,9 @@ describe("built-in registration declarations", () => {
     expect(declared.filter(route => route.method === "WS").map(route => route.path)).toEqual(["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live", "/v1/simulators/stream", "/v1/browsers/stream", "/v1/mac/windows/stream", "/v1/git/watch"]);
   });
 
-  it("can feed only memory into the existing gate without exposing task or dispatch actions", async () => {
-    configure("version: 1\nenabled:\n  tasks: false\n");
-    const composites = new Set(["revise_finding", "manage_task", "session", "phren_admin"]);
+  it("can feed only memory into the existing gate without exposing dispatch actions", async () => {
+    configure("version: 1\nenabled:\n  code: false\n");
+    const composites = new Set(["revise_finding", "session", "phren_admin"]);
     const gate = createToolGate({ profile: "core", register: () => {} });
     for (const module of enabled(tmp.path)) {
       for (const tool of module.tools) {
@@ -196,23 +196,23 @@ describe("built-in registration declarations", () => {
 
 describe("phren modules list", () => {
   it("lists configured status using the active profile and leaves config untouched", async () => {
-    configure("version: 1\nprofiles:\n  work:\n    enabled:\n      tasks: false\n");
+    configure("version: 1\nprofiles:\n  work:\n    enabled:\n      code: false\n");
     const before = fs.readFileSync(path.join(tmp.path, ".config", "modules.yaml"), "utf8");
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     await lookupCommand("modules")!.run(["list"], { phrenPath: () => tmp.path, profile: () => "work" });
     expect(log).toHaveBeenCalledWith("Module\tVersion\tEffective\tSource\tRequires");
     expect(log).toHaveBeenCalledWith(`memory\t${VERSION}\tenabled\tdefault\t-`);
-    expect(log).toHaveBeenCalledWith(`tasks\t${VERSION}\tdisabled\tprofile\tmemory`);
+    expect(log).toHaveBeenCalledWith(`code\t${VERSION}\tdisabled\tprofile\tmemory`);
     expect(fs.readFileSync(path.join(tmp.path, ".config", "modules.yaml"), "utf8")).toBe(before);
   });
 
   it("supports an explicit profile without resolving the machine profile", async () => {
-    configure("version: 1\nprofiles:\n  personal:\n    enabled:\n      tasks: false\n");
+    configure("version: 1\nprofiles:\n  personal:\n    enabled:\n      code: false\n");
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const profile = vi.fn(() => "work");
     await lookupCommand("modules")!.run(["list", "--profile", "personal"], { phrenPath: () => tmp.path, profile });
     expect(profile).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith(`tasks\t${VERSION}\tdisabled\tprofile\tmemory`);
+    expect(log).toHaveBeenCalledWith(`code\t${VERSION}\tdisabled\tprofile\tmemory`);
   });
 
   it.each([[], ["enable"], ["disable"], ["list", "extra"], ["list", "--profile"], ["list", "--profile", "--bad"]])

@@ -26,8 +26,6 @@ export interface ProjectConfigOverrides {
   findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";
   proactivity?: "high" | "medium" | "low";
   proactivityFindings?: "high" | "medium" | "low";
-  proactivityTask?: "high" | "medium" | "low";
-  taskMode?: "off" | "manual" | "suggest" | "auto";
   retentionPolicy?: RetentionPolicyPatch;
   workflowPolicy?: {
     lowConfidenceThreshold?: number;

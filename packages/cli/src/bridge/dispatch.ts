@@ -1,4 +1,3 @@
-import { mergeTaskIdentitySchema } from "../task/merge-links.js";
 import { dispatchIssueSchema, issueBriefBlock, writeDispatchIssue } from "./dispatch-issue.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 import { integratorSchema, prsSchema } from "./return-contract.js";
@@ -41,7 +40,6 @@ export const PEER_COPILOT_REASON = "Copilot cannot continue on another computer:
 export const DISPATCH_HARNESSES = ["codex", "claude", "opencode", "copilot"] as const;
 const dispatchMetadataSchema = z.object({
   computer: z.union([z.literal("anywhere"), computerName]).describe("Enrolled computer name, local for this computer, or anywhere for the least busy connected computer."),
-  task: mergeTaskIdentitySchema.optional().describe("Deprecated task identity, accepted and ignored."),
   project: projectName.describe("Project slug registered on the receiving computer."),
   harness: z.enum(DISPATCH_HARNESSES).describe("Agent harness on the receiving computer."),
   model: text(200).optional().describe("Explicit model, otherwise the remote harness default."),
@@ -52,7 +50,7 @@ const dispatchMetadataSchema = z.object({
   releaseActions: z.array(releaseAction).min(1).max(RELEASE_ACTIONS.length).optional()
     .describe("Release-type actions the brief asks the worker to do (merge, publish, deploy, app-store, github-admin). Ask-first projects refuse them from an agent unless the owner confirmed."),
   prompt: z.string().min(1).max(DISPATCH_PROMPT_LIMIT).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value)).describe(`Worker brief, at most ${DISPATCH_PROMPT_LIMIT} characters.`),
-  label: text(200).describe("Short task label."),
+  label: text(200).describe("Short worker label."),
   idempotencyKey: idempotencyKeySchema.optional()
     .describe("Caller-supplied key (1 to 200 characters of letters, digits and : . _ @ / -). The Hook returns the dispatch this key already started instead of starting another, for 30 days. Dispatches with a key run in their harness's standard permission mode."),
   worktree: z.boolean().optional().describe("Start the worker in a fresh git worktree of the project's checkout, on a new branch. Never reused."),
@@ -81,16 +79,6 @@ export const originPaneSchema = z.object({ server: serverName, workspace: id, ta
 export type OriginPane = z.infer<typeof originPaneSchema>;
 export const workerStates = ["working", "waiting", "done", "needs-you", "failed", "blocked", "stalled", "gone"] as const;
 export type WorkerState = typeof workerStates[number];
-/** One task of the worker session's ledger (task/session-tasks.ts), as an
- * observation or a return carries it: no store path on the wire. */
-export const workerTaskSchema = z.object({
-  project: projectName.describe("The task's project."),
-  stableId: z.string().regex(/^[a-f0-9]{8}$/).describe("The task's stable id, as bid: comments name it."),
-  title: z.string().max(200).describe("The task line without metadata; empty when the task is gone."),
-  section: z.enum(["Active", "Queue", "Done", "missing"]).describe("Where the task sits now."),
-  resolution: z.enum(["done", "queue", "parked", "open", "missing"]).describe("Whether the session settled it; open means it still owes the work."),
-}).strict();
-export type WorkerTask = z.infer<typeof workerTaskSchema>;
 const timestamp = z.string().datetime();
 const receiptSchema = dispatchMetadataSchema.omit({ prompt: true }).extend({
   id: z.string().uuid(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
@@ -151,9 +139,7 @@ const receiptSchema = dispatchMetadataSchema.omit({ prompt: true }).extend({
     turn: z.string().regex(/^[a-f0-9]{16}$/).optional(), read: z.boolean(), notifiedAt: timestamp.optional(),
     background: z.number().int().min(1).max(999).optional().describe("Background tasks the worker left running when it was counted done."),
     waited: z.number().int().min(1).max(999).optional().describe("The most background tasks the worker waited on before it finished."),
-    tasks: z.array(workerTaskSchema).max(32).optional()
-      .describe("The worker session's task ledger (session-tasks.ts): every task it took on and whether each is settled."),
-  }).strict().optional().describe("The latest return: the worker finished, is parked waiting on CI, background work or a queue, needs the owner, failed, is blocked or is gone."),
+  }).optional().describe("The latest return: the worker finished, is parked waiting on CI, background work or a queue, needs the owner, failed, is blocked or is gone."),
   approval: z.object({
     actionId: z.string().min(1).max(200), tool: z.string().max(200), title: z.string().max(200).optional(), request: z.string().max(500).optional(),
     requestKind: z.enum(["command", "tool", "edit", "question", "other"]).optional(), terminal: z.boolean().optional(),
@@ -254,7 +240,7 @@ function serializeReceiptUpdate<T>(change: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/** One dispatch receipt by id, for a task's live worker state. */
+/** One dispatch receipt by id, for a worker. */
 export function dispatchReceipt(receiptID: string): Promise<Receipt | undefined> {
   return readReceipt(receiptID);
 }
@@ -1368,7 +1354,7 @@ export class DispatchService {
       const authority = checked?.authority ?? await readAuthority().then(policy => projectAuthority(policy, data.project)).catch(() => undefined);
       const origin = await this.origin(originValue);
       // Prompts are sent over the pipe, never stored in the dispatch ledger.
-      const { prompt: originalPrompt, issue, task: _task, ...metadata } = data;
+      const { prompt: originalPrompt, issue, ...metadata } = data;
       const body = peer.local ? originalPrompt : redactPeerHandoff(originalPrompt);
       const issueBlock = issue ? issueBriefBlock(issue) : undefined;
       const prompt = issueBlock ? `${body.trimEnd()}\n\n${issueBlock}` : body;

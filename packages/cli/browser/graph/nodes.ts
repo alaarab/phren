@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { FGNode, RuntimeNode } from "./types.js";
+import type { FGNode, } from "./types.js";
 import { ACCENT_AMBER, ACCENT_CYAN } from "./types.js";
 import { clamp, focusMode, isInProjectNetwork, nodeRadius, seeded, state } from "./state.js";
 import { attachEagerLabel, refreshLabels } from "./labels.js";
@@ -7,11 +7,6 @@ import { refreshCageFocus } from "./cages.js";
 
 // ── Shared geometries (5 singletons for every node in the scene) ────────
 
-const SPHERE_GEOM = new THREE.SphereGeometry(1, 18, 18);
-const CAGE_GEOM = new THREE.IcosahedronGeometry(1, 1);
-const SHARD_GEOM = new THREE.OctahedronGeometry(1, 0);
-const REF_GEOM = new THREE.IcosahedronGeometry(1, 0);
-const RING_GEOM = new THREE.RingGeometry(1.55, 1.62, 48);
 
 let _glowTexture: THREE.Texture | null = null;
 export function glowTexture(): THREE.Texture {
@@ -67,47 +62,8 @@ export function ringTexture(): THREE.Texture {
 // uniform sets. Normal blending — additive stacking is what washed the old
 // scene out. A fixed in-shader key light gives form without scene lights.
 
-const HOLO_VERT = `
-  varying vec3 vNormal;
-  varying vec3 vView;
-  void main() {
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    vNormal = normalize(normalMatrix * normal);
-    vView = normalize(-mv.xyz);
-    gl_Position = projectionMatrix * mv;
-  }
-`;
 
-const HOLO_FRAG = `
-  uniform vec3 uColor;
-  uniform float uIntensity;
-  uniform float uRimPower;
-  uniform float uBodyAlpha;
-  varying vec3 vNormal;
-  varying vec3 vView;
-  void main() {
-    float fres = pow(1.0 - max(dot(vNormal, vView), 0.0), uRimPower);
-    float key = max(dot(vNormal, normalize(vec3(0.4, 0.7, 0.6))), 0.0) * 0.35;
-    vec3 col = uColor * (0.22 + key) + uColor * fres * 1.25;
-    float alpha = (uBodyAlpha + fres * 0.55) * uIntensity;
-    gl_FragColor = vec4(col, alpha);
-  }
-`;
 
-function makeHoloMaterial(color: string, bodyAlpha: number, rimPower: number): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    uniforms: {
-      uColor: { value: new THREE.Color(color) },
-      uIntensity: { value: 1 },
-      uRimPower: { value: rimPower },
-      uBodyAlpha: { value: bodyAlpha },
-    },
-    vertexShader: HOLO_VERT,
-    fragmentShader: HOLO_FRAG,
-    transparent: true,
-    depthWrite: false,
-  });
-}
 
 // ── Node construction ───────────────────────────────────────────────────
 
@@ -115,7 +71,6 @@ function makeHoloMaterial(color: string, bodyAlpha: number, rimPower: number): T
 function dotSize(node: FGNode["raw"]): number {
   if (node.kind === "project") return 4.5;
   if (node.kind === "finding") return node.tagged ? 3 : 2.6;
-  if (node.kind === "task") return 2.8;
   if (node.kind === "reference") return 2.2;
   if (node.kind === "topic") return 3.4;
   if (node.kind === "note") return 2.2;
@@ -350,6 +305,6 @@ export function tickNodes(dt: number, now: number): void {
 
   positionFocusHalo(hoverHalo, state.hoveredNodeId);
   // Selection is already clear from graph dimming and contextual UI. Avoid a
-  // second amber/yellow glow around projects, findings, tasks, or fragments.
+  // second amber/yellow glow around projects, findings or fragments.
   positionFocusHalo(selectHalo, null);
 }

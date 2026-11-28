@@ -64,3 +64,5 @@ ran it out of memory three times in a day.
   recorded resolutions. Never `git stash pop` (one agent's pop applied
   another session's old stash); commit work in progress on your own branch
   instead. After a merge that rerere resolved, read the diff before you commit.
+
+For work tracked in a forge issue, include its reference in the brief. Use `dispatch` with `issue` for issue-bound Hook workers. Send owner-only actions to the owner Inbox.

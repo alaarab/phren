@@ -5,17 +5,11 @@ const P = PhrenToolPresentation;
 const json = (value: unknown): string => JSON.stringify(value);
 
 describe("PhrenToolPresentationTests", () => {
-  it("findingTaskAndSessionVerbsUseHumanInput", () => {
+  it("findingAndSessionVerbsUseHumanInput", () => {
     const finding = P.of("mcp__phren__add_finding", `{"project":"phone","finding":"Keep the real image turn","findingType":"pitfall"}`, `{"ok":true}`)!;
     expect(finding.verb).toBe("Save finding"); expect(finding.body).toBe("Keep the real image turn");
     expect(finding.project).toBe("phone"); expect(finding.tag).toBe("pitfall");
     expect(finding.status).toBe(P.Status.SUCCEEDED);
-    const task = P.of("functions.mcp__phren__add_task", `{"task":"Verify the queue"}`)!;
-    expect(task.verb).toBe("Add task"); expect(task.body).toBe("Verify the queue");
-    expect(task.status).toBe(P.Status.RUNNING);
-    const done = P.of("mcp__phren__manage_task", `{"action":"complete","item":"A2"}`)!;
-    expect(done.verb).toBe("Update task"); expect(done.body).toBe("A2");
-    expect(done.fields[0].value).toBe("complete");
     for (const [tool, input, verb] of [["session", `{"action":"start"}`, "Session"], ["session", `{"action":"end"}`, "Session"], ["phren_admin", `{"action":"status"}`, "Status"]] as const) {
       expect(P.of(`mcp__phren__${tool}`, input)?.verb).toBe(verb);
     }
@@ -34,14 +28,14 @@ describe("PhrenToolPresentationTests", () => {
   it("memoryDetailFailureAndFutureToolsRemainReadable", () => {
     const detail = P.of("mcp__phren__get_memory_detail", `{"id":"mem:42"}`, `{"ok":true,"data":{"content":"A memory title\\nIts body"}}`);
     expect(detail?.body).toBe("mem:42"); expect(detail?.resultSummary).toBe("A memory title");
-    const failure = P.of("mcp__phren__add_task", "{}", `{"ok":false,"error":"Store is read-only"}`);
+    const failure = P.of("mcp__phren__add_finding", "{}", `{"ok":false,"error":"Store is read-only"}`);
     expect(failure?.status).toBe(P.Status.FAILED); expect(failure?.resultSummary).toBe("Store is read-only");
-    expect(P.of("mcp__phren__add_task", "{}", "Denied", true)?.status).toBe(P.Status.FAILED);
+    expect(P.of("mcp__phren__add_finding", "{}", "Denied", true)?.status).toBe(P.Status.FAILED);
     const future = P.of("mcp__phren__future_tool", `{"project":"phone","scope":{"type":"team"},"values":["one","two"]}`)!;
     expect(future.fields.map((f) => f.value)).toEqual(["type: team", "one, two"]);
     expect(future.fields.some((f) => f.value.includes("{"))).toBe(false);
     expect(P.of("mcp__phren__future_tool", "broken JSON")).not.toBeNull();
-    expect(P.of("mcp__other__add_task", "{}")).toBeNull();
+    expect(P.of("mcp__other__add_finding", "{}")).toBeNull();
   });
 
   it("longFindingPreviewIsBoundedWithoutModifyingInput", () => {
@@ -61,13 +55,13 @@ describe("PhrenToolPresentationTests", () => {
 
   it("nestedAndTransportFailuresKeepTheirReasonAndRawText", () => {
     const results = [
-      `{"isError":true,"content":[{"type":"text","text":"Store is read-only.\\nNo task saved."}]}`,
+      `{"isError":true,"content":[{"type":"text","text":"Store is read-only.\\nNo finding saved."}]}`,
       `{"structuredContent":{"ok":false,"error":{"message":"Store is read-only."}}}`,
       `{"content":[{"type":"text","text":"Processing"},{"type":"text","text":"{\\"ok\\":false,\\"error\\":\\"Store is read-only.\\"}"}]}`,
-      `{"ok":true,"data":{"added":["First task"],"errors":["Store is read-only."]}}`,
+      `{"ok":true,"data":{"added":["First finding"],"errors":["Store is read-only."]}}`,
     ];
     for (const result of results) {
-      const card = P.of("mcp__phren__add_task", "{}", result)!;
+      const card = P.of("mcp__phren__add_finding", "{}", result)!;
       expect(card.status).toBe(P.Status.FAILED);
       expect(card.resultSummary).toBe("Store is read-only.");
       expect(card.rawResult).toBe(result);
@@ -81,38 +75,22 @@ describe("PhrenToolPresentationTests", () => {
 
   it("expandedInputAndEveryResultRemainComplete", () => {
     const long = "Keep this entire instruction.\n".repeat(100) + "Final marker";
-    const task = P.of("phren_add_task", json({ item: long }))!;
-    expect(task.fullInput.includes(long)).toBe(true);
-    expect(task.body.length < long.length).toBe(true);
+    const finding = P.of("phren_add_finding", json({ finding: long }))!;
+    expect(finding.fullInput.includes(long)).toBe(true);
+    expect(finding.body.length < long.length).toBe(true);
     expect(P.readable(`{"content":[{"type":"text","text":"First"},{"type":"text","text":"Last"}]}`)).toBe("First\n\nLast");
     const search = P.of("phren_search_knowledge", "{}", `{"ok":true,"data":{"results":[{"title":"First"},{"title":"Second"},{"title":"Third"},{"title":"Fourth","content":"Full recalled text"}]}}`)!;
     expect(search.titles.length).toBe(3);
     expect(search.searchResults.length).toBe(4);
     expect(search.searchResults[search.searchResults.length - 1].text).toBe("Full recalled text");
-    expect(P.of("phren_manage_task", `{"action":"remove","item":"Old task"}`, `{"ok":true}`)?.target).toBeNull();
   });
 
   it("failedCallShowsItsIssuesNotItsParameterList", () => {
-    const result = `{"ok":false,"error":"Invalid arguments for update_task","issues":[{"path":"updates","message":"Invalid input: expected object, received string"}],"params":[{"name":"project","required":true}]}`;
-    const card = P.of("mcp__phren__manage_task", `{"action":"update","item":"bid:1"}`, result);
+    const result = `{"ok":false,"error":"Invalid arguments for edit_issue","issues":[{"path":"updates","message":"Invalid input: expected object, received string"}],"params":[{"name":"project","required":true}]}`;
+    const card = P.of("mcp__phren__edit_issue", `{"ref":"org/repo#1"}`, result);
     expect(card?.status).toBe(P.Status.FAILED);
-    expect(card?.resultSummary).toBe("Invalid arguments for update_task");
+    expect(card?.resultSummary).toBe("Invalid arguments for edit_issue");
     expect(card?.issues).toEqual(["updates: Invalid input: expected object, received string"]);
-  });
-});
-
-describe("PhrenToolItemsTests", () => {
-  it("severalTasksInOneCallAreSeparateRows", () => {
-    const card = P.of("mcp__phren__add_task", `{"project":"phren","item":["Search memory card misaligned","Show what the hook injected","Dispatch to the local Mac"]}`, `{"ok":true}`)!;
-    expect(card.items).toEqual(["Search memory card misaligned", "Show what the hook injected", "Dispatch to the local Mac"]);
-    expect(card.toolName).toBe("mcp__phren__add_task");
-    expect(card.fullInput.includes("Dispatch to the local Mac")).toBe(true);
-  });
-
-  it("oneTaskStaysTheBody", () => {
-    const card = P.of("mcp__phren__add_task", `{"project":"phren","item":["Just one"]}`)!;
-    expect(card.items).toEqual([]);
-    expect(card.body).toBe("Just one");
   });
 });
 
@@ -246,24 +224,7 @@ describe("PhrenReadToolTests", () => {
     ] }]));
   });
 
-  it("getTasksGroupsBySectionAndProject", () => {
-    const one = text(`{"ok":true,"message":"## p","data":{"project":"p","items":{"Active":[{"id":"A1","stableId":"ab12cd34","section":"Active","line":"Fix login [high] [pinned]","checked":false,"priority":"high","pinned":true,"claim":{"computer":"desk","at":"x"}}],"Queue":[{"id":"Q1","section":"Queue","line":"Write docs","checked":false}],"Done":[]},"totalItems":2}}`);
-    const card = P.of("mcp__phren__get_tasks", `{"project":"p"}`, one)!;
-    expect(card.resultSummary).toBe("2 tasks");
-    expect(card.detail).toEqual(PhrenToolPresentation.Detail.rows([
-      { header: "Active", rows: [row("Fix login", "high · pinned · claimed on desk", "A1")] },
-      { header: "Queue", rows: [row("Write docs", null, "Q1")] },
-    ]));
-    const all = text(`{"ok":true,"data":{"projects":[{"project":"a","items":{"Active":[],"Queue":[{"id":"Q1","line":"First"}],"Done":[]}},{"project":"b","items":{"Active":[{"id":"A1","line":"Second"}],"Queue":[],"Done":[]}}],"summary":false}}`);
-    const groups = (P.of("mcp__phren__get_tasks", "{}", all)?.detail as PhrenToolPresentation.Detail.Rows).groups;
-    expect(groups.map((g) => g.header)).toEqual(["a · Queue", "b · Active"]);
-    const lookup = text(`{"ok":true,"message":"Q3: Fix it (Queue)","data":{"project":"p","id":"Q3","stableId":null,"section":"Queue","checked":false,"line":"Fix it","priority":null}}`);
-    expect(P.of("mcp__phren__get_tasks", `{"project":"p","id":"Q3"}`, lookup)?.detail).toEqual(PhrenToolPresentation.Detail.rows([{ header: "Queue", rows: [row("Fix it", null, "Q3")] }]));
-    const summary = text(`{"ok":true,"message":"**Active**: 3 items (1 high)\\n  - bid:1 Fix","data":{"project":"p","summary":true,"totalItems":3}}`);
-    const folded = P.of("mcp__phren__get_tasks", `{"project":"p","summary":true}`, summary)!;
-    expect(folded.detail).toBeNull();
-    expect(folded.resultSummary).toBe("Active: 3 items (1 high)");
-  });
+
 
   it("otherReadsDrawRows", () => {
     const inbox = text(`{"ok":true,"message":"1 owner inbox items.","data":{"ok":true,"items":[{"id":"1","kind":"needs-you","title":"Approve the merge","state":"open","project":"phren","computer":"desk"}],"unreachable":[]}}`);
@@ -277,13 +238,13 @@ describe("PhrenReadToolTests", () => {
     expect(list?.detail).toEqual(PhrenToolPresentation.Detail.rows([{ header: null, rows: [
       row("phren", "Memory for agents"), row("hub", "Timesheets", "team"),
     ] }]));
-    const summary = text(`{"ok":true,"message":"# phren","data":{"name":"phren","counts":{"findings":55,"openTasks":7}}}`);
-    expect(P.of("mcp__phren__get_project_summary", `{"name":"phren"}`, summary)?.resultSummary).toBe("55 findings · 7 open tasks");
+    const summary = text(`{"ok":true,"message":"# phren","data":{"name":"phren","counts":{"findings":55}}}`);
+    expect(P.of("mcp__phren__get_project_summary", `{"name":"phren"}`, summary)?.resultSummary).toBe("55 findings");
   });
 
   it("writesSayWhatTheyDidAndUnknownReadsKeepTheirOutput", () => {
-    const added = text(`{"ok":true,"message":"Added 1 of 1 tasks to p","data":{"project":"p","added":["Fix"],"errors":[]}}`);
-    expect(P.of("mcp__phren__add_task", `{"project":"p","item":"Fix"}`, added)?.resultSummary).toBe("Added 1 of 1 tasks to p");
+    const added = text(`{"ok":true,"message":"Finding saved to p","data":{"project":"p","added":["Fix"],"errors":[]}}`);
+    expect(P.of("mcp__phren__add_finding", `{"project":"p","finding":"Fix"}`, added)?.resultSummary).toBe("Finding saved to p");
     const health = P.of("mcp__phren__phren_admin", `{"action":"health_check"}`, text(`{"ok":true,"message":"Phren v1.2.3\\nProfile: default","data":{"version":"1.2.3"}}`))!;
     expect(health.verb).toBe("Health check");
     expect(health.resultSummary).toBe("Phren v1.2.3");

@@ -64,7 +64,7 @@ export async function watchHead({ readHead, before, delays = WATCH_DELAYS, wait 
 
 /** Queue the pull on the computer's Hook. Throws when the request fails; otherwise returns the head to compare against. */
 export async function requestPull(computer) {
-  const identity = pullIdentity(await hookGet(computer, "/v1/tasks/stores"));
+  const identity = pullIdentity(await hookGet(computer, "/v1/store/directory"));
   if (!identity) throw new Error("This computer's store has no synced remote to pull.");
   let before;
   try { before = (await hookGet(computer, "/v1/store/head")).sha; } catch { /* the watch takes its first good read as the baseline */ }
@@ -106,7 +106,7 @@ export function createSyncControl({ el, getComputer, onSynced, delays = WATCH_DE
 
   async function loadLabel(computer) {
     label = syncLabel(null);
-    if (computer) { try { label = syncLabel(await hookGet(computer, "/v1/tasks/stores")); } catch { /* keep the single-store label */ } }
+    if (computer) { try { label = syncLabel(await hookGet(computer, "/v1/store/directory")); } catch { /* keep the single-store label */ } }
     if (getComputer() === computer) paint();
   }
 

@@ -228,7 +228,6 @@ describe("maintenance of attached stores", () => {
     const today = new Date().toISOString().slice(0, 10);
     makeProject(attached, "proj", {
       "FINDINGS.md": `# Findings\n\n## 2020-01-01\n\n- Old deployment advice that retention would delete\n\n## ${today}\n\n- fixed stuff\n- fixed stuff\n`,
-      "tasks.md": "# Tasks\n\n## Active\n\n## Queue\n\n## Done\n\n" + Array.from({ length: 32 }, (_, i) => `- [x] Completed deployment ${i}\n`).join(""),
       "reference/topics/deploy.md": "# Deploy\n\n## 2020-01-01\n\n- Archived deployment advice\n",
     });
     const leaseFile = path.join(attached, ".config", "maintenance-writer.json");
@@ -266,7 +265,7 @@ describe("maintenance of attached stores", () => {
     expect(errors).not.toHaveBeenCalled();
   });
 
-  it("tidies, summarizes and prunes the attached store while the primary lease belongs to another computer", async () => {
+  it("summarizes and prunes the attached store while the primary lease belongs to another computer", async () => {
     const { primary, attached } = makeStorePair();
     writeFile(path.join(primary, ".config", "maintenance-writer.json"), JSON.stringify({ computer: "other-computer", renewedAt: new Date().toISOString() }));
     writeFile(path.join(primary, ".config", "retention-policy.json"), JSON.stringify({ retentionDays: 3650 }));
@@ -275,7 +274,6 @@ describe("maintenance of attached stores", () => {
     const today = new Date().toISOString().slice(0, 10);
     makeProject(attached, "proj", {
       "FINDINGS.md": `# Findings\n\n## ${old}\n\n- Old deployment advice that retention should delete\n\n## ${today}\n\n- Keep database migrations ahead of the worker rollout\n- Keep database migrations ahead of the worker rollout\n`,
-      "tasks.md": "# Tasks\n\n## Active\n\n## Queue\n\n## Done\n\n" + Array.from({ length: 32 }, (_, i) => `- [x] Completed deployment ${i}\n`).join(""),
       "reference/topics/deploy.md": `# Deploy\n\n## ${old}\n\n- Archived deployment advice\n`,
     });
     makeProject(attached, "unsubscribed", { "FINDINGS.md": "- fixed stuff\n" });
@@ -287,11 +285,9 @@ describe("maintenance of attached stores", () => {
     const findings = fs.readFileSync(path.join(attached, "proj", "FINDINGS.md"), "utf8");
     expect(findings).not.toContain("Old deployment advice");
     expect(findings.match(/Keep database migrations/g)).toHaveLength(1);
-    expect(fs.readFileSync(path.join(attached, ".config", "task-archive", "proj.md"), "utf8")).toContain("Completed deployment");
     expect(fs.readFileSync(path.join(attached, "proj", "reference", "topics", "deploy.md"), "utf8")).toContain("## Now");
     expect(fs.readFileSync(path.join(attached, "proj", "summary.md"), "utf8")).toContain("What phren knows");
     expect(snapshotStore(path.join(attached, "unsubscribed"))).toEqual(unsubscribed);
-    expect(fs.existsSync(path.join(primary, ".config", "task-archive"))).toBe(false);
     expect(JSON.parse(fs.readFileSync(path.join(primary, ".runtime", "runtime-health.json"), "utf8")).lastGovernance.status).toBe("ok");
   });
 });

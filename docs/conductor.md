@@ -94,7 +94,7 @@ delegation and release restrictions apply at every level.
 
 An agent (not a conductor) can start in a new worktree. The sheet's Work in a
 new worktree switch is off by default; turned on, it takes a branch name,
-suggested from the task's first line or `phren/<short-id>`. The Hook sends
+suggested from the brief's first line or `phren/<short-id>`. The Hook sends
 `worktree: { branch }` to `git worktree add`, from the project's current HEAD
 into `<repo>/.claude/worktrees/<name>`, and starts the agent there. It refuses
 a folder that is not a Git repository and a branch that already exists, with a
@@ -137,23 +137,7 @@ A conductor dispatches only within its set: a peer that does not link back is
 refused by name and skipped by `anywhere`. Design and routes are in
 [Conductor sets](conductor-sets.md).
 
-Computers that are not linked can each run their own conductor. They
-coordinate through the synced store by claiming tasks: `claim_task` (or
-`manage_task` with `action: "claim"`) pulls the store, moves the task to Active
-with a line under it in `tasks.md`,
-
-```md
-- [ ] Port the parser <!-- bid:aaaa1111 rank:1 -->
-  Claimed: Mini 2026-09-25T04:30:00Z session:w22-p1
-```
-
-then commits and pushes. A task another computer holds is refused. When two
-claims race, the store merge keeps the one that reached the remote first, and
-the other call reports it as `heldBy`. `get_tasks` summaries show
-`[claimed: <computer>]`; conductors skip tasks claimed elsewhere. Completing a
-task clears its claim, `release: true` returns it to the Queue, and `force`
-takes over a claim more than a day old. Phren versions older than claims drop
-the `Claimed:` line when they rewrite `tasks.md`, so update every computer.
+Conductors coordinate through forge claims. Use `claim_issue` or `phren issue claim` to assign an issue and record the computer working on it.
 
 On the phone, hold a project or computer for 0.4 seconds to open the computer
 chooser. It lists names, colors, reachability and project session counts, puts
@@ -1349,7 +1333,7 @@ through the durable hand-off queue, with one stable delivery id. Receipts carry
 keeps its original integrator target on retries, even if the default changes.
 Queued forwarding is checked until
 delivered; uncertain forwarding stays uncertain. A restarted integrator needs
-its new target configured. Workers need no direct messaging or GitHub comment.
+its new target configured. For issue-bound work the brief asks the worker to post one summary comment when finished.
 
 ## Owner inbox
 
@@ -1360,15 +1344,14 @@ owner-inbox list` show it across the linked computers. The owning Hook persists
 each item. An item's `inboxComputer` tells clients where to resolve it; its
 `computer` can instead name the remote worker. Unreachable inboxes are
 reported. `add` takes `title`, optional `project`, an optional stable UUID `id`
-to keep on retries, and for an owner action a paste-able `command`, the `task`
-(`bid:xxxxxxxx`), the `pr` URL and an optional dedupe `key`. The generated
+to keep on retries, and for an owner action a paste-able `command`, an `issue` reference, a `pr` URL and an optional dedupe `key`. The generated
 `paste` clears the item on its owning Hook after the command succeeds and
 only if its `updatedAt` still matches. Multiline commands run with `sh -e`.
 The same normalized PR or `key` matches an open item. Conflicting identifiers
 are rejected. Posting a resolved item again under its id with changed fields
 reopens it. A manual item resolves itself when its GitHub or gitboy PR merges
-or closes, or when its linked task is Done. GitLab merge requests can be saved
-as links. A closed unmerged PR or Done task needs a fresh read after the item
+or closes. GitLab merge requests can be saved
+as links. A closed unmerged PR needs a fresh read after the item
 is edited or reopened. `resolve` takes `id`, optional `computer` (the
 `inboxComputer`, omitted for local), `resolution` and `--if-updated-at`.
 For remote adds with the new fields and guarded remote resolves, the
@@ -1378,7 +1361,7 @@ For example, run these commands from a shell.
 
 ```sh
 phren owner-inbox add "Restart the router" --project phren
-phren owner-inbox add "Merge phren#940: owner inbox" --command "gh pr merge 940 -R alaarab/phren --squash" --task bid:ac70edca --pr https://github.com/alaarab/phren/pull/940
+phren owner-inbox add "Merge phren#940: owner inbox" --command "gh pr merge 940 -R alaarab/phren --squash" --issue github.com/alaarab/phren#940 --pr https://github.com/alaarab/phren/pull/940
 phren owner-inbox list --all
 phren owner-inbox resolve <id> --computer <name> --resolution "Restarted"
 ```
@@ -1449,9 +1432,3 @@ A security review found same-user self-enrollment, policy rollback, arbitrary co
 behind allowed commands, coverage gaps and erasable audit. Auto-allow is deferred
 until a protected OS user enforces rollback-protected policy and durable audit.
 Tampering can remove restrictions back to today's behavior, never grant beyond it.
-
-### Dispatch task-field compatibility
-
-For one release, dispatch and PR reports still accept a valid
-`task:{storeId,project,stableId}` and ignore it. Use `issue` to associate new
-work with a forge issue. PR reports replace the task work sweep for new work.

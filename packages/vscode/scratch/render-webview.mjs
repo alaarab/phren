@@ -43,7 +43,7 @@ const entries = {};
 const ages = [4, 20, 80, 120, 220, 320];
 let k = 0;
 for (const proj of ["api-server", "web-app"]) {
-  nodes.push({ id: "project:" + proj, kind: "project", projectName: proj, label: proj, text: proj + " summary", subtype: "project", radius: 20, color: "#7B68AE", findingCount: proj === "api-server" ? 71 : 12, taskCount: 4 });
+  nodes.push({ id: "project:" + proj, kind: "project", projectName: proj, label: proj, text: proj + " summary", subtype: "project", radius: 20, color: "#7B68AE", findingCount: proj === "api-server" ? 71 : 12 });
   for (let i = 0; i < 12; i++) {
     const [slug, tlabel] = topics[i % topics.length];
     const id = "finding:" + proj + ":" + i;
@@ -51,12 +51,6 @@ for (const proj of ["api-server", "web-app"]) {
     const age = ages[i % ages.length];
     entries[key] = { impressions: i, helpful: i % 4, repromptPenalty: 0, regressionPenalty: 0, lastUsedAt: new Date(Date.now() - age * 86400000).toISOString() };
     nodes.push({ id, kind: "finding", projectName: proj, label: tlabel + " finding " + (i + 1), text: tlabel + " finding " + (i + 1) + " for " + proj + " — a representative memory describing a pattern or pitfall.", subtype: slug, topicSlug: slug, topicLabel: tlabel, scoreKey: key, date: "2026-0" + (1 + (i % 6)) + "-1" + (i % 9), radius: 8, color: "#5B4B8A" });
-    edges.push({ source: "project:" + proj, target: id });
-  }
-  for (let t = 0; t < 4; t++) {
-    const section = t % 3 === 0 ? "Active" : t % 3 === 1 ? "Queue" : "Done";
-    const id = "task:" + proj + ":" + t;
-    nodes.push({ id, kind: "task", projectName: proj, label: "Task " + (t + 1) + " for " + proj, text: "Task " + (t + 1) + " for " + proj, subtype: section.toLowerCase(), section, priority: t % 2 ? "high" : "", radius: 7, color: "#00E5FF" });
     edges.push({ source: "project:" + proj, target: id });
   }
 }

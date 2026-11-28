@@ -23,7 +23,6 @@ export interface SessionState {
   endedAt?: string;
   summary?: string;
   findingsAdded: number;
-  tasksCompleted: number;
   /** When true, this session was created by a lifecycle hook, not an explicit MCP call. */
   hookCreated?: boolean;
   /** When true, this session was created by the coding agent runtime. */

@@ -211,7 +211,7 @@ function remoteInventory(result = peers) {
       { name: "unregistered", directory: "/repo/project/src", registered: false },
       { name: "project", directory: "/repo/project", registered: true },
     ] };
-    if (route === "/v1/tasks/stores") return { stores: [{ projects: ["registered-name"] }] };
+    if (route === "/v1/store/directory") return { stores: [{ projects: ["registered-name"] }] };
     if (route === "/v1/projects/locate") return { candidates: [{ directory: "/repo/project" }] };
     return result;
   });

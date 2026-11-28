@@ -72,7 +72,6 @@ export function deriveKind(node: RawNode): NodeKind {
   if (node.group === "reference") return "reference";
   if (node.group === "topic") return "topic";
   if (node.group === "note") return "note";
-  if (node.group.startsWith("task-")) return "task";
   if (node.group.startsWith("topic:")) return "finding";
   return "other";
 }
@@ -120,11 +119,6 @@ export function qualityScore(node: RawNode, scores: ScoreMap): number | null {
 export function baseColorForNode(node: RawNode, storeColor: StoreColorFn): string {
   const kind = deriveKind(node);
   if (kind === "finding") return topicColor(node.topicSlug || node.group.slice(6));
-  if (kind === "task") {
-    if (node.section === "Done" || node.group === "task-done") return KIND_COLORS["task-done"];
-    if (node.section === "Active" || node.group === "task-active") return KIND_COLORS["task-active"];
-    return KIND_COLORS["task-queue"];
-  }
   if (kind === "project") return storeColor(node.store) || KIND_COLORS.project;
   if (kind === "entity") return KIND_COLORS.entity;
   if (kind === "reference") return KIND_COLORS.reference;
@@ -141,7 +135,6 @@ export function sizeForNode(node: RawNode, scores: ScoreMap): number {
   if (kind === "project") return clamp(20 + Math.sqrt(refCount + 4) * 4, 24, 38);
   if (kind === "entity") return clamp(8 + Math.sqrt(refCount + 1) * 2.3, 10, 22);
   if (kind === "finding") return clamp(7.5 + Math.sqrt(helpful + 1) * 1.8 + (node.tagged ? 1.4 : 0), 9, 18);
-  if (kind === "task") return clamp(8 + (node.section === "Active" ? 2 : 0) + (node.priority === "high" ? 1 : 0), 8, 15);
   if (kind === "reference") return clamp(7 + Math.sqrt(refCount + 1) * 1.2, 7, 12);
   if (kind === "topic") return clamp(10 + Math.sqrt(refCount + 1) * 2.2, 11, 24);
   if (kind === "note") return 9;
@@ -194,7 +187,7 @@ export function buildFullAdjacency(nodes: RuntimeNode[], links: RawLink[]): Map<
 }
 
 export function connectionCounts(model: Pick<GraphModel, "fullAdjacency" | "nodeById">, nodeId: string): NodeDetail["connections"] {
-  const counts = { total: 0, projects: 0, findings: 0, tasks: 0, entities: 0, references: 0, topics: 0, notes: 0 };
+  const counts = { total: 0, projects: 0, findings: 0, entities: 0, references: 0, topics: 0, notes: 0 };
   const adjacency = model.fullAdjacency.get(nodeId);
   if (!adjacency) return counts;
   counts.total = adjacency.size;
@@ -203,7 +196,6 @@ export function connectionCounts(model: Pick<GraphModel, "fullAdjacency" | "node
     if (!neighbor) return;
     if (neighbor.kind === "project") counts.projects++;
     else if (neighbor.kind === "finding") counts.findings++;
-    else if (neighbor.kind === "task") counts.tasks++;
     else if (neighbor.kind === "entity") counts.entities++;
     else if (neighbor.kind === "reference") counts.references++;
     else if (neighbor.kind === "topic") counts.topics++;
@@ -280,7 +272,6 @@ export function nodeRank(node: RuntimeNode, filters: GraphFilters, scores: Score
   if (node.kind === "project") rank += 2000;
   if (node.kind === "entity") rank += 800 + (node.refCount || 0) * 8;
   if (node.kind === "finding") rank += 600 + (scoreForNode(node, scores)?.helpful || 0) * 14 + (node.tagged ? 45 : 0);
-  if (node.kind === "task") rank += node.section === "Active" ? 540 : 470;
   if (node.kind === "reference") rank += 180 + (node.refCount || 0) * 3;
   if (node.kind === "topic") rank += 700 + (node.refCount || 0) * 4;
   if (node.kind === "note") rank += 440;
@@ -337,7 +328,7 @@ function allocateQuotas(buckets: Map<string, RuntimeNode[]>, budget: number): Ma
 
 /**
  * Fill a bucket's quota by taking the best of each kind in turn rather than the
- * best overall, so a project's tasks and reference docs cannot be crowded out
+ * best overall, so a project's reference docs cannot be crowded out
  * by its own findings.
  */
 function pickAcrossKinds(nodes: RuntimeNode[], quota: number, filters: GraphFilters, scores: ScoreMap): RuntimeNode[] {
@@ -467,7 +458,7 @@ export function bestSearchMatch(results: RuntimeNode[]): RuntimeNode | null {
 
 /**
  * The dossier's ranked walk through one project: findings newest date first
- * (payload order breaks ties), then tasks in payload order. That is the order
+ * (payload order breaks ties). That is the order
  * the Memory list shows rows for the project, so Previous/Next and the
  * keyboard arrows land where a reader scrolling the list would.
  */
@@ -479,9 +470,8 @@ export function rankedProjectIds(nodes: readonly RawNode[], project: string): st
     if (left === right) return 0;
     return left > right ? -1 : 1;
   });
-  const tasks = nodes.filter((node) => node.project === project && deriveKind(node) === "task");
   const notes = nodes.filter((node) => node.project === project && deriveKind(node) === "note");
-  return [...findings, ...tasks, ...notes].map((node) => node.id);
+  return [...findings, ...notes].map((node) => node.id);
 }
 
 /**

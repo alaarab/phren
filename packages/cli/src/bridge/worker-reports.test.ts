@@ -23,11 +23,15 @@ const dispatch = "70000000-0000-4000-8000-000000000001";
 const terminal = "terminal-worker";
 const origin = { server: "default", workspace: "w1", tab: "t1", pane: "p1" };
 const target: Target = { ...origin, source: "codex", session: "70000000-0000-4000-8000-000000000002" };
-const legacyTask = { storeId: "12345678", project: "widgets", stableId: "12345678" };
 const githubIssue = { repo: "github.com/example/widgets", number: 42 };
 const gitboyIssue = { repo: "gitboy.example/example/widgets", number: 42 };
 const pull = (number: number) => ({ url: `https://github.com/example/widgets/pull/${number}`, repo: "example/widgets",
   branch: "feat/fix", tests: "fixture evidence", notes: "local report details" });
+
+const issueData = { number: 42, index: 42, title: "Report evidence", state: "open" };
+const githubRead = { stdout: JSON.stringify(issueData), stderr: "" };
+const githubComment = { stdout: '{"id":1}', stderr: "" };
+const postedComments = () => gh.mock.calls.filter(([args]) => args[5] === "POST");
 
 let root: string;
 beforeEach(async () => {
@@ -56,32 +60,32 @@ const submit = (id?: string) => noteTurn(target.server, target.pane, {
 it("posts each reported PR on the dispatched issue once across concurrent and repeated reports", async () => {
   await writeDispatchIssue(dispatch, githubIssue);
   const turn = (await submit(dispatch))!;
-  gh.mockResolvedValue({ stdout: '{"id":1}', stderr: "" });
+  gh.mockImplementation(async (args) => args[5] === "GET" ? githubRead : githubComment);
   const first = pull(7);
   const second = pull(8);
   const prs = [first, second];
-  const data = { origin, prs, task: legacyTask };
+  const data = { origin, prs };
   const responses = await Promise.all([reportWorker(data), reportWorker(data)]);
   for (const response of responses) expect(response).toMatchObject({ ok: true, issueLinks: { linked: true } });
   expect(await reportWorker({ ...data, prs: [{ ...first, url: `${first.url}?tab=files#diff` }, second] }))
     .toMatchObject({ ok: true, issueLinks: { linked: true } });
-  expect(gh).toHaveBeenCalledTimes(2);
-  expect(gh.mock.calls.map(([args, options]) => [args[1], args[5], JSON.parse(options.input ?? "")]))
+  expect(postedComments()).toHaveLength(2);
+  expect(postedComments().map(([args, options]) => [args[1], args[5], JSON.parse(options.input ?? "")]))
     .toEqual(expect.arrayContaining(prs.map(pr => ["repos/example/widgets/issues/42/comments", "POST", { body: `PR ${pr.url}` }])));
   expect(await workerPrs(target, turn)).toMatchObject([{ ...first, url: `${first.url}?tab=files#diff` }, second]);
   expect(fetchForge).not.toHaveBeenCalled();
 });
 
-it("links an explicit gitboy issue and accepts a legacy task without a binding", async () => {
+it("links an explicit gitboy issue and leaves unbound reports forge-free", async () => {
   await submit();
   const pr = pull(7);
-  const data = { origin, prs: [pr], task: legacyTask };
+  const data = { origin, prs: [pr] };
   expect(await reportWorker(data)).toMatchObject({ ok: true, issueLinks: { linked: false } });
   expect(fetchForge).not.toHaveBeenCalled();
   expect(gh).not.toHaveBeenCalled();
-  fetchForge.mockImplementation(async () => Response.json({ id: "comment-1" }));
+  fetchForge.mockImplementation(async (_url, init) => Response.json(init?.method === "POST" ? { id: "comment-1" } : issueData));
   expect(await reportWorker({ ...data, issue: `${gitboyIssue.repo}#42` })).toMatchObject({ ok: true, issueLinks: { linked: true } });
-  expect(fetchForge).toHaveBeenCalledTimes(1);
+  expect(fetchForge).toHaveBeenCalledTimes(2);
   expect(fetchForge).toHaveBeenCalledWith(
     "https://gitboy.example/api/v1/repos/example/widgets/issues/42/comments",
     expect.objectContaining({ method: "POST", body: JSON.stringify({ body: `PR ${pr.url}` }) }),
@@ -91,16 +95,17 @@ it("links an explicit gitboy issue and accepts a legacy task without a binding",
 it("retries definite refusals and keeps an ambiguous comment from being sent twice", async () => {
   await submit();
   const data = { origin, prs: [pull(7)], issue: githubIssue };
-  gh.mockRejectedValueOnce(Object.assign(new Error("fixture"), { stderr: "gh: denied (HTTP 403)" }));
+  gh.mockResolvedValueOnce(githubRead).mockRejectedValueOnce(Object.assign(new Error("fixture"), { stderr: "gh: denied (HTTP 403)" }));
   expect(await reportWorker(data)).toMatchObject({ ok: true, issueLinks: { linked: false, error: expect.stringContaining("denied") } });
-  gh.mockResolvedValueOnce({ stdout: '{"id":1}', stderr: "" });
+  gh.mockResolvedValueOnce(githubRead).mockResolvedValueOnce(githubComment);
   expect(await reportWorker(data)).toMatchObject({ ok: true, issueLinks: { linked: true } });
   const uncertain = { ...data, prs: [pull(8), pull(9)] };
-  gh.mockImplementation(async (_args, options) => {
+  gh.mockImplementation(async (args, options) => {
+    if (args[5] === "GET") return githubRead;
     if (options.input?.includes("/pull/8")) throw new Error("Lost reply");
     return { stdout: '{"id":2}', stderr: "" };
   });
   expect(await reportWorker(uncertain)).toMatchObject({ ok: true, issueLinks: { linked: false, error: expect.stringContaining("did not confirm") } });
   expect(await reportWorker(uncertain)).toMatchObject({ ok: true, issueLinks: { linked: false, error: expect.stringContaining("may already have received") } });
-  expect(gh).toHaveBeenCalledTimes(4);
+  expect(postedComments()).toHaveLength(4);
 });

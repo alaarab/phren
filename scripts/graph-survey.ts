@@ -23,7 +23,7 @@ const FRAGS = ["RetryPolicy","RateLimiter","AuthGuard","SessionStore","EventBus"
 const VERBS = ["wraps","caps","rejects","normalises","batches","retries","invalidates","serialises","short-circuits","backfills"];
 const NOUNS = ["outbound calls","the checkout flow","webhook payloads","the session cookie","tenant lookups","the migration order","cold starts","the audit log","index rebuilds","the review queue"];
 
-function makeStore(projects: number, findingsEach: number, tasksEach: number) {
+function makeStore(projects: number, findingsEach: number) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-survey-"));
   const w = (p: string, c: string) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, c); };
   writeRootManifest(dir, { version: 1, installMode: "shared", syncMode: "managed-git" });
@@ -39,9 +39,6 @@ function makeStore(projects: number, findingsEach: number, tasksEach: number) {
       if (i % 40 === 39) lines.push("", `## 2026-08-${String(20 - (i / 40 | 0)).padStart(2, "0")}`, "");
     }
     w(path.join(dir, name, "FINDINGS.md"), lines.join("\n") + "\n");
-    const act = Array.from({ length: Math.ceil(tasksEach / 2) }, (_, i) => `- [ ] ${name}: ${VERBS[i % VERBS.length]} ${NOUNS[i % NOUNS.length]} (${["high","medium","low"][i % 3]})`);
-    const q = Array.from({ length: Math.floor(tasksEach / 2) }, (_, i) => `- [ ] ${name}: queued work item ${i}`);
-    w(path.join(dir, name, "tasks.md"), `# ${name} tasks\n\n## Active\n\n${act.join("\n")}\n\n## Queue\n\n${q.join("\n")}\n\n## Done\n`);
     w(path.join(dir, name, "reference", "runbook.md"), `# ${name} runbook\n\n${FRAGS.slice(0, 4).join(", ")} notes.\n`);
     for (const f of FRAGS.slice(0, 4 + (pi % 4))) manual.push({ entity: f, entityType: "class", sourceDoc: `${name}/FINDINGS.md`, relType: "mentions" });
   }
@@ -58,9 +55,9 @@ const SCALES: Array<[string, number, number, number]> = [
 ];
 const TERMS: Array<[number, number]> = [[80, 24], [120, 32], [200, 50]];
 
-console.log("scale     proj  find  task | nodes links | visible  cap? | build layout | term      ink%  labels");
-for (const [label, projects, findingsEach, tasksEach] of SCALES) {
-  const dir = makeStore(projects, findingsEach, tasksEach);
+console.log("scale     proj  find | nodes links | visible  cap? | build layout | term      ink%  labels");
+for (const [label, projects, findingsEach] of SCALES) {
+  const dir = makeStore(projects, findingsEach);
   for (const [cols, rows] of TERMS) {
     Object.defineProperty(process.stdout, "columns", { value: cols, configurable: true });
     Object.defineProperty(process.stdout, "rows", { value: rows, configurable: true });
@@ -83,7 +80,7 @@ for (const [label, projects, findingsEach, tasksEach] of SCALES) {
     if (cols === 80) {
       const n = g.model.rawNodes.length, l = g.model.rawLinks.length;
       const capped = g.visible.nodes.length < n ? "YES" : "no";
-      process.stdout.write(`${label.padEnd(9)} ${String(projects).padStart(4)} ${String(findingsEach).padStart(5)} ${String(tasksEach).padStart(5)} | ${String(n).padStart(5)} ${String(l).padStart(5)} | ${String(g.visible.nodes.length).padStart(7)}  ${capped.padEnd(4)} | ${String(build).padStart(5)} ${String(layout).padStart(6)} | `);
+      process.stdout.write(`${label.padEnd(9)} ${String(projects).padStart(4)} ${String(findingsEach).padStart(5)} | ${String(n).padStart(5)} ${String(l).padStart(5)} | ${String(g.visible.nodes.length).padStart(7)}  ${capped.padEnd(4)} | ${String(build).padStart(5)} ${String(layout).padStart(6)} | `);
     } else {
       process.stdout.write(`${"".padEnd(9)} ${"".padStart(4)} ${"".padStart(5)} ${"".padStart(5)} | ${"".padStart(5)} ${"".padStart(5)} | ${"".padStart(7)}  ${"".padEnd(4)} | ${"".padStart(5)} ${String(layout).padStart(6)} | `);
     }

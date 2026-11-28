@@ -23,8 +23,8 @@ export function visibleCopilotEvent(raw: Json): Json | undefined {
   // `success` is false on a failed tool run.
   const allowed = ["content", "source", "messageId", "deltaContent", "toolName", "toolCallId", "arguments", "result", "error", "success", "phase", "aborted", "reasoningText", "mcpServerName", "mcpToolName", "inputTokens", "outputTokens", "cacheReadTokens"];
   return { type: raw.type, timestamp: raw.timestamp, data: Object.fromEntries(Object.entries(data)
-    // The MCP server and tool a call went to (`phren` + `get_tasks` for the
-    // `phren-get_tasks` tool), so the phone draws the server's own card.
+    // The MCP server and tool a call went to (`phren` + `list_issues` for the
+    // `phren-list_issues` tool), so the phone draws the server's own card.
     .filter(([key, value]) => allowed.includes(key) && (key !== "reasoningText" || (raw.type === "assistant.message" && typeof value === "string"))
       && (!["mcpServerName", "mcpToolName"].includes(key) || (typeof value === "string" && value.length <= 200)))
     .map(([key, value]) => [key, key === "reasoningText" ? String(value).slice(0, 8_000) : value])) };

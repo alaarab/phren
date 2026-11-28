@@ -33,7 +33,6 @@ let url: string;
 // What the fake Hook says about the working session's pull request checks.
 let ciChecks = "pending";
 let ciReview: string | null = null;
-const completed: string[] = [];
 
 test.beforeAll(async () => {
   if (!existsSync(UI_LINK)) {
@@ -63,10 +62,6 @@ test.beforeAll(async () => {
         current: { number: 42, title: "Keep the session through the guard", state: "OPEN", checks: ciChecks, reviewDecision: ciReview, mergeState: "CLEAN" } } }),
       "GET /v1/projects/repos": () => ({ status: 200, json: { repos: [{ name: "phren", directory: "/Users/you/phren", source: "activity", registered: true }] } }),
       "GET /v1/projects/phren/git": () => ({ status: 200, json: FORGE }),
-      "GET /v1/projects/phren/tasks": (_req: unknown, _body: unknown, url: URL) => ({ status: 200, json: { project: "phren", branch: url.searchParams.get("branch"), truncated: false, tasks: [
-        { id: "bid:1a2b3c4d", text: "Keep the signed-in user through feat/login's session guard", created: "2026-10-12", context: null, section: "active", match: "branch" },
-      ] } }),
-      "POST /v1/projects/phren/tasks/complete": (_req: unknown, body: unknown) => { completed.push((body as { id: string }).id); return { status: 200, json: { project: "phren", id: (body as { id: string }).id, status: "completed" } }; },
     },
   });
 
@@ -412,14 +407,7 @@ test("projects section renders", async ({ page }) => {
   await expect(forge.locator(".pj-forge-branch .pj-checks.failing")).toBeVisible();
   await expect(forge.locator(".pj-row")).toHaveCount(2);
   await expect(forge.locator(".pj-row", { hasText: "#41 Faster store sync" })).toContainText("Checks pass");
-  // The open tasks naming the checkout's branch, with Done.
-  const tasks = forge.locator(".bt");
-  await expect(tasks).toContainText("1 task for this branch");
-  await expect(tasks.locator(".bt-item")).toContainText("session guard");
   await page.screenshot({ path: test.info().outputPath("project-forge.png") });
-  await tasks.getByRole("button", { name: "Done" }).click();
-  await expect(tasks.locator(".bt-item.done")).toHaveCount(1);
-  expect(completed).toEqual(["bid:1a2b3c4d"]);
   // New agent opens the shared launch sheet on this project.
   await page.getByRole("button", { name: "New agent" }).click();
   await expect(page.locator(".launch-title")).toHaveText("New agent in phren");
@@ -530,7 +518,7 @@ test("the window opens on Home", async ({ page }) => {
   await expect(page).toHaveURL(/#\/home$/);
 });
 
-test("Home's Saved today card lists today's findings and tasks and each row opens its section", async ({ page }) => {
+test("Home's Saved today card lists today's findings and opens the selected finding", async ({ page }) => {
   await page.route("**/api/memory/*/projects", route => route.fulfill({ json: { projects: [{ name: "phren", findings: 2 }, { name: "website", findings: 2 }] } }));
   await page.route("**/api/memory/*/findings?*", route => route.fulfill({ json: { items: [
     { id: "fid:phren-today", text: "[pitfall] Sample finding saved today: the Hook caps findings at 500 per project.", date: "2026-01-01" },
@@ -539,39 +527,23 @@ test("Home's Saved today card lists today's findings and tasks and each row open
   page.on("request", (request) => { if (/\/v1\/projects\/[^/]+\/memory$/.test(new URL(request.url()).pathname)) memoryReads.push(request.url()); });
   await page.goto(url, { waitUntil: "domcontentloaded" });
   const card = page.locator('[data-block="saved-today"]');
-  await expect(card.locator(".home-saved-row")).toHaveCount(4);
-  // Tasks carry a time and lead, newest first; findings (date only) follow.
   const rows = card.locator(".home-saved-row");
-  await expect(rows.nth(0)).toContainText("tidy the release checklist");
-  // 12 minutes ago, or less just after midnight (the fixture stays today).
-  await expect(rows.nth(0)).toContainText(/task.*phren.*(\d+m ago|now)/);
-  await expect(rows.nth(1)).toContainText("compress the hero image");
-  await expect(rows.nth(2)).toContainText(/finding.*today/);
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toContainText(/finding.*today/);
   await expect(card.locator(".home-more")).toBeHidden();
-  // One memory read per project, not per render or poll.
   expect(memoryReads).toHaveLength(2);
-
-  // A cold Tasks section (never opened) lands on the task's project and row.
-  await rows.filter({ hasText: "compress the hero image" }).click();
-  await expect(page).toHaveURL(/#\/tasks$/);
-  await expect(page.locator(".tasks-project.selected")).toContainText("website");
-  await expect(page.locator(".tasks-row.selected")).toContainText("compress the hero image");
-
-  await page.locator(".section-pill", { hasText: "Home" }).click();
-  await expect(rows).toHaveCount(4);
   await rows.filter({ hasText: "caps findings at 500" }).click();
   await expect(page).toHaveURL(/#\/memory$/);
   await expect(page.locator(".mem-row", { hasText: "caps findings at 500" })).toBeVisible();
 
   // Showing Home again inside the five minute window does not read memory again.
   await page.locator(".section-pill", { hasText: "Home" }).click();
-  await expect(rows).toHaveCount(4);
+  await expect(rows).toHaveCount(2);
   expect(memoryReads).toHaveLength(2);
 });
 
 test("Home's Saved today card says so when every read fails", async ({ page }) => {
   await page.route("**/v1/projects/*/memory", route => route.fulfill({ status: 500, json: { error: "boom" } }));
-  await page.route("**/v1/tasks?*", route => route.fulfill({ status: 500, json: { error: "boom" } }));
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await expect(page.locator('[data-block="saved-today"] .home-empty')).toHaveText("Couldn't read what was saved today.");
 });

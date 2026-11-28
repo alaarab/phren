@@ -1,6 +1,6 @@
 # Memory Viewer (3D Graph)
 
-The memory viewer renders your store as a 3D graph, projects as containment fields, findings/tasks/fragments/references as nodes inside them. Hosts that build their own payload can also send `topic` (group `"topic"`, hub with `topicSlug` and `refCount`) and `note` (group `"note"`, with `project` and `date`) nodes; `topic:<slug>` groups stay findings. The same renderer (a shared browser bundle built from `packages/cli/browser/graph/`) powers three hosts:
+The memory viewer renders your store as a 3D graph, projects as containment fields, findings/fragments/references as nodes inside them. Hosts that build their own payload can also send `topic` (group `"topic"`, hub with `topicSlug` and `refCount`) and `note` (group `"note"`, with `project` and `date`) nodes; `topic:<slug>` groups stay findings. The same renderer (a shared browser bundle built from `packages/cli/browser/graph/`) powers three hosts:
 
 - the **web UI** Graph tab (`phren web-ui`)
 - the **VS Code extension** webview (Phren Fragment Graph panel)
@@ -15,7 +15,7 @@ On SwiftShader (software WebGL), the viewer renders the scene at half resolution
 ## Labels
 
 Project (group) labels always draw first: they claim slots from the
-per-frame budget before any finding or task. Finding and task labels resolve
+per-frame budget before any finding. Finding labels resolve
 against screen-space rectangles every frame in `graph-core`'s collision
 resolver: a leaf whose box intersects a group label or a higher-ranked leaf
 is hidden. Leaves rank by focus/hover priority, then whether they were
@@ -24,7 +24,7 @@ node degree including `refCount`, then recency. Hysteresis keeps a shown
 label through a marginal overlap so labels do not flicker as the camera
 moves. The draw cap counts groups and leaves together and scales with
 viewport area, with a floor of 40 so a full project navigator still fits on
-a phone-sized canvas. Zooming in brings more finding/task labels into the
+a phone-sized canvas. Zooming in brings more finding labels into the
 pool and clears collisions, so detail appears as you approach it. Rects are
 computed one frame behind the CSS2D draw (labelTick runs in the ambient RAF,
 elements are positioned in force-graph's render pass); that lag is accepted
@@ -43,10 +43,10 @@ rather than coupling the resolver to the host loop.
 
 The dossier's header row carries the node's kind and title on the left and
 44px icon buttons on the right, beside **Close**: **Previous node** and
-**Next node** chevrons (findings, tasks, then notes), then **Edit** (pencil) and
+**Next node** chevrons (findings, then notes), then **Edit** (pencil) and
 **Delete** (trash in the danger tint) for nodes that can change. Previous and
 Next step through the current ranked list, the order the list mode shows for
-that project: its findings newest date first, then its tasks, wrapping at
+that project: its findings newest date first, wrapping at
 both ends. The `←`/`→` keys do the same walk while a node dossier is open
 (otherwise they still cycle projects in the navigator dock). The counter under
 the body reads `n of m` for that same list.
@@ -60,7 +60,7 @@ Click an orb to focus that project (camera flies to it, its network highlights, 
 Opens automatically when a project is in context (focused directly, or any of its findings/tasks is selected):
 
 - **Header**: item counts plus a healthy/decaying/stale bar; click a health segment to filter to it.
-- **Filter row**: text filter, `All / Findings / Tasks` chips, an `⚠ Aging` chip, and a sort control (`Aging first` / `Recent` / `A–Z`).
+- **Filter row**: text filter, an `⚠ Aging` chip, and a sort control (`Aging first` / `Recent` / `A–Z`).
 - **Rows**: health-tinted dot, label, topic/section chip. Click to fly to the node and open its dossier. Hover actions: **◎ peek** (fly without opening the dossier), **✎ edit** (open the dossier in edit mode), **🗑 delete**.
 - **Keyboard**: `↑`/`↓` move a cursor row, `Enter` opens it, `Delete` prunes it.
 
@@ -105,4 +105,4 @@ after a gesture. Selecting another node resumes centering.
 
 ## Where edits land
 
-All actions operate on the same files the CLI and MCP tools use, `<store>/<project>/FINDINGS.md` and `tasks.md` (default store: `~/.phren`). Nothing in the viewer introduces new storage, commands, or MCP tools; delete/edit/merge are compositions of the existing finding and task operations.
+All actions operate on the same files the CLI and MCP tools use, `<store>/<project>/FINDINGS.md` (default store: `~/.phren`). Nothing in the viewer introduces new storage, commands, or MCP tools; delete/edit/merge are compositions of the existing finding and task operations.

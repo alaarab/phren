@@ -5,7 +5,7 @@ it, and phren in the app launcher.
 
 - **Bar icon** — lights up while phren is recalling something. Click for the
   panel, right-click straight into the shell, middle-click into the graph.
-- **Panel** — every project with its finding and open-task counts and, when
+- **Panel** — every project with its finding count and, when
   `phren maintain summarize` has run, a one-line summary of what phren knows
   about it; the last
   recalls as they land (what was looked up, from which project, by what), and
@@ -40,7 +40,7 @@ Move it with `omarchy plugin enable phren --section left`, hide it with
 ## How it works
 
 The widget is a display over the store's own files. `bin/phren-omarchy-status`
-reads `~/.phren` (or `$PHREN_PATH`) directly: one `FINDINGS.md` and `tasks.md`
+reads `~/.phren` (or `$PHREN_PATH`) directly: one `FINDINGS.md`
 per project for the counts, and the tail of `.runtime/lookup-events.jsonl`,
 the same log the terminal graph's watch mode follows, for the recalls. It
 costs a few milliseconds and runs every 30 seconds (configurable in the

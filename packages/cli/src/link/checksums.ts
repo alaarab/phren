@@ -2,7 +2,6 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { getProjectDirs } from "../shared.js";
-import { TASK_FILE_ALIASES } from "../data/tasks.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
@@ -44,7 +43,7 @@ export function updateFileChecksums(phrenPath: string, profileName?: string): { 
   const tracked: string[] = [];
   const dirs = getProjectDirs(phrenPath, profileName);
   for (const dir of dirs) {
-    for (const name of [FINDINGS_FILENAME, ...TASK_FILE_ALIASES, "truths.md"]) {
+    for (const name of [FINDINGS_FILENAME, "truths.md"]) {
       const full = path.join(dir, name);
       if (!fs.existsSync(full)) continue;
       const rel = path.relative(phrenPath, full).replace(/\\/g, "/");

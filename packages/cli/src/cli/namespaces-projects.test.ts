@@ -89,7 +89,7 @@ async function runWithStdin(args: string[], input: string) {
 }
 
 describe("phren projects namespace", () => {
-  it("lists projects sorted, tags findings and tasks, and skips global and archived dirs", async () => {
+  it("lists projects sorted, tags findings, and skips global and archived dirs", async () => {
     writeProject("zebra", { "FINDINGS.md": "# Zebra\n" });
     writeProject("alpha", { "tasks.md": "# Alpha\n" });
     writeProject("global");
@@ -99,7 +99,7 @@ describe("phren projects namespace", () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).toContain(`Projects in ${store}:`);
-    expect(stdout).toContain("  alpha  [tasks]");
+    expect(stdout).toContain("  alpha");
     expect(stdout).toContain("  zebra  [findings]");
     expect(stdout.indexOf("  alpha")).toBeLessThan(stdout.indexOf("  zebra"));
     expect(stdout).not.toContain("  global");
@@ -184,11 +184,10 @@ describe("phren projects namespace", () => {
     expect(existsSync(path.join(store, "missing"))).toBe(false);
   });
 
-  it("exports summary, findings, tasks and instructions as JSON", async () => {
+  it("exports summary, findings and instructions as JSON", async () => {
     writeProject("exporter", {
       "summary.md": "# Exporter\n",
       "FINDINGS.md": "# Exporter Findings\n\n## 2026-01-01\n\n- A durable fact\n",
-      "tasks.md": "# Exporter tasks\n\n## Active\n\n- [ ] Ship it\n",
       "AGENTS.md": "# Instructions\n",
     });
 
@@ -203,10 +202,8 @@ describe("phren projects namespace", () => {
       agentsMd: "# Instructions\n",
       claudeMd: "# Instructions\n",
       findingsRaw: expect.stringContaining("A durable fact"),
-      taskRaw: expect.stringContaining("Ship it"),
     });
     expect(exported.learnings).toContainEqual(expect.objectContaining({ text: "A durable fact" }));
-    expect(exported.task.Active).toContainEqual(expect.objectContaining({ line: "Ship it", section: "Active" }));
   });
 
   it("imports exported files into a new project and refuses to overwrite it", async () => {
@@ -215,7 +212,6 @@ describe("phren projects namespace", () => {
       summary: "# S\n",
       agentsMd: "# A\n",
       findingsRaw: "# F\n",
-      taskRaw: "# T\n",
     };
     const importFile = path.join(root, "import.json");
     writeFileSync(importFile, JSON.stringify(payload));
@@ -223,12 +219,11 @@ describe("phren projects namespace", () => {
     const { stdout, exitCode } = await run(["import", importFile]);
 
     expect(exitCode).toBe(0);
-    expect(stdout).toContain('Imported project "imported-project": summary.md, AGENTS.md, FINDINGS.md, tasks.md');
+    expect(stdout).toContain('Imported project "imported-project": summary.md, AGENTS.md, FINDINGS.md');
     const projectDir = path.join(store, "imported-project");
     expect(readFileSync(path.join(projectDir, "summary.md"), "utf8")).toBe("# S\n");
     expect(readFileSync(path.join(projectDir, "AGENTS.md"), "utf8")).toBe("# A\n");
     expect(readFileSync(path.join(projectDir, "FINDINGS.md"), "utf8")).toBe("# F\n");
-    expect(readFileSync(path.join(projectDir, "tasks.md"), "utf8")).toBe("# T\n");
 
     const again = await run(["import", importFile]);
     expect(again.exitCode).toBe(1);

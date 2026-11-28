@@ -23,7 +23,7 @@ test("graph UI layout and project workflow", async ({ page }) => {
   await page.evaluate(() => (window as any).phrenGraph.selectNode("project:api-server"));
   const panel = page.locator(".phren-project-panel");
   await expect(panel).toBeVisible({ timeout: 5_000 });
-  await expect(panel.locator(".phren-pp-sub")).toContainText("71 findings · 4 tasks");
+  await expect(panel.locator(".phren-pp-sub")).toContainText("71 findings");
   await page.waitForTimeout(1_000);
   await page.screenshot({ path: path.join(shots, "02-project.png") });
 
@@ -105,15 +105,4 @@ test("graph UI layout and project workflow", async ({ page }) => {
   await expect(selectAll).toHaveText("Select all");
   await panel.locator("[data-pp-bulk-done]").click();
 
-  const taskFilter = panel.locator('[data-pp-chip][data-kind="task"]');
-  await taskFilter.click();
-  const firstTask = panel.locator('.phren-pp-row').first();
-  await firstTask.hover();
-  await firstTask.locator('[data-pp-edit]').click();
-  await firstTask.locator('[data-pp-section]').selectOption('Active');
-  await firstTask.locator('[data-pp-priority]').selectOption('high');
-  await firstTask.locator('[data-pp-save]').click();
-  await expect.poll(async () => page.evaluate(() => (window as any).__phrenPostedMessages.at(-1)?.command)).toBe("saveTaskEdit");
-  await expect(page.locator("#node-popover")).toBeHidden();
-  await page.screenshot({ path: path.join(shots, "04-edit.png") });
 });

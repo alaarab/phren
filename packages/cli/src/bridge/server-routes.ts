@@ -1,3 +1,4 @@
+import { storeDirectory } from "./store-directory.js";
 import type { BrowserRegistry } from "./browser-registry.js";
 import { browserRoute } from "./browser-routes.js";
 import type { TurnQueue } from "./turn-queue.js";
@@ -16,8 +17,6 @@ import { localMoveAvailability, moveComputers } from "./move-computers.js";
 import { ownerRequest, requestPeer, type PeerIdentity } from "./request-origin.js";
 import { bodyDigest, OWNER_PROOF_HEADER, OwnerProof } from "./owner-proof.js";
 import { listMoves, moveSessionFields, readMove, type MoveRecord, type SessionMover } from "./session-move.js";
-import { getTaskListRoute, getTaskDetailRoute, getTaskDirectoryRoute } from "./task-routes.js";
-import { TASKS_RETIRED_CODE, TASKS_RETIRED_MESSAGE } from "../task/retired.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import { inboxWire, type OwnerInbox } from "./owner-inbox.js";
 import { issueItemRoute, issueListRoute, issueWriteRoute } from "./issue-routes.js";
@@ -58,7 +57,7 @@ import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { resolveFilePath } from "./file-resolve.js";
 import { isMediaPath, readMedia } from "./home-media.js";
 import { storeRoute } from "./memory-store.js";
-import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch } from "./project-memory.js";
+import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding } from "./project-memory.js";
 import { PROJECT_GIT_ROUTE, projectGit, projectHostToken } from "./project-git.js";
 import { availablePaneEvidence, childActivity, effectivePaneEvidence } from "./session-evidence.js";
 import { liveWork, markBackground, ownRecord, paneRecord, provisionalWork, recordTitle, replyExcerpt, resolveEffectiveStatus, turnCompletion } from "./session-activity.js";
@@ -229,10 +228,9 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
     result.ownerInboxPush = true;
     result.ownerInboxIssues = true;
   }
-  for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
+  for (const name of ["memory", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
   if (snapshot.has("hook")) result.approvalRules = { version: 2, effects: ["always-ask", "deny"], harnesses: ["claude"], events: ["PermissionRequest"], tools: ["Bash"], inputField: "command", conductorTools: false, mcpTools: false, preExecution: false };
   if (snapshot.has("schedules")) { result.scheduleProjects = true; result.scheduleUpdate = true; result.scheduleEvents = true; }
-  if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; result.taskAtomicCreate = true; result.taskAtomicSave = true; result.taskBoundLaunch = true; result.taskWork = true; }
   return result;
 }
 
@@ -521,11 +519,6 @@ async function peerContinuationIntent(caller: PeerIdentity, id: string, conversa
   return peerRequest(candidates[0], `/v1/sessions/move/intent?id=${z.string().uuid().parse(id)}${conversation === undefined ? "" : `&conversation=${conversation}`}`, undefined, 5_000);
 }
 
-/** Tasks are retired in 0.4.0: the phone keeps every task read, and every task write is 410. */
-function taskWriteRetired(): never {
-  throw new BridgeError(410, TASKS_RETIRED_MESSAGE, { code: TASKS_RETIRED_CODE });
-}
-
 export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
   const { version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks, journal,
     modelCatalog, accountUsage, resources, launches, locatedDirectories, fanoutMessages, canary } = ctx;
@@ -552,14 +545,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       const memoryRoute = PROJECT_MEMORY_ROUTE.exec(url.pathname);
       if (memoryRoute) {
         const [, project, route] = memoryRoute;
-        if (request.method !== (route === "findings" || route === "tasks/complete" ? "POST" : "GET")) throw new BridgeError(405, "Unsupported request method.");
+        if (request.method !== (route === "findings" ? "POST" : "GET")) throw new BridgeError(405, "Unsupported request method.");
         if (!modules.has("memory")) throw new BridgeError(404, disabledHint("memory"));
-        if ((route === "tasks" || route === "tasks/complete") && !modules.has("tasks")) throw new BridgeError(404, disabledHint("tasks"));
         if (route === "memory") result = projectMemory(modules.store, project);
         else if (route === "memory/files") result = await memoryForFiles(modules.store, project, url.searchParams.getAll("path"));
         else if (route === "memory/search") result = memorySearch(modules.store, project, url.searchParams.get("q") ?? "", Number(url.searchParams.get("limit") ?? "5"));
-        else if (route === "tasks") result = tasksForBranch(modules.store, project, url.searchParams.get("branch") ?? "");
-        else if (route === "tasks/complete") taskWriteRetired();
         else result = await saveFinding(modules.store, project, await body(request));
       } else if (PROJECT_GIT_ROUTE.test(url.pathname)) {
         const [, project, tokenRoute] = PROJECT_GIT_ROUTE.exec(url.pathname)!;
@@ -568,6 +558,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         result = tokenRoute
           ? await projectHostToken(modules.store, project, await journal.recent(), await body(request))
           : await projectGit(modules.store, project, await journal.recent());
+      } else if (url.pathname === "/v1/store/directory") {
+        if (request.method !== "GET") throw new BridgeError(405, "Unsupported request method.");
+        result = await storeDirectory(modules.store);
       } else if (url.pathname === "/v1/store/pull-now") {
         if (request.method !== "POST") throw new BridgeError(405, "Unsupported request method.");
         if (!ctx.storePulls) throw new BridgeError(503, "Store pulls unavailable.");
@@ -580,9 +573,6 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         // Owner actions that a phone signs carry no body on GET: the signed digest is of zero bytes.
         await ownerProof.check(request, url.pathname, {}, bodyDigest(Buffer.alloc(0)));
         switch (url.pathname) {
-          case "/v1/tasks": result = await getTaskListRoute(modules.store, url); break;
-          case "/v1/tasks/detail": result = await getTaskDetailRoute(modules.store, url); break;
-          case "/v1/tasks/stores": result = await getTaskDirectoryRoute(modules.store); break;
           case "/v1/health": result = { ...info, codePackage: await codePackageStatus(scheduleStore, modules.has("code")) }; break;
           case "/v1/metrics": result = hookMetrics.snapshot(); break;
           case "/v1/health/details": result = { ...await healthDetails({ hookVersion: version, computerId: computerID, store: scheduleStore,
@@ -1038,14 +1028,6 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           if (request.headers?.["x-phren-origin"] === "peer") throw new BridgeError(403, "Only local agents use the conductor call route.");
           const parsed = z.object({ action: z.enum(["dispatch", "hand_off", "returns", "approve", "grants-list", "grants-add", "grants-remove"]), data: z.record(z.string(), z.unknown()), origin: targetSchema.omit({ source: true, session: true }) }).strict().parse(data);
           result = await conductorCall(parsed.action, parsed.data, parsed.origin, () => executeConductor(parsed.action, parsed.data, parsed.origin));
-        } else if (url.pathname === "/v1/tasks/launch") {
-          taskWriteRetired();
-        } else if (url.pathname === "/v1/tasks/save") {
-          taskWriteRetired();
-        } else if (url.pathname === "/v1/tasks/create") {
-          taskWriteRetired();
-        } else if (url.pathname === "/v1/tasks/update") {
-          taskWriteRetired();
         } else if (url.pathname === "/v1/subagents/resume") {
           result = await fanoutMessages.send(data);
         } else if (url.pathname === "/v1/subagents/archive-finished") {

@@ -41,9 +41,6 @@ export async function showProjectConfigPanel(client: PhrenClient, project: strin
   const proactivitySource = asRecord(proactivityData?._source);
   const proactivityBaseSource = typeof proactivitySource?.base === "string" ? proactivitySource.base : undefined;
 
-  const taskModeData = asRecord(configData.taskMode);
-  const taskMode = typeof taskModeData?.taskMode === "string" ? taskModeData.taskMode : "auto";
-  const taskModeSource = typeof taskModeData?._source === "string" ? taskModeData._source : undefined;
 
   const findingData = asRecord(configData.findingSensitivity);
   const findingSensitivity = typeof findingData?.level === "string" ? findingData.level : "balanced";
@@ -54,7 +51,6 @@ export async function showProjectConfigPanel(client: PhrenClient, project: strin
   const retentionSource = typeof retentionData?._source === "string" ? retentionData._source : undefined;
 
   const proactivitySrc = sourceLabel(proactivityBaseSource);
-  const taskModeSrc = sourceLabel(taskModeSource);
   const findingSrc = sourceLabel(findingSource);
   const retentionSrc = sourceLabel(retentionSource);
 
@@ -63,11 +59,6 @@ export async function showProjectConfigPanel(client: PhrenClient, project: strin
       label: `${proactivitySrc.icon} Proactivity`,
       description: proactivityBase,
       detail: `${proactivitySrc.detail}  •  high / medium / low`,
-    },
-    {
-      label: `${taskModeSrc.icon} Task Mode`,
-      description: taskMode,
-      detail: `${taskModeSrc.detail}  •  off / manual / suggest / auto`,
     },
     {
       label: `${findingSrc.icon} Finding Sensitivity`,
@@ -89,8 +80,6 @@ export async function showProjectConfigPanel(client: PhrenClient, project: strin
 
   if (chosen.label.includes("Proactivity")) {
     await editProactivity(client, project, proactivityBase);
-  } else if (chosen.label.includes("Task Mode")) {
-    await editTaskMode(client, project, taskMode);
   } else if (chosen.label.includes("Finding Sensitivity")) {
     await editFindingSensitivity(client, project, findingSensitivity);
   } else if (chosen.label.includes("Retention TTL")) {
@@ -100,7 +89,7 @@ export async function showProjectConfigPanel(client: PhrenClient, project: strin
 
 async function editProactivity(client: PhrenClient, project: string, current: string): Promise<void> {
   const options: vscode.QuickPickItem[] = [
-    { label: "high", description: "Always auto-capture findings and tasks", picked: current === "high" },
+    { label: "high", description: "Always auto-capture findings", picked: current === "high" },
     { label: "medium", description: "Only capture on explicit signals", picked: current === "medium" },
     { label: "low", description: "Never auto-capture — fully manual", picked: current === "low" },
   ];
@@ -119,27 +108,6 @@ async function editProactivity(client: PhrenClient, project: string, current: st
   }
 }
 
-async function editTaskMode(client: PhrenClient, project: string, current: string): Promise<void> {
-  const options: vscode.QuickPickItem[] = [
-    { label: "off", description: "Task system completely disabled", picked: current === "off" },
-    { label: "manual", description: "Tasks only created when explicitly requested", picked: current === "manual" },
-    { label: "suggest", description: "Agent suggests tasks, you confirm", picked: current === "suggest" },
-    { label: "auto", description: "Agent adds tasks automatically", picked: current === "auto" },
-  ];
-  const choice = await vscode.window.showQuickPick(options, {
-    title: `Task Mode for "${project}"`,
-    placeHolder: `Current: ${current}`,
-  });
-  if (!choice) return;
-
-  try {
-    const raw = await client.setConfig("taskMode", { mode: choice.label }, project);
-    maybeWarn(raw);
-    await vscode.window.showInformationMessage(`Task mode for "${project}" set to "${choice.label}".`);
-  } catch (error) {
-    await vscode.window.showErrorMessage(`Failed to set task mode: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
 
 async function editFindingSensitivity(client: PhrenClient, project: string, current: string): Promise<void> {
   const options: vscode.QuickPickItem[] = [

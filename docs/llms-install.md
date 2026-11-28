@@ -1,6 +1,6 @@
 # phren: LLM Installation Guide
 
-phren keeps project memory portable across sessions and machines. It runs as an MCP server and a set of lifecycle hooks. The server's default `core` profile exposes twelve tools; the tables below list every tool by its full-profile name, and in `core` the folded ones are reached as `revise_finding` / `manage_task` / `session` / `phren_admin` with an `action` parameter (see `api-reference.md`).
+phren keeps project memory portable across sessions and machines. It runs as an MCP server and a set of lifecycle hooks. The server's default `core` profile exposes nine tools; the tables below list every tool by its full-profile name, and in `core` the folded ones are reached as `revise_finding` / `session` / `phren_admin` with an `action` parameter (see `api-reference.md`).
 
 ## Quick Start
 
@@ -64,20 +64,20 @@ List registered stores:
 phren team list
 ```
 
-Team stores sync independently via git. Findings, notes, and tasks in a team store are visible to all members through federated search. Notes remain opt-in search context and are not automatically injected.
+Team stores sync independently via git. Findings and notes in a team store are visible to all members through federated search. Notes remain opt-in search context and are not automatically injected.
 
 ## Maintenance Safety
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (90)
+## MCP Tools (82)
 
 ### Search and Browse
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
 | `search_knowledge` | `query`, `type?`, `limit?`, `project?`, `tag?`, `since?`, `status?`, `include_history?`, `synthesize?` | FTS5 full-text search across your project store. Supports AND, OR, NOT, phrase matching. Filter by tag, date, or lifecycle status. |
-| `get_memory_detail` | `id` | Fetch full content by id: `fid:`/`bid:` returns one finding or task, `mem:project/filename` the document. |
+| `get_memory_detail` | `id` | Fetch full content by id: `fid:` returns one finding, `mem:project/filename` the document. |
 | `get_project_summary` | `name` | Returns a project's summary card, AGENTS.md path, and list of indexed files. |
 | `list_projects` | `page?`, `page_size?` | Lists all projects in the active profile with pagination. |
 | `get_findings` | `project`, `limit?`, `include_superseded?`, `include_history?`, `status?` | Read recent findings, filterable by lifecycle status. |
@@ -106,19 +106,6 @@ Notes are explicitly searchable but excluded from automatic hook context, findin
 | `comment_issue` | `repo?`, `project?`, `number`, `body` | Post one comment and return its URL. |
 | `close_issue` | `repo?`, `project?`, `number`, `comment?` | Close an issue, optionally with a comment. |
 
-### Task Management (`task` tools)
-
-| Tool | Parameters | Description |
-|------|-----------|-------------|
-| `get_tasks` | `project?`, `id?`, `item?`, `status?`, `limit?`, `done_limit?`, `offset?`, `summary?` | Read tasks with pagination, summary mode, and section filtering. |
-| `add_task` | `project`, `item: string \| string[]` | Add one or more tasks to a project's Queue section. Pass a string or array. |
-| `complete_task` | `project`, `item: string \| string[]` | Move one or more tasks to Done by text match. Pass a string or array. |
-| `remove_task` | `project`, `item: string \| string[]` | Remove one or more tasks by matching text or ID. Pass a string or array. |
-| `update_task` | `project`, `item?`, `updates` | Update text, priority, context, section, GitHub metadata, pin, promote, or work_next. Item optional when work_next is true. |
-| `tidy_done_tasks` | `project`, `keep?`, `dry_run?` | Archive completed tasks to keep the list clean. |
-| `pin_task` | `project`, `item`, `unpin?` | Pin or unpin a task. Pinned tasks always appear in hook context regardless of priority. |
-| `claim_task` | `project`, `item`, `session?`, `release?`, `force?` | Claim a task for this computer (Active, with a `Claimed:` line) and push it, so unlinked conductors skip it. |
-
 ### Finding Capture
 
 | Tool | Parameters | Description |
@@ -146,7 +133,7 @@ Notes are explicitly searchable but excluded from automatic hook context, findin
 | Tool | Parameters | Description |
 |------|-----------|-------------|
 | `add_project` | `path`, `profile?`, `ownership?` | Bootstrap a repo or working directory into phren and add it to the active profile. |
-| `export_project` | `project` | Export a project's data (findings, tasks, summary) as portable JSON. |
+| `export_project` | `project` | Export a project's data (findings and summary) as portable JSON. |
 | `import_project` | `data` | Import project data from a previously exported JSON payload. |
 | `manage_project` | `project`, `action` | Archive or unarchive a project. |
 
@@ -164,10 +151,10 @@ Notes are explicitly searchable but excluded from automatic hook context, findin
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `session_start` | `project?`, `agentScope?`, `connectionId?` | Mark session start. Returns prior summary, recent findings, active tasks, checkpoint resume hints, and a `sessionId`. |
-| `session_end` | `summary?`, `sessionId?`, `connectionId?` | Mark session end and save summary for next session. Also writes task checkpoint snapshots and updates finding impact outcomes. |
+| `session_start` | `project?`, `agentScope?`, `connectionId?` | Mark session start. Returns prior summary, recent findings, and a `sessionId`. |
+| `session_end` | `summary?`, `sessionId?`, `connectionId?` | Mark session end and save summary for next session. |
 | `session_context` | `sessionId?`, `connectionId?` | Get current session state. Pass `sessionId` or a previously bound `connectionId`. |
-| `session_history` | `limit?`, `sessionId?`, `project?` | List past sessions or drill into a specific session to see its findings and tasks. |
+| `session_history` | `limit?`, `sessionId?`, `project?` | List past sessions or drill into a specific session to see its findings. |
 
 ### Skills Management
 
@@ -208,8 +195,8 @@ Skill system behavior:
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `get_config` | `domain?`, `project?` | Read governance and policy config (proactivity, taskMode, findingSensitivity, retention, workflow, access, index, topic, dreaming, or all). |
-| `set_config` | `domain`, `settings`, `project?` | Update config for a domain (proactivity, taskMode, findingSensitivity, retention, workflow, access, index, topic, dreaming). |
+| `get_config` | `domain?`, `project?` | Read governance and policy config (proactivity, findingSensitivity, retention, workflow, access, index, topic, dreaming, or all). |
+| `set_config` | `domain`, `settings`, `project?` | Update config for a domain (proactivity, findingSensitivity, retention, workflow, access, index, topic, dreaming). |
 
 Maintenance tools are CLI-only. Use `phren config` and `phren maintain` commands.
 
@@ -230,7 +217,7 @@ Parameters for these are in [api-reference.md](api-reference.md).
 | `hand_off` | see api-reference.md | Queue a prompt at a busy session; keep deliveryId, query status:true without text; uncertain input is never resent automatically. |
 | `dispatch_report` | `prs` | Turn-bound PR evidence in done returns, forwarded through the Hook to the integrator. |
 | `move_session` | see api-reference.md | Move a live session to another harness on its computer: it writes a hand-off and exits, and the new agent starts in the same pane with it. A dispatched worker keeps its dispatch; the receipt records the move. With `resume: true` a Claude chat switches to another Claude account with no hand-off (the transcript is copied and resumed). |
-| `owner_inbox` | `operation?`, `title?`, `project?`, `id?`, `resolution?`, `includeResolved?`, `computer?`, `command?`, `task?`, `pr?`, `issue?`, `key?`, `ifUpdatedAt?` | Add, list or resolve owner items across linked computers. `ifUpdatedAt` guards a resolve against item changes; `issue` (`domain/owner/name#N`) links a manual item to its forge issue. |
+| `owner_inbox` | `operation?`, `title?`, `project?`, `id?`, `resolution?`, `includeResolved?`, `computer?`, `command?`, `pr?`, `issue?`, `key?`, `ifUpdatedAt?` | Add, list or resolve owner items across linked computers. `ifUpdatedAt` guards a resolve against item changes; `issue` (`domain/owner/name#N`) links a manual item to its forge issue. |
 | `live_sessions` | see api-reference.md | List the live agent sessions on this computer and every enrolled computer: computer, project, harness, status, idleFor (seconds since the tab last changed), role and the target hand_off takes. Computers that could not be reached are listed separately, and computers registered in the store but not linked in hooks.yaml come back in notLinked: their sessions are unknown, not absent. |
 | `account_usage` | see api-reference.md | Agent usage on this computer and every enrolled computer, merged by account: one row per Claude login, Codex, OpenCode, OpenCode Go, OpenRouter and GitHub Copilot, with its windows (percent used, percent left, reset time), leftPercent (the least room on any window, the account's API credits counted as one balance, limits and spend summed, as dispatch counts them), nearLimit (under 20% left: information, not a reason to avoid it), exhausted (a window at 100% or refusing requests, with availableIn), freshness (updatedAt, age, stale) and the computers where it is signed in, with the Claude account id dispatch takes there. Call it before dispatch: never send work to an exhausted account; a low one is fine, and one that resets soon is worth using before it does. Harnesses no computer reported are in noData; unreachable and unlinked computers are listed separately: their usage is unknown, not zero. |
 | `machine_health` | see api-reference.md | Named health findings for this computer and every linked computer, worst computer first (swap, disk, load pileups, memory hogs and leaks, orphans, restart loops, backups, updates, crashes, OOM kills, GPU errors, stale locks), each with severity and a fix. For the conductor's watchdog. Read-only. |
@@ -299,7 +286,6 @@ Findings can include source citations (`file:line@commit`). The trust filter val
 ### Finding Lifecycle and Impact Scoring
 
 Finding lifecycle metadata is stored inline and updated by lifecycle tools (`supersede_finding`, `retract_finding`, `resolve_contradiction`).
-Impact scoring tracks which finding IDs were injected into context and marks successful outcomes when session tasks are completed, boosting retrieval priority for repeatedly useful findings.
 
 Lifecycle state also applies retrieval penalties so stale or invalid findings rank lower:
 - Superseded findings: 0.25× confidence multiplier

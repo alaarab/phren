@@ -5,7 +5,6 @@ import {
   formatDateLabel,
   formatRelativeTime,
   formatSessionTimeLabel,
-  taskIconId,
   themeIcon,
   truncate,
 } from "./tree-utils";
@@ -16,8 +15,8 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
   }
   switch (element.kind) {
     case "rootSection": {
-      const labels: Record<string, string> = { projects: "Projects", tasks: "Tasks", machines: "Machines", review: "Review Queue", skills: "Skills", hooks: "Hooks", graph: "Fragment Graph", manage: "Manage" };
-      const icons: Record<string, string> = { projects: "hubot", tasks: "checklist", machines: "vm", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
+      const labels: Record<string, string> = { projects: "Projects", machines: "Machines", review: "Review Queue", skills: "Skills", hooks: "Hooks", graph: "Fragment Graph", manage: "Manage" };
+      const icons: Record<string, string> = { projects: "hubot", machines: "vm", review: "inbox", skills: "extensions", hooks: "plug", graph: "type-hierarchy", manage: "gear" };
       const label = labels[element.section] ?? element.section;
 
       if (element.section === "graph") {
@@ -40,11 +39,6 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
       const reviewBadge: string[] = [];
       if (element.conflictCount && element.conflictCount > 0) reviewBadge.push(`⚠ ${element.conflictCount}`);
       else if (element.reviewCount && element.reviewCount > 0) reviewBadge.push(`${element.reviewCount} review`);
-      const taskBadge: string[] = [];
-      if (element.activeCount && element.activeCount > 0) taskBadge.push(`${element.activeCount} active`);
-      if (element.queueCount && element.queueCount > 0) taskBadge.push(`${element.queueCount} queued`);
-      if (taskBadge.length === 0 && element.openCount && element.openCount > 0) taskBadge.push(`${element.openCount} open`);
-      if (taskBadge.length > 0) reviewBadge.push(taskBadge.join(" · "));
       const reviewBadgeText = reviewBadge.join(" · ");
       if (element.active) {
         // Two-space gap sets the badge off from the star; only meaningful when
@@ -62,7 +56,7 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
     }
     case "category": {
       const cat = element.category ?? "unknown";
-      const categoryLabels: Record<string, string> = { findings: "Findings", notes: "Notes", truths: "Truths", sessions: "Sessions", task: "Tasks", queue: "Review Queue", hooks: "Hooks", reference: "Reference" };
+      const categoryLabels: Record<string, string> = { findings: "Findings", notes: "Notes", truths: "Truths", sessions: "Sessions", queue: "Review Queue", hooks: "Hooks", reference: "Reference" };
       let categoryLabel = categoryLabels[cat] ?? cat.charAt(0).toUpperCase() + cat.slice(1);
       if (cat === "findings" && dateFilter) {
         categoryLabel += ` [${dateFilter.label}]`;
@@ -149,36 +143,6 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
       item.id = `phren.note.${element.projectName}.${element.id}`;
       item.contextValue = element.promoted ? "phren.note.promoted" : "phren.note";
       item.command = { command: "phren.openNote", title: "Open Note", arguments: [element] };
-      return item;
-    }
-    case "globalTaskSectionGroup": {
-      const globalSectionIcons: Record<string, string> = { Pinned: "pinned", Active: "play", Queue: "clock", Done: "check" };
-      const item = new vscode.TreeItem(element.section, vscode.TreeItemCollapsibleState.Collapsed);
-      item.description = `${element.count}`;
-      item.iconPath = themeIcon(globalSectionIcons[element.section] ?? "list-flat");
-      item.id = `phren.globalTaskSectionGroup.${element.section}`;
-      return item;
-    }
-    case "taskSectionGroup": {
-      const sectionIcons: Record<string, string> = { Active: "play", Queue: "clock", Done: "check" };
-      const item = new vscode.TreeItem(element.section, vscode.TreeItemCollapsibleState.Collapsed);
-      item.description = `${element.count}`;
-      item.iconPath = themeIcon(sectionIcons[element.section] ?? "list-flat");
-      item.id = `phren.taskSectionGroup.${element.projectName}.${element.section}`;
-      return item;
-    }
-    case "task": {
-      const item = new vscode.TreeItem(truncate(element.line, 120), vscode.TreeItemCollapsibleState.None);
-      item.description = element.projectName;
-      item.tooltip = `[${element.projectName}] ${element.section} (${element.id})\n${element.line}`;
-      item.iconPath = themeIcon(taskIconId(element));
-      item.id = `phren.task.${element.projectName}.${element.id}`;
-      item.contextValue = element.section !== "Done" ? "phren.task.active" : "phren.task.done";
-      item.command = {
-        command: "phren.openTask",
-        title: "Open Task",
-        arguments: [element],
-      };
       return item;
     }
     case "reviewProjectGroup": {
@@ -345,8 +309,8 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
       return item;
     }
     case "sessionBucket": {
-      const labels: Record<SessionBucket, string> = { findings: "Findings", tasks: "Tasks" };
-      const icons: Record<SessionBucket, string> = { findings: "list-flat", tasks: "checklist" };
+      const labels: Record<SessionBucket, string> = { findings: "Findings" };
+      const icons: Record<SessionBucket, string> = { findings: "list-flat" };
       const item = new vscode.TreeItem(labels[element.bucket], vscode.TreeItemCollapsibleState.Collapsed);
       item.description = `${element.count}`;
       item.iconPath = themeIcon(icons[element.bucket]);

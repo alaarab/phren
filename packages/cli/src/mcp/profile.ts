@@ -31,9 +31,6 @@ export const CORE_TOOLS: readonly string[] = [
   "revise_finding",
   "list_issues",
   "get_issue",
-  "get_tasks",
-  "add_task",
-  "manage_task",
   "session",
   "phren_admin",
 ];
@@ -81,18 +78,6 @@ const COMPOSITES: Record<string, Composite> = {
       resolve_contradiction: "resolve_contradiction",
       pin: "pin_memory",
       feedback: "memory_feedback",
-    },
-  },
-  manage_task: {
-    title: "◆ phren · manage task",
-    summary: "Deprecated: tasks are retired in 0.4.0, so every write action returns `tasks-retired`; nothing is written. Use forge issues (`create_issue`, `claim_issue`, `comment_issue`) for work and the owner Inbox for owner actions. Pass `action` plus that action's own parameters.",
-    actions: {
-      complete: "complete_task",
-      claim: "claim_task",
-      update: "update_task",
-      remove: "remove_task",
-      pin: "pin_task",
-      tidy: "tidy_done_tasks",
     },
   },
   session: {

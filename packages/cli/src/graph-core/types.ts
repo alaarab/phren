@@ -35,7 +35,6 @@ export type RawNode = {
   topicSlug?: string;
   topicLabel?: string;
   findingCount?: number;
-  taskCount?: number;
   /** The number beside a project's label for the active filter (the phone sets it). */
   labelCount?: number;
 };
@@ -58,7 +57,7 @@ export type GraphPayload = {
   topics?: RawTopic[];
 };
 
-export type NodeKind = "project" | "finding" | "task" | "entity" | "reference" | "topic" | "note" | "other";
+export type NodeKind = "project" | "finding" | "entity" | "reference" | "topic" | "note" | "other";
 export type NodeHealth = "healthy" | "decaying" | "stale";
 
 export type RuntimeNode = RawNode & {
@@ -81,7 +80,6 @@ export type NodeDetail = RuntimeNode & {
     total: number;
     projects: number;
     findings: number;
-    tasks: number;
     entities: number;
     references: number;
     topics: number;
@@ -128,9 +126,6 @@ export const KIND_COLORS = {
   entity: "#38e1ff",
   reference: "#42e099",
   note: "#c9a67a",
-  "task-active": "#3ae374",
-  "task-queue": "#48b2ff",
-  "task-done": "#5c6b8a",
   other: "#7f8db3",
 };
 

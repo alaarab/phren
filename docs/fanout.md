@@ -22,7 +22,7 @@ minutes. Unknown usage is reported explicitly and does not invent headroom.
 
 Fan-out serves forge issues: a brief names the issue it serves, asks the worker
 to post ONE summary comment on it when done, and its PR says `Closes <repo>#N`.
-Phren tasks are retired in 0.4.0 (read-only); see [issues](issues.md).
+Pass the forge issue reference in the worker brief. Use the owner Inbox for actions only the owner can take. See [issues](issues.md).
 
 ```yaml
 threshold: 80

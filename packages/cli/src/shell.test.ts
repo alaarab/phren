@@ -145,7 +145,6 @@ describe("PhrenShell", () => {
     await shell.handleInput(":open demo");
     await shell.handleInput("b");
     let output = await shell.render();
-    expect(output).toContain("▤ Tasks");
     expect(output).toContain("demo");
 
     await shell.handleInput("l");
@@ -162,7 +161,6 @@ describe("PhrenShell", () => {
     const shell = createShell(dir);
     const output = await shell.render();
     expect(output).toContain("◉ Projects");
-    expect(output).toContain("Task pulse");
     expect(output).toContain("Recent fragments");
     expect(output).toContain("No project selected yet");
   });
@@ -203,32 +201,7 @@ describe("PhrenShell", () => {
     });
   });
 
-  it("supports task mutations including work next and tidy", async () => {
-    const shell = createShell(dir);
-    await shell.handleInput(":open demo");
-    await shell.handleInput(":add write shell tests [medium]");
-    await shell.handleInput(":work next");
-    await shell.handleInput(":complete write shell tests");
-    await shell.handleInput("y");
 
-    const parsedInitial = readTasks(dir, "demo");
-    expect(parsedInitial.ok).toBe(true);
-    if (!parsedInitial.ok) throw new Error(parsedInitial.error);
-    expect(parsedInitial.data.items.Done.some((item) => item.line.includes("write shell tests"))).toBe(true);
-
-    // Force multiple done entries and archive old ones.
-    await shell.handleInput(":add prune this task");
-    await shell.handleInput(":complete prune this task");
-    await shell.handleInput("y");
-    await shell.handleInput(":tidy 1");
-
-    const parsedAfterTidy = readTasks(dir, "demo");
-    expect(parsedAfterTidy.ok).toBe(true);
-    if (!parsedAfterTidy.ok) throw new Error(parsedAfterTidy.error);
-    expect(parsedAfterTidy.data.items.Done.length).toBe(1);
-    const archiveFile = path.join(dir, ".config", "task-archive", "demo.md");
-    expect(fs.existsSync(archiveFile)).toBe(true);
-  });
 
   it("adds and removes findings from shell commands", async () => {
     const shell = createShell(dir);
@@ -326,7 +299,6 @@ describe("PhrenShell", () => {
 
     await shell.handleInput("b");
     const stateAfterTask = loadShellState(dir);
-    expect(stateAfterTask.view).toBe("Tasks");
 
     await shell.handleInput("l");
     const stateAfterFindings = loadShellState(dir);
@@ -334,7 +306,6 @@ describe("PhrenShell", () => {
 
     await shell.handleInput("b");
     const stateBackAgain = loadShellState(dir);
-    expect(stateBackAgain.view).toBe("Tasks");
   });
 
   it("renders a branded startup intro frame set", () => {
@@ -416,24 +387,7 @@ describe("PhrenShell", () => {
     expect(output).toMatch(/━{10,}/);
   });
 
-  it(":undo restores file after destructive :complete action", async () => {
-    const shell = createShell(dir);
-    await shell.handleInput(":open demo");
 
-    const taskBefore = fs.readFileSync(path.join(dir, "demo", "tasks.md"), "utf8");
-    await shell.handleInput(":complete active item");
-    await shell.handleInput("y");
-
-    const parsedAfter = readTasks(dir, "demo");
-    expect(parsedAfter.ok).toBe(true);
-    if (parsedAfter.ok) {
-      expect(parsedAfter.data.items.Done.some((i) => i.line.includes("active item"))).toBe(true);
-    }
-
-    await shell.handleInput(":undo");
-    const taskAfterUndo = fs.readFileSync(path.join(dir, "demo", "tasks.md"), "utf8");
-    expect(taskAfterUndo).toBe(taskBefore);
-  });
 
   it(":undo reports nothing when stack is empty", async () => {
     const shell = createShell(dir);
@@ -442,23 +396,7 @@ describe("PhrenShell", () => {
     expect(output).toContain("Nothing to undo");
   });
 
-  it("bulk :complete with comma-separated text matches completes multiple items", async () => {
-    const shell = createShell(dir);
-    await shell.handleInput(":open demo");
-    await shell.handleInput(":add first bulk task");
-    await shell.handleInput(":add second bulk task");
 
-    await shell.handleInput(":complete first bulk task,second bulk task");
-    await shell.handleInput("y");
-
-    const parsed = readTasks(dir, "demo");
-    expect(parsed.ok).toBe(true);
-    if (parsed.ok) {
-      const doneLines = parsed.data.items.Done.map((i) => i.line);
-      expect(doneLines.some((l) => l.includes("first bulk task"))).toBe(true);
-      expect(doneLines.some((l) => l.includes("second bulk task"))).toBe(true);
-    }
-  });
 
   it("long-running commands include timing in status message", async () => {
     const shell = createShell(dir);
@@ -468,54 +406,7 @@ describe("PhrenShell", () => {
     expect(output).toMatch(/Relink ok.*\(\d+\.\d+s\)/);
   });
 
-  it("displays task subsection headers (P0, P1, etc) when present", async () => {
-    write(
-      path.join(dir, "demo", "tasks.md"),
-      [
-        "# demo task",
-        "",
-        "## Active",
-        "",
-        "### P0: Critical",
-        "",
-        "- [ ] fix crash on startup",
-        "",
-        "### P1: Important",
-        "",
-        "- [ ] add logging",
-        "",
-        "## Queue",
-        "",
-        "### P2: Nice to have",
-        "",
-        "- [ ] update docs",
-        "",
-        "## Done",
-        "",
-        "- [x] done item",
-        "",
-      ].join("\n")
-    );
 
-    const shell = createShell(dir);
-    await shell.handleInput(":open demo");
-    await shell.handleInput("b");
-    const output = await shell.render();
-    expect(output).toContain("P0: Critical");
-    expect(output).toContain("P1: Important");
-    expect(output).toContain("P2: Nice to have");
-    expect(output).toContain("fix crash on startup");
-    expect(output).toContain("add logging");
-    expect(output).toContain("update docs");
-  });
 
-  it("per-section task IDs start at 1 for each section (#112)", async () => {
-    const shell = createShell(dir);
-    await shell.handleInput(":open demo");
-    await shell.handleInput("b");
-    const output = await shell.render();
-    expect(output).toContain("A1");
-    expect(output).toContain("Q1");
-    expect(output).toContain("D1");
-  });
+
 });

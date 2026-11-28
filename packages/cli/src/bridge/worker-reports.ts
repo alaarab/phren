@@ -1,4 +1,3 @@
-import { mergeTaskIdentitySchema } from "../task/merge-links.js";
 import { ForgeError } from "../forge/issues.js";
 import { dispatchIssueSchema, issueReference, linkIssuePulls, readDispatchIssue } from "./dispatch-issue.js";
 import { createHash } from "node:crypto";
@@ -30,7 +29,7 @@ const reportFile = (target: Target) => path.join(bridgeRoot(), "worker-reports",
  * Stop ends, and never to a prompt submitted after the report. */
 export async function reportWorker(input: unknown): Promise<Json> {
   const data = z.object({ origin: originPaneSchema, prs: prsSchema, issue: dispatchIssueSchema.optional(),
-    task: mergeTaskIdentitySchema.optional(), dispatch: briefId.optional() }).strict().parse(input);
+    dispatch: briefId.optional() }).strict().parse(input);
   const pane = findPane(await snapshot(data.origin.server), data.origin);
   if (!pane) throw new BridgeError(409, "The worker pane changed.");
   const session = await paneIdentity(data.origin.server, pane, true);

@@ -98,12 +98,11 @@ export {
   isProjectTracked,
   repairPreexistingInstall,
 } from "../init/setup.js";
-export { getProactivityLevelForTask, getProactivityLevelForFindings } from "../proactivity.js";
+export { getProactivityLevelForFindings } from "../proactivity.js";
 export { hasExplicitFindingSignal, shouldAutoCaptureFindingsForLevel } from "../proactivity.js";
 export { FINDING_SENSITIVITY_CONFIG } from "./config-policy.js";
 export { isFeatureEnabled, errorMessage } from "../utils.js";
 export { bootstrapPhrenDotEnv } from "../phren-dotenv.js";
-export { finalizeTaskSession } from "../task/lifecycle.js";
 export { appendFindingJournal } from "../finding/journal.js";
 export { getHooksEnabledPreference } from "../init/preferences.js";
 export { isToolHookEnabled } from "../hooks.js";

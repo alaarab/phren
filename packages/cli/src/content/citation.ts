@@ -30,7 +30,6 @@ export interface FindingCitation {
   /** True when an explicit symbol citation could not be resolved in the index. */
   symbol_unresolved?: boolean;
   supersedes?: string;
-  task_item?: string;
 }
 
 export const FINDING_PROVENANCE_SOURCES = [
@@ -205,7 +204,6 @@ export function parseCitationComment(line: string): FindingCitation | null {
       symbol: typeof parsed.symbol === "string" && parsed.symbol.trim() ? parsed.symbol : undefined,
       symbol_unresolved: parsed.symbol_unresolved === true ? true : undefined,
       supersedes: typeof parsed.supersedes === "string" ? parsed.supersedes : undefined,
-      task_item: typeof parsed.task_item === "string" ? parsed.task_item : undefined,
     };
   } catch (err: unknown) {
     debugLog(`parseCitationComment: malformed citation JSON: ${errorMessage(err)}`);

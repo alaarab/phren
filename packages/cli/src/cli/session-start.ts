@@ -1,4 +1,4 @@
-import { moduleEnabled } from "../modules/runtime.js";
+
 /**
  * Session start hook handler and onboarding notices.
  * Extracted from hooks-session.ts for modularity.
@@ -30,7 +30,6 @@ import {
   getPhrenPath,
   resolveRuntimeProfile,
 } from "./hooks-context.js";
-import { TASKS_FILENAME } from "../data/tasks.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import { readInstallPreferences } from "../init/preferences.js";
 import { resolveManagementCapabilities } from "../init/management-preset.js";
@@ -52,7 +51,7 @@ const SESSION_START_ONBOARDING_MARKER = "session-start-onboarding-v1";
 const SYNC_WARN_MARKER = "sync-broken-warned-v1";
 
 function projectHasBootstrapSignals(phrenPath: string, project: string): boolean {
-  // A team-store project keeps its findings and tasks in that store.
+  // A team-store project keeps its findings in that store.
   const projectDir = storeAwareProjectPath(phrenPath, project) ?? path.join(phrenPath, project);
   const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
   if (fs.existsSync(findingsPath)) {
@@ -60,11 +59,6 @@ function projectHasBootstrapSignals(phrenPath: string, project: string): boolean
     if (/^-\s+/m.test(findings)) return true;
   }
 
-  const tasksPath = path.join(projectDir, TASKS_FILENAME);
-  if (moduleEnabled(path.dirname(projectDir), "tasks") && fs.existsSync(tasksPath)) {
-    const tasks = fs.readFileSync(tasksPath, "utf8");
-    if (/^-\s+\[(?: |x|X)\]/m.test(tasks)) return true;
-  }
 
   return false;
 }
@@ -331,7 +325,6 @@ export async function handleHookSessionStart() {
         project: activeProject || undefined,
         startedAt,
         findingsAdded: 0,
-        tasksCompleted: 0,
         hookCreated: true,
       };
       writeSessionStateFile(sessionFileForId(phrenPath, sessionId), sessionState);

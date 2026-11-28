@@ -136,7 +136,7 @@ describe("remote mirror", () => {
     const store = fakeStore({
       "proj-a/FINDINGS.md": "# Findings\n\n- alpha\n",
       "proj-a/review.md": REVIEW_TEXT,
-      "proj-b/tasks.md": "# tasks\n\n## Queue\n\n- do a thing\n",
+      "proj-b/FINDINGS.md": "# Findings\n\n- beta\n",
       "proj-a/README.md": "not a memory file\n",
       "phren.root.yaml": "version: 1\ninstallMode: shared\n",
       "stores.yaml": "version: 1\n",
@@ -147,7 +147,7 @@ describe("remote mirror", () => {
 
     expect(projects.map((p) => p.name)).toEqual(["proj-a", "proj-b"]);
     expect(projects.find((p) => p.name === "proj-a")).toMatchObject({ findings: 1, review: 1 });
-    expect(projects.find((p) => p.name === "proj-b")).toMatchObject({ tasks: 1 });
+    expect(projects.find((p) => p.name === "proj-b")).toMatchObject({ findings: 1 });
     const mirror = path.join(cacheDir, "B");
     expect(existsSync(path.join(mirror, "proj-a/FINDINGS.md"))).toBe(true);
     expect(existsSync(path.join(mirror, "proj-a/review.md"))).toBe(true);
@@ -215,7 +215,7 @@ describe("remote mirror", () => {
   });
 
   it("fetches blobs in one batch when the Hook offers it", async () => {
-    const hook = fakeStore({ "app/FINDINGS.md": "# app\n- a\n", "app/tasks.md": "# tasks\n", "app/notes/2026-10-10.md": "note\n" }, { batch: true });
+    const hook = fakeStore({ "app/FINDINGS.md": "# app\n- a\n", "app/notes/2026-10-10.md": "note\n" }, { batch: true });
     const { projects } = await service(hook).projects(B);
     expect(projects.map((p) => p.name)).toContain("app");
     expect(hook.calls.blobs).toBe(1);

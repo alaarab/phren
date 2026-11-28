@@ -9,7 +9,7 @@ dependencies:
 
 > Audit your phren repo and tell you exactly what needs attention.
 
-Scans your phren directory for missing files, stale content, skill gaps, and stuck task items. Outputs a concrete, prioritized action list.
+Scans your phren directory for missing files, stale content and skill gaps. Outputs a concrete, prioritized action list.
 
 **Works standalone.** Just needs a phren directory.
 
@@ -44,7 +44,6 @@ for dir in "$PHREN_DIR"/*/; do
   [ -f "$dir/AGENTS.md" ]    && echo "$PROJECT: has AGENTS.md"    || echo "$PROJECT: MISSING AGENTS.md"
   [ -f "$dir/summary.md" ]   && echo "$PROJECT: has summary.md"   || echo "$PROJECT: MISSING summary.md"
   [ -f "$dir/FINDINGS.md" ] && echo "$PROJECT: has FINDINGS.md" || echo "$PROJECT: MISSING FINDINGS.md"
-  [ -f "$dir/tasks.md" ]   && echo "$PROJECT: has tasks.md"   || echo "$PROJECT: MISSING tasks.md"
 done
 ```
 
@@ -74,21 +73,13 @@ Flag anything not updated in 30+ days as stale.
 
 ### 4. Detect skill gaps
 
-Look at patterns in tasks.md files and FINDINGS.md files across projects. A skill gap is when:
+Look at patterns in FINDINGS.md files across projects. A skill gap is when:
 - Multiple projects repeat the same manual process (e.g., "remember to update the changelog," which should be a skill)
 - A FINDINGS.md entry says "next time, do X first," which is a skill waiting to happen
-- A task item keeps getting deferred, and might need a skill to make it easier
 
 Also check global/skills/ to see what skills exist, and whether any project's workflow isn't covered.
 
-### 5. Check task health
-
-For each project with a tasks.md:
-- Count total items, completed items, items with no recent progress
-- Flag tasks where nothing has been completed recently
-- Flag tasks with items older than 60 days that haven't moved
-
-### 6. Scaffold missing summary.md files
+### 5. Scaffold missing summary.md files
 
 For each project with a missing summary.md, output the template and offer to create it:
 
@@ -112,7 +103,7 @@ Want me to fill this in for myapp?
 
 If yes, gather the 5 fields from the user and write the file to `$PHREN_DIR/myapp/summary.md`.
 
-### 7. Output the report
+### 6. Output the report
 
 ```
 phren-discover
@@ -121,7 +112,7 @@ phren-discover
 
 Projects without core files:
 
-| Project | AGENTS.md | summary.md | FINDINGS.md | tasks.md |
+| Project | AGENTS.md | summary.md | FINDINGS.md |
 |---------|-----------|------------|--------------|------------|
 | myapp   | ok        | MISSING    | MISSING      | ok         |
 | api     | ok        | ok         | ok           | MISSING    |
@@ -135,23 +126,11 @@ Files not updated in 30+ days:
 ## Section 3: Skill gaps
 
 Things you do repeatedly that could be skills:
-- "Update changelog before release" appears in 3 project tasks. Consider a `/changelog` skill.
 - my-app FINDINGS.md mentions "always run parity check" 4 times. Already have `/parity`, but it's not in the workflow skill.
-
-## Section 4: Task health
-
-- my-app: 12 items (3 completed, 2 stale > 60 days)
-- backend: 5 items (0 completed, all stale)
-- frontend: 8 items (6 completed, healthy)
-
-Stuck items:
-- backend#2: "Add rate limiting" (added 90 days ago, no progress)
-- my-app#7: "Improve query performance" (added 75 days ago, no progress)
 
 ## Top 3 things to work on next
 
 1. **Add FINDINGS.md to myapp.** You've been working on it actively but capturing nothing. Use `add_finding()` during your next session.
-2. **Unstick api-server task.** 5 items, 0 completed. Either work them or trim them. Stale tasks are worse than no task.
 3. **Create a `/changelog` skill.** You're doing it manually in 3 projects. 15 minutes to write the skill saves hours over time.
 ```
 
@@ -172,4 +151,3 @@ The "Top 3" section is the most important part. Make these:
 - `phren-init`: scaffold missing files for a project
 - `add_finding()`: capture findings via MCP (fixes "missing FINDINGS.md")
 - `phren-consolidate`: synthesize cross-project patterns
-- `/tasks`: work on stuck task items

@@ -202,70 +202,11 @@ describe("finding provenance", () => {
     expect(content).not.toContain("<!-- source:");
   });
 
-  it("auto-stamps active task citation", () => {
-    grantAdmin(tmp.path, "codex-worker");
-    process.env.PHREN_ACTOR = "codex-worker";
-    writeFile(
-      path.join(tmp.path, PROJECT, "tasks.md"),
-      `# ${PROJECT} tasks
 
-## Active
 
-- [ ] Finish phase seven [high] <!-- bid:deadbeef -->
 
-## Queue
 
-- [ ] Later item <!-- bid:cafebabe -->
-`,
-    );
-    writeSession("session-1234");
 
-    const result = addFindingToFile(tmp.path, PROJECT, "Operator-surface refactor is safe to continue in smaller slices");
-    expect(result.ok).toBe(true);
-
-    const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toContain('"task_item":"deadbeef"');
-    // Source metadata no longer written — only scope (if non-shared)
-    expect(content).not.toContain("<!-- source:");
-  });
-
-  it("resolves explicit task_item references to the stable ID", () => {
-    writeFile(
-      path.join(tmp.path, PROJECT, "tasks.md"),
-      `# ${PROJECT} tasks
-
-## Active
-
-- [ ] Finish phase seven [high] <!-- bid:deadbeef -->
-`,
-    );
-
-    const result = addFindingToFile(tmp.path, PROJECT, "Task linkage should survive reordering", {
-      task_item: "A1",
-    });
-    expect(result.ok).toBe(true);
-
-    const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toContain('"task_item":"deadbeef"');
-  });
-
-  it("rejects invalid task_item references", () => {
-    writeFile(
-      path.join(tmp.path, PROJECT, "tasks.md"),
-      `# ${PROJECT} tasks
-
-## Active
-
-- [ ] Finish phase seven [high] <!-- bid:deadbeef -->
-`,
-    );
-
-    const result = addFindingToFile(tmp.path, PROJECT, "This should not save", {
-      task_item: "missing item",
-    });
-    expect(result.ok).toBe(false);
-    expect(result.ok === false && result.code).toBe("VALIDATION_ERROR");
-  });
 
   it("does not infer citation repo metadata from the enclosing phren store", () => {
     execFileSync("git", ["init"], { cwd: tmp.path, stdio: "ignore" });

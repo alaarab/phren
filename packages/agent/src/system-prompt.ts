@@ -64,7 +64,7 @@ const TOOL_GROUPS: Array<[string, string[]]> = [
   ["Shell", ["shell", "task_output", "task_stop"]],
   ["Git", ["git_status", "git_diff", "git_commit"]],
   ["Web", ["web_search", "web_fetch"]],
-  ["Memory", ["phren_search", "phren_add_finding", "phren_get_tasks", "run_skill"]],
+  ["Memory", ["phren_search", "phren_add_finding", "run_skill"]],
   ["Planning and agents", ["update_plan", "spawn_agent", "send_message_to_agent", "list_agents", "list_mcp_resources", "read_mcp_resource"]],
 ];
 

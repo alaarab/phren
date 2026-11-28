@@ -1,8 +1,7 @@
 # MCP API Reference
 
-Phren exposes 90 MCP tools across 19 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the nine memory tools (`list_issues` and `get_issue` are among them) plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default twelve. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 82 MCP tools across 18 modules, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the nine memory tools (`list_issues` and `get_issue` are among them) along with core tools from enabled modules. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
-Tasks are retired in 0.4.0. `get_tasks` still reads, but every task write returns `tasks-retired`; work is tracked as forge issues (`list_issues`, `create_issue`, `claim_issue`, `comment_issue`) and human actions go to the owner Inbox. See [issues](issues.md).
 
 ## Core profile
 
@@ -15,19 +14,16 @@ Tasks are retired in 0.4.0. `get_tasks` still reads, but every task write return
 | `revise_finding` | `action`: supersede, retract, edit, remove, link, resolve_contradiction, pin, feedback | `supersede_finding`, `retract_finding`, `edit_finding`, `remove_finding`, `link_findings`, `resolve_contradiction`, `pin_memory`, `memory_feedback` |
 | `list_issues` | List forge issues | None |
 | `get_issue` | Read one forge issue | None |
-| `get_tasks` | List tasks (read-only) | None |
-| `add_task` | **Deprecated, read-only**: returns `tasks-retired` | None |
-| `manage_task` | **Deprecated, read-only**: `action`: complete, update, remove, pin, claim, tidy all return `tasks-retired` | `complete_task`, `update_task`, `remove_task`, `pin_task`, `claim_task`, `tidy_done_tasks` |
 | `session` | `action`: start, end, context, history | `session_start`, `session_end`, `session_context`, `session_history` |
 | `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction, topic summaries (`get_topic_summaries`, `set_topic_summary`), code index (`code_search`, `code_definition`, `code_references`, `code_outline`, `code_usage`), dispatch and hand-off |
 
-A composite takes `action` plus the target tool's own parameters, validated against that tool's schema; a miss returns the parameter list. A nested object parameter (`manage_task` `updates`, `set_config` `settings`, `add_finding` `citation`) may arrive as a real object or as its JSON string (some hosts serialize what a passthrough schema does not name); both are accepted, and a decoded value that misses its own schema fails at the inner field rather than as a type error on the parameter. `phren_admin list_actions` returns every admin action with its full parameter list. The individual tool sections below still describe each tool's parameters; in the core profile, reach them through the composite that stands for them.
+A composite takes `action` plus the target tool's own parameters, validated against that tool's schema; a miss returns the parameter list. A nested object parameter (`set_config` `settings`, `add_finding` `citation`) may arrive as a real object or as its JSON string (some hosts serialize what a passthrough schema does not name); both are accepted, and a decoded value that misses its own schema fails at the inner field rather than as a type error on the parameter. `phren_admin list_actions` returns every admin action with its full parameter list. The individual tool sections below still describe each tool's parameters; in the core profile, reach them through the composite that stands for them.
 
 Most tools return structured JSON: `{ ok, message, data?, error? }`. The five code query tools return compact text.
 
-Responses are held well under the roughly 25,000-token limit Claude Code puts on a tool result. Search, task, findings and summary tools size their own output (see each tool). As a last resort, any response over 60,000 characters is replaced by its message cut short plus `data: { truncated: true, originalChars }` and a note on how to narrow the call. `export_project` is exempt, since an export is only useful whole.
+Responses are held well under the roughly 25,000-token limit Claude Code puts on a tool result. Search, findings and summary tools size their own output (see each tool). As a last resort, any response over 60,000 characters is replaced by its message cut short plus `data: { truncated: true, originalChars }` and a note on how to narrow the call. `export_project` is exempt, since an export is only useful whole.
 
-Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, code index, forge issues, dispatch and hand-off.
+Module layout: search, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, code index, forge issues, dispatch and hand-off.
 
 ## Cross-computer dispatch
 
@@ -248,11 +244,6 @@ transcript when there are none; see [Returns](conductor.md#returns).
 Each row carries `id` (the dispatch ID), `computer`, `project`, `label`,
 `harness`, `state`, `phase` (`working`, `waiting`, `needs-owner` or `done`),
 `at` and the worker's `target` for `hand_off`. A `done`, `waiting`,
-`needs-you` or `failed` row can carry `tasks`: every task the worker's session claimed or
-moved to Active (`project`, `stableId`, `title`, `section` and `resolution`:
-`done`, `queue`, `parked`, `open` or `missing`). A finished turn that leaves a
-task `open` returns `needs-you` with `question` naming its bids, unless the
-worker is `waiting`; see [Settling tasks](task-responsibility.md#settling-tasks).
 A worker
 that takes more work after `done` and finishes again produces a new return.
 The dispatching Hook asks each enrolled computer about its open dispatches at
@@ -991,11 +982,11 @@ An uncertain result is never retried automatically.
 
 ### `get_memory_detail`
 
-Fetch the full content of a specific memory entry by its ID. Use it to expand a `search_knowledge` excerpt or a row from [clanker mode](#clanker-mode). A `fid:xxxxxxxx` (finding) or `bid:xxxxxxxx` (task) id returns that one entry with its continuation lines (citations, task Context) in `data.content`, plus `data.source`, the `mem:` id of the file it lives in.
+Fetch the full content of a specific memory entry by its ID. Use it to expand a `search_knowledge` excerpt or a row from [clanker mode](#clanker-mode). A `fid:xxxxxxxx` finding ID returns that entry with its continuation lines and citations in `data.content`, plus `data.source`, the `mem:` id of the file it lives in.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `id` | string | yes | `fid:xxxxxxxx`, `bid:xxxxxxxx`, or `mem:project/filename` (e.g. `mem:my-app/FINDINGS.md`). Returned by `search_knowledge`, `get_findings`, `get_tasks` and the hook-prompt index. |
+| `id` | string | yes | `fid:xxxxxxxx`, or `mem:project/filename` (e.g. `mem:my-app/FINDINGS.md`). Returned by `search_knowledge`, `get_findings` and the hook-prompt index. |
 | `offset` | number | no | Character offset to read from. Documents over 16,000 characters come back a page at a time: `data.total_chars` is the full length and `data.next_offset` is where the next page starts (`null` on the last page). |
 
 ---
@@ -1011,7 +1002,7 @@ Search the user's personal project store using FTS5 full-text search with synony
 | `query` | string | yes | Search query. Supports FTS5 syntax: AND, OR, NOT, phrase matching with quotes. |
 | `limit` | number | no | Max results to return (1-20, default 5). |
 | `project` | string | no | Filter results to a specific project. |
-| `type` | enum | no | Filter by document type. One of: `claude`, `findings`, `notes`, `reference`, `skills`, `summary`, `task`, `changelog`, `canonical`, `review-queue`, `skill`, `other`. |
+| `type` | enum | no | Filter by document type. One of: `claude`, `findings`, `notes`, `reference`, `skills`, `summary`, `changelog`, `canonical`, `review-queue`, `skill`, `other`. |
 | `tag` | enum | no | Filter findings by type tag: `decision`, `pitfall`, `pattern`, `bug`, `workaround`, `context`. |
 | `since` | string | no | Filter findings by creation date. Formats: `7d`, `30d`, `YYYY-MM`, `YYYY-MM-DD`. |
 | `status` | enum | no | Filter findings by lifecycle status: `active`, `superseded`, `contradicted`, `stale`, `invalid_citation`, `retracted`. |
@@ -1024,13 +1015,13 @@ Each result is an excerpt around the match, not the whole document. Snippets sha
 
 #### Clanker mode
 
-With clanker mode on (`phren config clanker on`, `PHREN_CLANKER=on`), `search_knowledge`, `get_findings` and `get_tasks` return rows instead of text, one per line in `message`:
+With clanker mode on (`phren config clanker on`, `PHREN_CLANKER=on`), `search_knowledge`, `get_findings` return rows instead of text, one per line in `message`:
 
 ```
 fid:803b2823 Hook per-call change capture (bridge/changes.ts treeHash): never set the scratch index mt… [bridge, hook, per-call, bridge/changes.ts] 0.56
 ```
 
-That is the id, a title of up to 90 characters (140 in the prompt hook, whose few rows arrive unasked), up to four keywords (up to two of the query's terms it matched, then the entry's own identifiers and longest words) and, for searches, the share of query terms the entry contains. A search returns one row per matching finding or task (at most three per document, at most twice `limit` in all) and one row per other document, prefixed with the project when no `project` filter was given; `data.ids` lists the ids. `get_findings` rows carry the date and a non-active status, `get_tasks` rows the section, priority and claim. `data` keeps counts and paging but not the rows. Pass an id to `get_memory_detail` for the full text. The prompt hook injects the same rows, with the `fb:` key, and follows `</phren-context>` with one short line, such as `◆ phren · matched=render,callback,frame`.
+That is the id, a title of up to 90 characters (140 in the prompt hook, whose few rows arrive unasked), up to four keywords (up to two of the query's terms it matched, then the entry's own identifiers and longest words) and, for searches, the share of query terms the entry contains. A search returns one row per matching finding or task (at most three per document, at most twice `limit` in all) and one row per other document, prefixed with the project when no `project` filter was given; `data.ids` lists the ids. `get_findings` rows carry the date and a non-active status rows the section, priority and claim. `data` keeps counts and paging but not the rows. Pass an id to `get_memory_detail` for the full text. The prompt hook injects the same rows, with the `fb:` key, and follows `</phren-context>` with one short line, such as `◆ phren · matched=render,callback,frame`.
 
 With Clanker mode off, the hook's visible trace starts `◆ phren · trace: intent=debug; matched=render,callback,frame;`. Git context adds `reasons=file:N,branch:N; branch=...; changed_files=N;` before the budget, token and stage timings. Without git context, those git fields are absent. The matched words are distinct prompt keywords from the injected snippets, in order of first appearance; at most eight are shown, followed by `,+N` for any others. A summary block without matched words adds none; when no snippet matched any word, the field and the Clanker line are left out. A prompt that injects nothing prints neither line. The short Clanker line has no budget, timing or task-pause annotations.
 
@@ -1211,160 +1202,7 @@ Close an issue, optionally posting one comment first. Closing an already closed 
 
 ---
 
-## Task Management
-
-> **Tasks are retired in 0.4.0.** Only `get_tasks` (and the read-only task views) work. Every task write — `add_task`, each `manage_task` action, and the full-profile `complete_task`, `update_task`, `remove_task`, `pin_task`, `claim_task` and `tidy_done_tasks` — returns:
->
-> ```json
-> { "ok": false, "errorCode": "tasks-retired", "error": "Phren tasks are retired. Use forge issues (phren issue / create_issue) for work and the owner Inbox for owner actions. Run `phren migrate tasks` to move existing tasks." }
-> ```
->
-> Create, claim and comment on forge issues instead ([issues](issues.md)); put human actions in the owner Inbox. `phren migrate tasks` moves existing tasks.
-
-### `get_tasks`
-
-Tasks expose independent Human/Agent responsibility, stable-ID prerequisites and derived readiness. See [Task responsibility and prerequisites](task-responsibility.md) for filters, updates, activation and the Hook directory/create APIs, revision-checked text/context save, and task-bound launch. Since 0.4.0 the Hook's task routes keep their reads; `/v1/tasks/create`, `/update`, `/save` and `/launch` answer HTTP 410 with code `tasks-retired`.
-
-Get tasks for a project (or all projects). Supports progressive disclosure: use `summary:true` for lightweight planning views (~200 tokens), pagination for browsing, or `id` with a stable `bid:` hash for single-item fetches during execution. Stable IDs are also used by cross-session task checkpoints.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | no | Project name. Omit to get all projects. |
-| `id` | string | no | Task item ID. Accepts positional IDs (A1, Q3, D2) or stable `bid:XXXXXXXX` hashes. Requires project. Stable hashes are preferred for cross-session references because positional IDs shift when items complete. |
-| `item` | string | no | Exact task item text. Requires project. |
-| `summary` | boolean | no | If true, return counts and titles only (no full content). Reduces token usage to ~200 tokens. Use for planning and status checks. |
-| `limit` | number | no | Max items per Active/Queue section to return (1-200, default 20). Use with `offset` for pagination. |
-| `done_limit` | number | no | Max Done items to return, most recent first (1-200, default 5). Done sections are capped tightly by default to avoid large responses. |
-| `offset` | number | no | Skip the first N items in each section before applying limit. Use with `limit` for pagination (e.g. offset:20, limit:20 for page 2). |
-| `status` | enum | no | Filter by section: `all`, `active`, `queue`, `done`, `active+queue` (default). |
-
-List views show only the latest 300 characters of a long Context (marked `contextTruncated: true`); look up one task by `project` and `id` for its full context. A list that would still be too large for one response comes back with fewer items per section and a note saying so. Across all projects, when even one item per section does not fit, the response is the `summary` view; summary responses carry counts and previews but no item rows in `data`.
-
-### `add_task`
-
-**Retired in 0.4.0:** returns `tasks-retired`; nothing is written.
-
-Append one or more tasks to a project's tasks.md file. Adds to the Queue section. Supports batch adds by passing an array.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name (must match a directory in your phren). |
-| `item` | string or string[] | yes | The task(s) to add. Pass a single string for one task, or an array of strings for batch add. |
-| `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
-
-A title over 80 characters is still added, and the reply carries one line per
-such title (also in `data.warnings`) suggesting a short title and the context to
-move the rest into. `update_task` with new `text` warns the same way.
-
-Task mutations no longer write: since 0.4.0 `add_task` and every `manage_task` action return `tasks-retired`, so they carry no `data.write` receipt. The receipt format below describes the retired behaviour and future removal.
-
-```json
-{ "path": "/absolute/store/project/tasks.md", "commit": null }
-```
-
-`path` is the absolute file actually written, including when the project belongs to a team store. `commit` is a full store commit hash only when this call observed a successful commit and verified that it changed that file to the exact content written. Ordinary task edits save the file without committing, so they return `commit: null`; later session or background sync may commit them. Claims can return a verified local commit even if pushing fails. A commit receipt does not guarantee remote delivery or that a later sync kept the same task state; use the claim's existing `synced` and `heldBy` fields for that outcome. No Git repository, no new commit, a failed commit, or unavailable verification also yields `commit: null`, never an unrelated `HEAD`.
-
-Scalar and batch writes use the same receipt. Partial batches retain their existing success lists and `errors`. Even a fully rejected batch can rewrite task formatting and then includes a receipt; it still reports `ok: false`. Successful dry runs and no-op operations that do not write return `data.write: null`. Validation failures before a write retain their existing error response without a receipt.
-
-### `complete_task`
-
-**Retired in 0.4.0:** returns `tasks-retired`; nothing is written.
-
-Move one or more tasks to the Done section by matching text. Supports batch completion by passing an array.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `item` | string or string[] | yes | The task(s) to complete. Pass a single string for one task, or an array of partial/exact text strings for batch completion. |
-| `sessionId` | string | no | Optional session ID from `session_start` for per-session completion metrics. |
-
-When a task is completed, phren clears any checkpoint file associated with that task.
-
-### `remove_task`
-
-**Retired in 0.4.0:** returns `tasks-retired`; nothing is written.
-
-Remove a task from a project's `tasks.md` by matching text or task ID.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `item` | string | yes | Exact/partial task text, or task ID like `A1`, `Q3`, `D2`. |
-
-### `update_task`
-
-**Retired in 0.4.0:** returns `tasks-retired`; nothing is written.
-
-Update a task's text, priority, context, section, GitHub metadata, pin status, or promote it. Also supports work_next (pick highest-priority Queue item) and promote (clear speculative flag). When work_next is true, item is not needed.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `item` | string | no | Partial text to match against existing task items. Required unless `updates.work_next` is true. |
-| `updates` | object | yes | Fields to update (all optional inside the object). |
-
-The `updates` object accepts:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `text` | string | Replacement text for the task line. |
-| `priority` | string | New priority tag: `high`, `medium`, or `low`. |
-| `context` | string | Text to append to the Context line below the item. |
-| `replace_context` | boolean | Replace the existing `Context:` value instead of appending. |
-| `branches` | array | Replace private merge links: `{repo, name}`; `[]` clears. |
-| `prs` | array | Replace private PR links: `{repo, number}`; `[]` clears. |
-| `section` | string | Move item to this section: `Queue`, `Active`, or `Done`. |
-| `github_issue` | number or string | GitHub issue number (for example `14` or `#14`). |
-| `github_url` | string | GitHub issue URL to associate with the item. |
-| `unlink_github` | boolean | Remove any linked issue metadata from the item. |
-| `pin` | boolean | Pin the task so it floats to the top of its section. |
-| `promote` | boolean | Clear the speculative flag on this task (confirm the user wants it). |
-| `move_to_active` | boolean | Used with `promote`: also move the task to the Active section. |
-| `work_next` | boolean | Pick the highest-priority Queue item and move it to Active. Ignores `item` param. |
-
-### `tidy_done_tasks`
-
-**Retired in 0.4.0:** returns `tasks-retired`; nothing is written.
-
-Archive older Done items beyond a keep threshold to keep task lists short.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `keep` | number | no | Number of recent Done items to keep (default 30). |
-| `dry_run` | boolean | no | Preview what would change without writing. |
-
-### `pin_task`
-
-**Retired in 0.4.0:** returns `tasks-retired`; nothing is written.
-
-Pin or unpin a task. Pinned tasks always appear in hook context regardless of priority, so they stay visible across every prompt.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `item` | string | yes | Partial text or task ID (A1, Q3) to match. |
-| `unpin` | boolean | no | If true, unpin instead of pin. |
-
-### `claim_task`
-
-**Retired in 0.4.0:** returns `tasks-retired`; nothing is written. Claim a forge issue with `claim_issue` instead.
-
-Claim a task for this computer, so conductors that are not linked through the Hook do not take the same work. Syncs the store, moves the task to Active with a `Claimed: <computer> <ISO time> [session:<id>]` line under it, then commits and pushes. A task another computer holds is refused; when two claims race, the one that reached the store's remote first wins and the other call returns `heldBy`. Completing a task clears its claim. Conductors skip tasks claimed by other computers.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `project` | string | yes | Project name. |
-| `item` | string | yes | Task to claim: `bid:XXXXXXXX`, a positional ID (Q3) or its text. |
-| `session` | string | no | The claiming conductor's session id, recorded with the claim. |
-| `release` | boolean | no | Release this computer's claim and return the task to the Queue. |
-| `force` | boolean | no | Take over another computer's claim once it is more than a day old. |
-
-A claim and the other task moves used to record the task in the calling session's ledger and warn past three Active tasks. Tasks are retired, so nothing is recorded and the Stop hook no longer nags. See [Settling tasks](task-responsibility.md#settling-tasks).
-
----
-
-## Issues
+### Hook issue routes
 
 Forge issues live in `packages/cli/src/forge/` and reach the phone through the
 Hook's owner-only routes, advertised as `capabilities.issues: 1`. The five
@@ -1400,7 +1238,7 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `finding` | string or string[] | yes | The insight, as a single bullet point (or an array of bullet points for batch capture). Be specific enough to act on without extra context. |
-| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, name?, task_item? }`. `name` links the finding to a function, type or variable; the older `symbol` spelling is accepted until 0.3.1. |
+| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, name? }`. `name` links the finding to a function, type or variable; the older `symbol` spelling is accepted until 0.3.1. |
 | `sessionId` | string | no | Optional session ID from `session_start`. Pass it if you want session metrics to include this write. |
 | `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `bug`. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
@@ -1485,7 +1323,6 @@ Commit and push any changes in the phren repo.
 Finding lifecycle and impact scoring notes:
 - Lifecycle state is stored inline on finding bullets (for example: active, superseded, contradicted, retracted).
 - Hook/context injection records which finding IDs were surfaced.
-- `session_end` marks those entries as successful when tasks from that session reach Done, powering high-impact finding ranking.
 
 ---
 
@@ -1526,7 +1363,7 @@ Only explicit feedback moves the feedback multiplier in retrieval ranking: this 
 ### `add_project`
 
 Bootstraps a repo or working directory into phren and adds it to the active profile. Pass the path explicitly; when no `profile` is provided, phren uses `PHREN_PROFILE` or the current machine mapping from `machines.yaml`.
-Creates or copies `AGENTS.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under `~/.phren/<project>`.
+Creates or copies `AGENTS.md`, `summary.md`, `FINDINGS.md` under `~/.phren/<project>`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1536,7 +1373,7 @@ Creates or copies `AGENTS.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under
 
 ### `export_project`
 
-Export a project's data (findings, task, summary, AGENTS.md) as portable JSON.
+Export a project's data (findings, summary, AGENTS.md) as portable JSON.
 Use `phren export vault <dir>` to generate linked Markdown notes across projects. [Obsidian vault export](obsidian.md)
 
 | Parameter | Type | Required | Description |
@@ -1633,7 +1470,7 @@ Find fragments that appear in multiple projects. Useful for discovering shared p
 
 ### `session_start`
 
-Mark the start of a session. Returns prior summary, recent findings, active task context, and task checkpoints for resume guidance. Designed for agents without native lifecycle hooks.
+Mark the start of a session. Returns prior summary, recent findings and project preferences. Designed for agents without native lifecycle hooks.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1643,7 +1480,7 @@ Mark the start of a session. Returns prior summary, recent findings, active task
 
 ### `session_end`
 
-Mark the end of a session and save a summary for the next session. Reports duration and findings added, writes a task checkpoint snapshot for active work, and updates finding impact outcomes when session tasks were completed.
+Mark the end of a session and save a summary for the next session. Reports duration and findings added.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1662,7 +1499,7 @@ Get the current session state including project, duration, and findings added so
 
 ### `session_history`
 
-List recent sessions, or drill into one session to return artifacts (findings + tasks) linked to that session.
+List recent sessions, or drill into one session to return artifacts (findings) linked to that session.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1836,7 +1673,7 @@ Run doctor self-heal checks and apply fixes (missing files, broken symlinks, sta
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `check_data` | boolean | no | Also validate data files (findings, tasks) for structural issues. |
+| `check_data` | boolean | no | Also validate data files (findings) for structural issues. |
 
 ### `store_list`
 
@@ -1869,7 +1706,7 @@ Read current governance and policy configuration. Supports all config domains in
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `domain` | enum | no | Config domain to read: `proactivity`, `taskMode`, `findingSensitivity`, `retention`, `workflow`, `access`, `index`, `topic`, `dreaming`, or `all` (default). |
+| `domain` | enum | no | Config domain to read: `proactivity`, `findingSensitivity`, `retention`, `workflow`, `access`, `index`, `topic`, `dreaming`, or `all` (default). |
 | `project` | string | no | Project name. When provided, returns merged view with project overrides and `_source` annotations. Required for `topic` domain. |
 
 ### `set_config`
@@ -1878,17 +1715,16 @@ Update configuration for a specific domain. Unified setter for all config domain
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `domain` | enum | yes | Config domain: `proactivity`, `taskMode`, `findingSensitivity`, `retention`, `workflow`, `access`, `index`, `topic`, or `dreaming`. |
+| `domain` | enum | yes | Config domain: `proactivity`, `findingSensitivity`, `retention`, `workflow`, `access`, `index`, `topic`, or `dreaming`. |
 | `settings` | object | yes | Domain-specific settings (see below). |
 | `project` | string | no | Project name. When provided, writes to project's `phren.project.yaml` instead of global `.config/`. Required for `topic` domain. |
 
 **Domain-specific settings:**
 
-- **proactivity**: `{ level: "high"|"medium"|"low", scope?: "base"|"findings"|"tasks" }`
-- **taskMode**: `{ mode: "off"|"manual"|"suggest"|"auto" }`. In `auto`, the prompt hook files what it picks up on its own into **Queue**; a prompt that asks to be tracked ("add this to task") goes to Active, as does a prompt matching a task already in Active. Task proactivity `high` captures any actionable request, `medium` only prompts with that explicit signal, `low` none. Text inside terminal paste wrappers (`<pasted_content>`, which also carry phone messages and messages relayed into the pane) never files or touches a task, only what was typed outside them; neither do messages relayed from another agent ("From the conductor, ...", "From tidy-phren: ..."), nor frames from another agent or the harness (`<agent-message>` hand-backs, `<cross-session-message>`, delivery notices, `[SYSTEM NOTIFICATION]`, `<task-notification>`, `<system-reminder>`), questions, and replies that ask for nothing are never filed and never touch an existing task. A prompt that matches an existing task moves it to Active but never rewrites its Context or GitHub link. The hook never completes a task: a saved turn leaves the task where it is, and completion is explicit.
+- **proactivity**: `{ level: "high"|"medium"|"low", scope?: "base"|"findings" }`
 - **findingSensitivity**: `{ level: "minimal"|"conservative"|"balanced"|"aggressive" }`
-- **retention**: `{ ttlDays?, retentionDays?, autoAcceptThreshold?, minInjectConfidence?, decay?: { d30?, d60?, d90?, d120? }, budgets?: { openTasks?, reviewEntries?, runtimeMB?, fanoutArchiveMB?, runtimeAgeOut?, runtimeAgeOutDays? } }`. With `project`, only `budgets.openTasks` and `budgets.reviewEntries` are written.
-- **workflow**: `{ lowConfidenceThreshold?, riskySections?, taskMode?, findingSensitivity? }`
+- **retention**: `{ ttlDays?, retentionDays?, autoAcceptThreshold?, minInjectConfidence?, decay?: { d30?, d60?, d90?, d120? }, budgets?: { reviewEntries?, runtimeMB?, fanoutArchiveMB?, runtimeAgeOut?, runtimeAgeOutDays? } }`. With `project`, only `budgets.reviewEntries` is written.
+- **workflow**: `{ lowConfidenceThreshold?, riskySections?, findingSensitivity? }`
 - **index**: `{ includeGlobs?, excludeGlobs?, includeHidden? }`
 - **topic**: `{ topics: [{ slug, label, description?, keywords? }], domain? }`
 - **dreaming**: `{ enabled?, mode?: "propose"|"apply", cadence?: "nightly"|"idle"|"weekly"|"manual", window?: "HH:MM-HH:MM", idleMinutes?, lookbackHours?, maxChanges?, injectBudgetKB?, phases?: ("capture"|"correct"|"organize"|"prune")[], model?, clear?: string[] }`. Global values live in `.config/dreaming.json`, a project's in `config.dreaming` of its `phren.project.yaml`; `clear` (with `project`) removes that project's override of the named keys so they inherit again. Off by default; see [Dreaming](dreaming.md).
@@ -2928,18 +2764,14 @@ Worker tool, full profile or `phren_admin(action:"dispatch_report",prs)` in core
 terminal and submitted turn. HTTPS URLs only, at most 16 rows and 24000 UTF-8
 bytes. The done return carries the report and the Hook queues it to the
 configured integrator. CLI: `phren dispatch report --prs '<JSON array>'`.
-Optional `task:{storeId,project,stableId}` links the report to a private task;
-otherwise the Hook uses the association carried with the launch. Dispatch accepts
-the same optional `task` field. `taskLinks:{linked,error?}` reports the save result
-independently of report persistence. Nothing is written to GitHub. See
-[merge reconciliation](task-responsibility.md#complete-tasks-from-merged-prs).
+With an issue-bound dispatch or an explicit `issue`, `issueLinks: {linked, error?}` reports whether the Hook posted the PR links.
 
 ### `owner_inbox`
 
 Full profile or `phren_admin(action:"owner_inbox",...)` in core. `operation` defaults
 to `list`; optional `includeResolved` shows history. `add` requires `title`, with
 optional `project`, stable UUID `id`, `command` (a paste-able shell command,
-at most 20 lines; phren never runs it), `task` (`bid:xxxxxxxx`), `pr` (an HTTPS
+at most 20 lines; phren never runs it), `pr` (an HTTPS
 pull or merge request URL, stored normalized), `issue` (the forge issue the item
 carries out, `domain/owner/name#N`, at most 300 characters, for example
 `github.com/alaarab/phren#42`) and `key` (a dedupe key).
@@ -2950,7 +2782,7 @@ approve it. Lists include local and linked computers' inboxes plus `unreachable`
 entries. Add and list responses compute a `paste` for manual items with a
 `command`. The paste chains a guarded resolve after successful execution,
 runs multiline commands with `sh -e`, and routes to the owning Hook. Named
-remote adds and resolves also return `inboxComputer`. Remote `command`, `task`,
+remote adds and resolves also return `inboxComputer`. Remote `command`,
 `pr`, `key` and `ifUpdatedAt` require the destination Hook's `ownerInboxActions`
 capability, and a remote `issue` requires `ownerInboxIssues`. Legacy adds and
 resolves work during a rolling upgrade.
@@ -2969,7 +2801,7 @@ on the list tick when a GitHub or gitboy PR merges or closes (`done: PR merged`,
 `done: PR closed without merging`). When the PR read supplies neither outcome,
 a linked closed issue also resolves the item. GitLab
 merge requests can be linked for reference. The PR probe refreshes in the
-background. Unmerged closure and Done task evidence must come from a read after
+background. Unmerged closure evidence must come from a read after
 the latest item update to clear a reopened or edited action. Automatic items
 are deduplicated by pane, session and question and shown only while verified
 live. Answered or disappeared sources resolve automatically on reads or the

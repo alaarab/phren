@@ -898,11 +898,10 @@ export function renderProjectReferenceEnhancementScript(_authToken: string): str
 
 // renderReviewQueueEditSyncScript removed — was dead code returning ""
 
-export function renderTasksAndSettingsScript(authToken: string): string {
+export function renderSettingsScript(authToken: string): string {
   const safeToken = JSON.stringify(authToken).slice(1, -1);
   return `(function() {
     var _tsAuthToken = '${safeToken}';
-    var _allTasks = [];
     var esc = window._phrenEsc;
 
     function tsAuthUrl(base) {
@@ -912,272 +911,6 @@ export function renderTasksAndSettingsScript(authToken: string): string {
     function loadJson(url) {
       return fetch(url).then(function(r) { return r.json(); });
     }
-
-    function priorityBadge(p) {
-      if (!p) return '';
-      return '<span class="task-priority-badge task-priority-' + esc(p) + '">' + esc(p) + '</span>';
-    }
-
-    function projectBadge(proj) {
-      return '<span class="task-project-badge">' + esc(proj) + '</span>';
-    }
-
-    function pinIndicator(pinned) {
-      if (!pinned) return '';
-      return '<span class="task-pin-indicator" title="Pinned"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M9.828 2.172a2 2 0 0 1 2.828 0l1.172 1.172a2 2 0 0 1 0 2.828L12 8l-1.5 1.5.5 3.5L8 10l-3.5.5.5-3.5L3.5 5.5 2 4l2.172-1.828a2 2 0 0 1 2.828 0L8 3l1.828-.828z"/></svg></span>';
-    }
-
-    function githubBadge(issue, url) {
-      if (!issue || !url) return '';
-      return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer" class="task-github-badge" title="GitHub Issue #' + esc(String(issue)) + '"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>#' + esc(String(issue)) + '</a>';
-    }
-
-    function loadTasks() {
-      var url = _tsAuthToken ? tsAuthUrl('/api/tasks') : '/api/tasks';
-      fetch(url).then(function(r) { return r.json(); }).then(function(data) {
-        _allTasks = data.tasks || [];
-        populateTaskProjectFilter();
-        filterTasks();
-      }).catch(function(err) {
-        document.getElementById('tasks-list').innerHTML = '<div style="padding:40px;color:var(--muted);text-align:center">Failed to load tasks: ' + esc(String(err)) + '</div>';
-      });
-    }
-
-    window.editTaskContract = function(index, field, value) {
-      var task = _allTasks[index];
-      if (!task) return;
-      var updates = { project: task.project, item: task.stableId ? 'bid:' + task.stableId : task.id };
-      if (field === 'dependencies') {
-        var choices = _allTasks.filter(function(t) { return t.identity && t !== task; });
-        var selected = task.dependencies || [];
-        var retained = selected.filter(function(d) { return !choices.some(function(t) { return t.identity.storeId === d.storeId && t.identity.project === d.project && t.identity.stableId === d.stableId; }); });
-        var panel = document.getElementById('task-prerequisites-' + index);
-        if (!panel) return;
-        if (value !== 'save') {
-          panel.hidden = !panel.hidden;
-          var unavailableNotice = retained.length ? '<p role="note">Some prerequisites are not available in this picker and will be kept. This picker cannot remove them. Use the CLI or API to remove these links or clear the dependency list. If a retained target is unavailable to the server, saving other prerequisite changes will fail until it is restored or removed.</p>' + retained.map(function(d) {
-            var current = (task.prerequisites || []).find(function(p) { return p.storeId === d.storeId && p.project === d.project && p.stableId === d.stableId; });
-            var responsibility = !current || current.missing ? 'Unknown responsibility' : current.responsibility === 'human' ? 'Human' : 'Agent';
-            return '<div>' + esc(responsibility + ' · ' + (current ? current.title : 'Unavailable prerequisite')) + ' <code style="overflow-wrap:anywhere">' + esc(d.storeId + '/' + d.project + '/' + d.stableId) + '</code></div>';
-          }).join('') : '';
-          panel.innerHTML = unavailableNotice + choices.map(function(t, choice) {
-            var checked = selected.some(function(d) { return d.storeId === t.identity.storeId && d.project === t.identity.project && d.stableId === t.identity.stableId; });
-            var responsibility = t.responsibility === 'human' ? 'Human' : 'Agent';
-            return '<label><input type="checkbox" data-task-choice="' + choice + '"' + (checked ? ' checked' : '') + '> ' + esc(responsibility + ' · ' + t.line) + ' <code style="overflow-wrap:anywhere">' + esc(t.identity.storeId + '/' + t.identity.project + '/' + t.identity.stableId) + '</code></label><br>';
-          }).join('') + '<button data-ts-action="savePrerequisites" data-index="' + index + '">Save prerequisites</button>';
-          panel._choices = choices;
-          return;
-        }
-        // Retain unavailable prerequisites unless explicitly removed through CLI/API.
-        var dependencies = retained;
-        panel.querySelectorAll('input:checked').forEach(function(input) { dependencies.push(panel._choices[Number(input.getAttribute('data-task-choice'))].identity); });
-        updates.dependencies = JSON.stringify(dependencies);
-      } else updates[field] = value;
-      var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
-      fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrf) {
-        var body = new URLSearchParams(updates);
-        if (csrf.token) body.set('_csrf', csrf.token);
-        return fetch(_tsAuthToken ? tsAuthUrl('/api/tasks/update') : '/api/tasks/update', { method: 'POST', body: body });
-      }).then(function(r) { return r.json(); }).then(function(data) { if (data.ok) loadTasks(); else alert(data.error || 'Task update failed. Your selections have been kept.'); })
-        .catch(function(err) { alert('Task update could not be confirmed. Your selections have been kept; check the task before retrying. ' + String(err)); });
-    };
-
-    window.completeTaskFromUi = function(project, item) {
-      var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
-      fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrfData) {
-        var body = new URLSearchParams({ project: project, item: item });
-        if (csrfData.token) body.set('_csrf', csrfData.token);
-        var url = _tsAuthToken ? tsAuthUrl('/api/tasks/complete') : '/api/tasks/complete';
-        return fetch(url, { method: 'POST', body: body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
-      }).then(function(r) { return r.json(); }).then(function(data) {
-        if (data.ok) { loadTasks(); } else { alert(data.error || 'Failed to complete task'); }
-      }).catch(function(err) { alert('Error: ' + String(err)); });
-    };
-
-    window.removeTaskFromUi = function(project, item) {
-      if (!confirm('Delete this task?')) return;
-      var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
-      fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrfData) {
-        var body = new URLSearchParams({ project: project, item: item });
-        if (csrfData.token) body.set('_csrf', csrfData.token);
-        var url = _tsAuthToken ? tsAuthUrl('/api/tasks/remove') : '/api/tasks/remove';
-        return fetch(url, { method: 'POST', body: body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
-      }).then(function(r) { return r.json(); }).then(function(data) {
-        if (data.ok) { loadTasks(); } else { alert(data.error || 'Failed to remove task'); }
-      }).catch(function(err) { alert('Error: ' + String(err)); });
-    };
-
-    window.addTaskFromUi = function(project) {
-      var input = document.getElementById('task-add-input-' + project);
-      if (!input || !input.value.trim()) return;
-      var item = input.value.trim();
-      var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
-      fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrfData) {
-        var body = new URLSearchParams({ project: project, item: item });
-        if (csrfData.token) body.set('_csrf', csrfData.token);
-        var url = _tsAuthToken ? tsAuthUrl('/api/tasks/add') : '/api/tasks/add';
-        return fetch(url, { method: 'POST', body: body, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
-      }).then(function(r) { return r.json(); }).then(function(data) {
-        if (data.ok) { input.value = ''; loadTasks(); } else { alert(data.error || 'Failed to add task'); }
-      }).catch(function(err) { alert('Error: ' + String(err)); });
-    };
-
-    window.toggleDoneSection = function(btn) {
-      if (!btn) return;
-      var list = btn.nextElementSibling;
-      var arrow = btn.querySelector('.task-toggle-arrow');
-      if (!list) return;
-      var isOpen = list.style.display !== 'none';
-      list.style.display = isOpen ? 'none' : 'block';
-      if (arrow) arrow.textContent = isOpen ? '\u25B6' : '\u25BC';
-    };
-
-    function populateTaskProjectFilter() {
-      var projects = Array.from(new Set(_allTasks.map(function(t) { return t.project; }))).sort();
-      var sel = document.getElementById('tasks-filter-project');
-      if (!sel) return;
-      var html = '<option value="">All projects</option>';
-      projects.forEach(function(p) { html += '<option value="' + esc(p) + '">' + esc(p) + '</option>'; });
-      sel.innerHTML = html;
-    }
-
-    window.filterTasks = function() {
-      var projectFilter = (document.getElementById('tasks-filter-project') || {}).value || '';
-      var sectionFilter = (document.getElementById('tasks-filter-section') || {}).value || '';
-      var responsibilityFilter = (document.getElementById('tasks-filter-responsibility') || {}).value || '';
-      var showDone = sectionFilter === 'Done';
-      var tasks = _allTasks.filter(function(t) {
-        if (projectFilter && t.project !== projectFilter) return false;
-        if (responsibilityFilter && (t.responsibility || 'agent') !== responsibilityFilter) return false;
-        if (sectionFilter && t.section !== sectionFilter) return false;
-        if (!sectionFilter && t.section === 'Done') return false;
-        return true;
-      });
-      var doneTasks = showDone ? [] : _allTasks.filter(function(t) {
-        if (projectFilter && t.project !== projectFilter) return false;
-        if (responsibilityFilter && (t.responsibility || 'agent') !== responsibilityFilter) return false;
-        return t.section === 'Done' || t.checked;
-      });
-
-      var activeCount = tasks.filter(function(t) { return t.section !== 'Done' && !t.checked; }).length;
-      var countEl = document.getElementById('tasks-count');
-      if (countEl) countEl.textContent = activeCount + ' active' + (doneTasks.length ? ', ' + doneTasks.length + ' done' : '');
-
-      var container = document.getElementById('tasks-list');
-      if (!container) return;
-      if (!tasks.length && !doneTasks.length) {
-        container.innerHTML = '<div class="task-empty-state"><svg viewBox="0 0 48 48" width="48" height="48" style="display:block;margin:0 auto 12px"><ellipse cx="24" cy="24" rx="16" ry="15" fill="#7B68AE" opacity="0.25"/><ellipse cx="24" cy="24" rx="12" ry="11.5" fill="#7B68AE" opacity="0.4"/><circle cx="19" cy="22" r="1.5" fill="#2D2255"/><circle cx="29" cy="22" r="1.5" fill="#2D2255"/><path d="M21 28c1 1.2 2.5 1.5 3.5 1.3 1-.2 2-1 2.5-1.3" stroke="#2D2255" stroke-width="1" fill="none" stroke-linecap="round"/></svg><div style="font-size:var(--text-md);font-weight:600;color:var(--ink);margin-bottom:4px">Nothing to do!</div><div style="color:var(--muted);font-size:var(--text-sm)">Add a task to get started.</div></div>';
-        return;
-      }
-
-      var priorityOrder = { high: 0, medium: 1, low: 2 };
-      function sortByPriority(a, b) {
-        if (a.pinned && !b.pinned) return -1;
-        if (!a.pinned && b.pinned) return 1;
-        var pa = priorityOrder[a.priority] !== undefined ? priorityOrder[a.priority] : 1;
-        var pb = priorityOrder[b.priority] !== undefined ? priorityOrder[b.priority] : 1;
-        return pa - pb;
-      }
-
-      function isNotDone(t) { return t.section !== 'Done' && !t.checked; }
-
-      function renderTaskRow(t) {
-        var index = _allTasks.indexOf(t);
-        var taskMatch = t.stableId ? 'bid:' + t.stableId : t.id;
-        var isDone = t.section === 'Done' || t.checked;
-        var priClass = t.priority ? 'task-row-priority-' + esc(t.priority) : 'task-row-priority-none';
-        var html = '<div class="task-row' + (isDone ? ' task-row-done' : '') + '">';
-        html += '<div class="task-row-priority ' + priClass + '"></div>';
-        html += '<div class="task-row-content">';
-        html += '<span class="task-row-text">' + esc(t.line) + '</span>';
-        html += '<div>' + esc((t.responsibility || 'agent') === 'human' ? 'Human' : 'Agent') + ' · ' + esc(t.readiness || 'ready') + '</div>';
-        (t.prerequisites || []).forEach(function(d) {
-          var responsibility = d.missing ? 'Unknown responsibility' : d.responsibility === 'human' ? 'Human' : 'Agent';
-          html += '<div>' + (d.missing ? 'Unavailable' : d.completed ? '✓' : 'Waiting on') + ' · ' + esc(responsibility + ' · ' + d.title) + '<br><code style="overflow-wrap:anywhere">' + esc(d.storeId + '/' + d.project + '/' + d.stableId) + '</code></div>';
-        });
-        html += '<div id="task-prerequisites-' + index + '" hidden></div>';
-        html += '</div>';
-        html += '<div class="task-row-meta">';
-        html += pinIndicator(t.pinned);
-        html += githubBadge(t.githubIssue, t.githubUrl);
-        html += priorityBadge(t.priority);
-        html += projectBadge(t.project);
-        html += '</div>';
-        html += '<div class="task-row-actions">';
-        html += '<select aria-label="Task responsibility" data-task-field="responsibility" data-index="' + index + '"><option value="agent"' + ((t.responsibility || 'agent') === 'agent' ? ' selected' : '') + '>Agent</option><option value="human"' + (t.responsibility === 'human' ? ' selected' : '') + '>Human</option></select>';
-        html += '<select aria-label="Task section" data-task-field="section" data-index="' + index + '">' + ['Queue', 'Active', 'Done'].map(function(section) { return '<option' + (t.section === section ? ' selected' : '') + '>' + section + '</option>'; }).join('') + '</select>';
-        html += '<button data-ts-action="editPrerequisites" data-index="' + index + '">Prerequisites</button>';
-        if (!isDone) {
-          html += '<button class="task-action-btn task-action-complete" data-ts-action="completeTask" data-project="' + esc(t.project) + '" data-item="' + esc(taskMatch) + '" title="Mark done"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>';
-        }
-        html += '<button class="task-action-btn task-action-delete" data-ts-action="removeTask" data-project="' + esc(t.project) + '" data-item="' + esc(taskMatch) + '" title="Delete task"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
-        html += '</div>';
-        html += '</div>';
-        return html;
-      }
-
-      var html = '';
-
-      // Summary bar
-      var allActive = _allTasks.filter(function(t) { return t.section !== 'Done' && !t.checked; });
-      var highCount = allActive.filter(function(t) { return t.priority === 'high'; }).length;
-      var medCount = allActive.filter(function(t) { return t.priority === 'medium'; }).length;
-      var lowCount = allActive.filter(function(t) { return t.priority === 'low'; }).length;
-      var projectCounts = {};
-      allActive.forEach(function(t) { projectCounts[t.project] = (projectCounts[t.project] || 0) + 1; });
-      var topProjects = Object.keys(projectCounts).sort(function(a, b) { return projectCounts[b] - projectCounts[a]; }).slice(0, 3);
-      html += '<div class="task-summary-bar">';
-      html += '<span class="task-summary-total">' + allActive.length + ' active</span>';
-      if (highCount) html += '<span class="task-summary-pill task-summary-high">' + highCount + ' high</span>';
-      if (medCount) html += '<span class="task-summary-pill task-summary-medium">' + medCount + ' medium</span>';
-      if (lowCount) html += '<span class="task-summary-pill task-summary-low">' + lowCount + ' low</span>';
-      if (topProjects.length) {
-        html += '<span class="task-summary-projects">';
-        topProjects.forEach(function(p) { html += '<span class="task-summary-project">' + esc(p) + ' (' + projectCounts[p] + ')</span>'; });
-        html += '</span>';
-      }
-      html += '</div>';
-
-      // Add task input at top (only when a specific project is selected)
-      if (projectFilter) {
-        html += '<div class="task-add-bar">';
-        html += '<input id="task-add-input-' + esc(projectFilter) + '" type="text" class="task-add-input" placeholder="Add an Agent task to ' + esc(projectFilter) + '\u2026" data-ts-action="addTaskKeydown" data-project="' + esc(projectFilter) + '">';
-        html += '<button class="task-add-btn" data-ts-action="addTask" data-project="' + esc(projectFilter) + '"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Add Agent task</button>';
-        html += '</div>';
-        html += '<p role="note">New tasks are created as Agent work. Creating a Human task in one step is not supported here.</p>';
-      }
-
-      // Group by section: Active first, then Queue
-      var activeTasks = tasks.filter(function(t) { return t.section === 'Active' && isNotDone(t); }).sort(sortByPriority);
-      var queueTasks = tasks.filter(function(t) { return t.section !== 'Active' && isNotDone(t); }).sort(sortByPriority);
-
-      function renderSection(title, items) {
-        if (!items.length) return '';
-        var shtml = '<div class="task-section-group">';
-        shtml += '<div class="task-section-header">' + title + ' <span class="task-section-count">' + items.length + '</span></div>';
-        shtml += '<div class="task-list">';
-        items.forEach(function(t) { shtml += renderTaskRow(t); });
-        shtml += '</div></div>';
-        return shtml;
-      }
-
-      html += renderSection('Active', activeTasks);
-      html += renderSection('Queue', queueTasks);
-
-      // Done section (collapsible)
-      var allDone = showDone ? tasks.filter(function(t) { return t.section === 'Done' || t.checked; }) : doneTasks;
-      if (allDone.length) {
-        html += '<div class="task-done-section">';
-        html += '<button class="task-done-toggle" data-ts-action="toggleDoneSection">';
-        html += '<span class="task-toggle-arrow">\u25B6</span> Completed <span class="task-section-count">' + allDone.length + '</span></button>';
-        html += '<div class="task-done-list" style="display:none">';
-        html += '<div class="task-list">';
-        allDone.forEach(function(t) { html += renderTaskRow(t); });
-        html += '</div></div></div>';
-      }
-
-      container.innerHTML = html;
-    };
 
     function setSettingsStatus(message, type) {
       var el = document.getElementById('settings-status-inline');
@@ -1357,7 +1090,6 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         var effective = (selectedProject && data.merged) ? data.merged : null;
         var rawOverrides = (selectedProject && data.overrides) ? data.overrides : null;
         var effectiveSensitivity = effective ? effective.findingSensitivity : (data.findingSensitivity || 'balanced');
-        var effectiveTaskMode = effective ? effective.taskMode : (data.taskMode || 'auto');
         var effectiveProactivity = data.proactivity || 'high';
         var effectiveRetention = (effective && effective.retentionPolicy) ? effective.retentionPolicy : (data.retentionPolicy || {});
         var effectiveWorkflow = (effective && effective.workflowPolicy) ? effective.workflowPolicy : (data.workflowPolicy || {});
@@ -1376,11 +1108,9 @@ export function renderTasksAndSettingsScript(authToken: string): string {
             infoHtml += '<div><strong style="color:var(--ink)">Ownership</strong><div class="text-muted">' + esc(pi.ownership) + '</div></div>';
             infoHtml += '<div><strong style="color:var(--ink)">Config file</strong><div class="text-muted" style="font-family:var(--mono);font-size:var(--text-xs);word-break:break-all">' + esc(pi.configFile) + '</div>' + (pi.configExists ? '<span style="color:var(--green);font-size:var(--text-xs)">exists</span>' : '<span style="color:var(--muted);font-size:var(--text-xs)">not created</span>') + '</div>';
             infoHtml += '<div><strong style="color:var(--ink)">Findings</strong><div class="text-muted">' + pi.findingCount + ' entries</div></div>';
-            infoHtml += '<div><strong style="color:var(--ink)">Tasks</strong><div class="text-muted">' + pi.taskCount + ' in queue</div></div>';
             infoHtml += '</div>';
             var files = [];
             if (pi.hasFindings) files.push('FINDINGS.md');
-            if (pi.hasTasks) files.push('tasks.md');
             if (pi.hasSummary) files.push('summary.md');
             if (pi.hasClaudeMd) files.push('AGENTS.md');
             if (files.length) {
@@ -1443,23 +1173,8 @@ export function renderTasksAndSettingsScript(authToken: string): string {
 
         var behaviorEl = document.getElementById('settings-behavior');
         if (behaviorEl) {
-          var taskMode = effectiveTaskMode || 'auto';
           var proactivity = effectiveProactivity;
           var behaviorHtml = '';
-          var taskModeOverride = rawOverrides && rawOverrides.taskMode != null;
-          behaviorHtml += '<div class="settings-control">';
-          behaviorHtml += '<div class="settings-control-header"><span class="settings-control-label">Task mode</span>' + sourceBadge(taskModeOverride);
-          if (isProject && taskModeOverride) {
-            behaviorHtml += '<button data-ts-action="clearProjectOverride" data-field="taskMode" class="settings-chip" style="font-size:11px;margin-left:auto">Clear override</button>';
-          }
-          behaviorHtml += '</div>';
-          behaviorHtml += '<div class="settings-chip-row">';
-          ['auto', 'suggest', 'manual', 'off'].forEach(function(mode) {
-            var active = mode === taskMode ? ' active' : '';
-            var action = isProject ? 'setProjectTaskMode' : 'setTaskMode';
-            behaviorHtml += '<button data-ts-action="' + action + '" data-mode="' + esc(mode) + '" class="settings-chip' + active + '">' + esc(mode) + '</button>';
-          });
-          behaviorHtml += '</div></div>';
           if (!isProject) {
             behaviorHtml += '<div class="settings-control">';
             behaviorHtml += '<div class="settings-control-header"><span class="settings-control-label">Proactivity level</span></div>';
@@ -1582,7 +1297,7 @@ export function renderTasksAndSettingsScript(authToken: string): string {
               '</div></div>';
           }
           accRow('Admins', 'admins', 'Full access — all actions, including config changes.');
-          accRow('Contributors', 'contributors', 'Can add, edit, and remove findings and tasks.');
+          accRow('Contributors', 'contributors', 'Can add, edit, and remove findings.');
           accRow('Readers', 'readers', 'Read-only access (search and get).');
           accHtml += '<div class="settings-control-note">' + (isProject
             ? 'Editing the per-project access list for this project. Effective roles are the union of global and project lists.'
@@ -1670,11 +1385,9 @@ export function renderTasksAndSettingsScript(authToken: string): string {
 
     // Hook into switchTab to lazy-load
     var _origSwitchTab = window.switchTab;
-    var _tasksLoaded = false;
     var _settingsLoaded = false;
     window.switchTab = function(tab) {
       if (typeof _origSwitchTab === 'function') _origSwitchTab(tab);
-      if (tab === 'tasks' && !_tasksLoaded) { _tasksLoaded = true; loadTasks(); }
       if (tab === 'settings' && !_settingsLoaded) { _settingsLoaded = true; loadSettings(); }
     };
 
@@ -1715,22 +1428,14 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       });
     }
 
-    // Event delegation for dynamically generated tasks/settings UI
     document.addEventListener('click', function(e) {
       var target = e.target;
       if (!target || typeof target.closest !== 'function') return;
       var actionEl = target.closest('[data-ts-action]');
       if (!actionEl) return;
       var action = actionEl.getAttribute('data-ts-action');
-      if (action === 'editPrerequisites') { editTaskContract(Number(actionEl.getAttribute('data-index')), 'dependencies', 'edit'); }
-      else if (action === 'savePrerequisites') { editTaskContract(Number(actionEl.getAttribute('data-index')), 'dependencies', 'save'); }
-      else if (action === 'toggleDoneSection') { toggleDoneSection(actionEl); }
-      else if (action === 'completeTask') { completeTaskFromUi(actionEl.getAttribute('data-project'), actionEl.getAttribute('data-item')); }
-      else if (action === 'removeTask') { removeTaskFromUi(actionEl.getAttribute('data-project'), actionEl.getAttribute('data-item')); }
-      else if (action === 'addTask') { addTaskFromUi(actionEl.getAttribute('data-project')); }
-      else if (action === 'setFindingSensitivity') { setFindingSensitivity(actionEl.getAttribute('data-level')); }
+      if (action === 'setFindingSensitivity') { setFindingSensitivity(actionEl.getAttribute('data-level')); }
       else if (action === 'toggleAutoCapture') { setAutoCapture(actionEl.getAttribute('data-enabled') !== 'true'); }
-      else if (action === 'setTaskMode') { setTaskMode(actionEl.getAttribute('data-mode')); }
       else if (action === 'setProactivity') { setProactivity(actionEl.getAttribute('data-level')); }
       else if (action === 'toggleMcpEnabled') { setMcpEnabled(actionEl.getAttribute('data-enabled') !== 'true'); }
       else if (action === 'toggleIntegrationTool') { toggleIntegrationTool(actionEl.getAttribute('data-tool')); }
@@ -1738,10 +1443,6 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         var proj = getSettingsProject();
         var level = actionEl.getAttribute('data-level');
         postProjectOverride(proj, 'findingSensitivity', findingUiToStorage(level || 'medium'), false);
-      }
-      else if (action === 'setProjectTaskMode') {
-        var proj = getSettingsProject();
-        postProjectOverride(proj, 'taskMode', actionEl.getAttribute('data-mode') || 'auto', false);
       }
       else if (action === 'clearProjectOverride') {
         var proj = getSettingsProject();
@@ -1798,15 +1499,6 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       }
     });
 
-    // Keydown delegation for add-task inputs (Enter key)
-    document.addEventListener('keydown', function(e) {
-      var target = e.target;
-      if (!target || !target.getAttribute) return;
-      if (target.getAttribute('data-ts-action') === 'addTaskKeydown' && e.key === 'Enter') {
-        addTaskFromUi(target.getAttribute('data-project'));
-      }
-    });
-
     window.setFindingSensitivity = function(level) {
       var descriptions = {
         high: 'Capture findings proactively, including minor observations.',
@@ -1821,10 +1513,6 @@ export function renderTasksAndSettingsScript(authToken: string): string {
 
     window.setAutoCapture = function(enabled) {
       postSettings('/api/settings/auto-capture', { enabled: String(!!enabled) }, 'Auto-capture updated.');
-    };
-
-    window.setTaskMode = function(mode) {
-      postSettings('/api/settings/task-mode', { value: String(mode || 'auto') }, 'Task mode updated.');
     };
 
     window.setProactivity = function(level) {
@@ -2115,14 +1803,6 @@ export function renderEventWiringScript(): string {
   var graphResetLayoutBtn = document.getElementById('graph-reset-layout');
   if (graphResetLayoutBtn) graphResetLayoutBtn.addEventListener('click', function() { if (typeof graphResetLayout === 'function') graphResetLayout(); });
 
-  // --- Tasks filters ---
-  var tasksFilterProject = document.getElementById('tasks-filter-project');
-  if (tasksFilterProject) tasksFilterProject.addEventListener('change', function() { filterTasks(); });
-  document.addEventListener('change', function(e) { var el = e.target; if (el && el.hasAttribute('data-task-field')) editTaskContract(Number(el.getAttribute('data-index')), el.getAttribute('data-task-field'), el.value); });
-  var taskResponsibilityFilter = document.getElementById('tasks-filter-responsibility');
-  if (taskResponsibilityFilter) taskResponsibilityFilter.addEventListener('change', function() { filterTasks(); });
-  var tasksFilterSection = document.getElementById('tasks-filter-section');
-  if (tasksFilterSection) tasksFilterSection.addEventListener('change', function() { filterTasks(); });
 
   // --- Mascot click animation ---
   var mascotSvg = document.querySelector('.header-brand svg');
@@ -2324,7 +2004,7 @@ export function renderGraphHostScript(): string {
 
   function projectCounts(node) {
     var map = nodeMap();
-    var counts = { finding: 0, task: 0, entity: 0, reference: 0, other: 0 };
+    var counts = { finding: 0, entity: 0, reference: 0, other: 0 };
     neighborIds(node.id).forEach(function(id) {
       var neighbor = map[id];
       if (!neighbor) return;
@@ -2339,7 +2019,6 @@ export function renderGraphHostScript(): string {
     if (!node) return '';
     if (node.kind === 'entity') return node.entityType ? 'Fragment · ' + node.entityType : 'Fragment';
     if (node.kind === 'reference') return 'Reference';
-    if (node.kind === 'task') return 'Task';
     if (node.kind === 'project') return 'Project';
     if (node.kind === 'finding') return node.topicLabel ? 'Finding · ' + node.topicLabel : 'Finding';
     return node.kind || 'Node';
@@ -2446,14 +2125,12 @@ export function renderGraphHostScript(): string {
     var title = node.displayLabel || node.label || node.tooltipLabel || node.id;
     var meta = [kindLabel(node)];
     if (node.projectName) meta.push(node.projectName);
-    if (node.kind === 'task' && node.section) meta.push(node.section);
-    if (node.kind === 'task' && node.priority) meta.push('Priority ' + node.priority);
     if (node.kind === 'finding' && node.topicLabel) meta.push(node.topicLabel);
     if (node.kind === 'finding' && node.date) meta.push(node.date);
 
     var api = graphApi();
     var pos = api && api.dossierPosition ? api.dossierPosition(node.id) : null;
-    var editable = node.kind === 'finding' || node.kind === 'task';
+    var editable = node.kind === 'finding';
     var tools = [];
     if (pos) {
       tools.push(dossierIconBtn('prev-node', 'Previous node'));
@@ -2487,17 +2164,16 @@ export function renderGraphHostScript(): string {
       var counts = projectCounts(node);
       // Server totals beat visible-adjacency counts (filters can hide nodes)
       var findingTotal = typeof node.findingCount === 'number' && node.findingCount > counts.finding ? node.findingCount : counts.finding;
-      var taskTotal = typeof node.taskCount === 'number' && node.taskCount > counts.task ? node.taskCount : counts.task;
-      // Compact stat line — the detailed findings/tasks browser lives in the
+      // Compact stat line — the detailed findings browser lives in the
       // contents pane on the right, so the bulky card grid was redundant.
       var stat = function(n, label) {
         return '<span style="display:inline-flex;align-items:baseline;gap:5px"><b style="font-size:var(--text-md);font-weight:700;color:var(--ink)">' + n + '</b><span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">' + label + '</span></span>';
       };
       body += '<div style="display:flex;flex-wrap:wrap;gap:16px;padding:10px 0">'
-        + stat(findingTotal, 'findings') + stat(taskTotal, 'tasks')
+        + stat(findingTotal, 'findings')
         + stat(counts.entity, 'fragments') + stat(counts.reference, 'refs')
         + '</div>';
-      body += '<div class="text-muted" style="font-size:var(--text-sm)">Browse and prune this project\\'s findings and tasks in the contents pane →</div>';
+      body += '<div class="text-muted" style="font-size:var(--text-sm)">Browse and prune this project\\'s findings in the contents pane →</div>';
     } else if (node.kind === 'finding') {
       // GraphRAG-style stats row: links / project / helpful
       var conn = node.connections || {};
@@ -2521,15 +2197,6 @@ export function renderGraphHostScript(): string {
         body += '<div class="phren-dossier-section">Community</div>';
         body += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">' + gotoChip(node.projectName, node.projectName, true) + '</div>';
       }
-    } else if (node.kind === 'task') {
-      body += '<div id="graph-node-text" style="white-space:pre-wrap;line-height:1.65;font-size:var(--text-base)">' + esc(node.tooltipLabel || node.fullLabel || title) + '</div>';
-      body += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">';
-      body += chip('Status ' + (node.section || 'Queue'), true);
-      if (node.priority) body += chip('Priority ' + node.priority, false);
-      body += '</div>';
-      if ((node.section || '').toLowerCase() !== 'done') actions.push('<button type="button" class="btn btn-sm" data-graph-action="complete">Done</button>');
-      if ((node.section || '').toLowerCase() !== 'active') actions.push('<button type="button" class="btn btn-sm" data-graph-action="move-active">Move to Active</button>');
-      if ((node.section || '').toLowerCase() !== 'queue') actions.push('<button type="button" class="btn btn-sm" data-graph-action="move-queue">Move to Queue</button>');
     } else if (node.kind === 'entity') {
       if (node.connectedProjects && node.connectedProjects.length) {
         body += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">' + node.connectedProjects.map(function(project) { return chip(project, true); }).join('') + '</div>';
@@ -2548,16 +2215,8 @@ export function renderGraphHostScript(): string {
   }
 
   function renderEdit(node) {
-    var title = node.kind === 'task' ? 'Edit task' : 'Edit finding';
+    var title = 'Edit finding';
     var text = node.tooltipLabel || node.fullLabel || node.displayLabel || '';
-    var section = node.section || 'Queue';
-    var priority = node.priority || '';
-    var sectionControls = '';
-    var priorityControls = '';
-    if (node.kind === 'task') {
-      sectionControls = '<label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)">Status<select id="graph-task-section" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface);color:var(--ink)"><option value="Queue"' + (section === 'Queue' ? ' selected' : '') + '>Queue</option><option value="Active"' + (section === 'Active' ? ' selected' : '') + '>Active</option><option value="Done"' + (section === 'Done' ? ' selected' : '') + '>Done</option></select></label>';
-      priorityControls = '<label style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)">Priority<select id="graph-task-priority" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface);color:var(--ink)"><option value=""' + (!priority ? ' selected' : '') + '>None</option><option value="high"' + (priority === 'high' ? ' selected' : '') + '>High</option><option value="medium"' + (priority === 'medium' ? ' selected' : '') + '>Medium</option><option value="low"' + (priority === 'low' ? ' selected' : '') + '>Low</option></select></label>';
-    }
     return '<div class="phren-dossier-head">'
       + '<div style="display:flex;flex-direction:column;gap:8px;flex:1 1 auto;min-width:0">'
       + '<div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">' + esc(title) + '</div>'
@@ -2567,7 +2226,6 @@ export function renderGraphHostScript(): string {
       + '</div>'
       + '<div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">'
       + '<textarea id="graph-node-editor" style="min-height:180px;width:100%;border:1px solid var(--border);border-radius:12px;padding:12px 14px;background:var(--surface-sunken);color:var(--ink);font:inherit;line-height:1.55;resize:vertical">' + esc(text) + '</textarea>'
-      + (node.kind === 'task' ? '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">' + sectionControls + priorityControls + '</div>' : '')
       + '<div style="display:flex;flex-wrap:wrap;gap:8px"><button type="button" class="btn btn-sm" data-graph-action="save-edit">Save</button><button type="button" class="btn btn-sm" data-graph-action="cancel-edit">Cancel</button></div>'
       + '</div>';
   }
@@ -2646,41 +2304,6 @@ export function renderGraphHostScript(): string {
     });
   }
 
-  function saveTaskEdit() {
-    var editor = document.getElementById('graph-node-editor');
-    var sectionEl = document.getElementById('graph-task-section');
-    var priorityEl = document.getElementById('graph-task-priority');
-    if (!editor || !currentNode) return;
-    var nextText = editor.value.trim();
-    if (!nextText) {
-      graphToast('Task text cannot be empty', 'err');
-      return;
-    }
-    var updates = { text: nextText };
-    if (sectionEl && sectionEl.value) updates.section = sectionEl.value;
-    if (priorityEl) updates.priority = priorityEl.value;
-    graphRequest('/api/tasks/update', 'POST', {
-      project: currentNode.projectName,
-      item: currentNode.stableId || currentNode.id || currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || '',
-      text: updates.text,
-      section: updates.section || '',
-      priority: updates.priority || ''
-    }).then(function(result) {
-      if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Save failed');
-      graphToast('Task updated', 'ok');
-      editMode = null;
-      var nextSection = updates.section || currentNode.section || 'Queue';
-      if (nextSection === 'Done') {
-        hidePopover();
-        return reloadGraph(null);
-      }
-      return reloadGraph({ kind: 'task', projectName: currentNode.projectName, tooltipLabel: nextText });
-    }).catch(function(err) {
-      graphToast('Update failed: ' + err.message, 'err');
-    });
-  }
-
-  // Fire the delete API for one node (no confirm, no reload) — reused by single
   // and batch delete so a bulk prune reloads the graph just once at the end.
   function deleteNodeRequest(node) {
     if (!node) return Promise.resolve({ ok: false, error: 'no node' });
@@ -2688,12 +2311,6 @@ export function renderGraphHostScript(): string {
       return graphRequest('/api/findings/' + encodeURIComponent(node.projectName), 'DELETE', {
         text: node.tooltipLabel || node.fullLabel || '',
         score_key: node.scoreKey || ''
-      });
-    }
-    if (node.kind === 'task') {
-      return graphRequest('/api/tasks/remove', 'POST', {
-        project: node.projectName,
-        item: node.stableId || node.id || node.tooltipLabel || node.fullLabel || node.displayLabel || ''
       });
     }
     return Promise.resolve({ ok: false, error: 'unsupported' });
@@ -2704,7 +2321,7 @@ export function renderGraphHostScript(): string {
     if (!confirm('Delete this ' + (node.kind || 'node') + '?')) return;
     deleteNodeRequest(node).then(function(result) {
       if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Delete failed');
-      graphToast(node.kind === 'task' ? 'Task removed' : 'Finding deleted', 'ok');
+      graphToast('Finding deleted', 'ok');
       return reloadGraph(null);
     }).catch(function(err) {
       graphToast('Delete failed: ' + err.message, 'err');
@@ -2715,9 +2332,6 @@ export function renderGraphHostScript(): string {
     return Promise.all(items.map(function(it) {
       if (it.kind === 'finding') {
         return graphRequest('/api/findings/' + encodeURIComponent(it.projectName), 'POST', { text: it.text }).catch(function() { return { ok: false }; });
-      }
-      if (it.kind === 'task') {
-        return graphRequest('/api/tasks/add', 'POST', { project: it.projectName, item: it.item }).catch(function() { return { ok: false }; });
       }
       return Promise.resolve({ ok: false });
     })).then(function() {
@@ -2794,7 +2408,7 @@ export function renderGraphHostScript(): string {
   // Persist edits made directly inside the project pane. The pane owns the
   // editor; the host only performs the mutation and updates the rendered node.
   function saveInlineFromPane(node) {
-    if (!node || (node.kind !== 'finding' && node.kind !== 'task')) return;
+    if (!node || (node.kind !== 'finding')) return;
     var nextText = (node.editedText || '').trim();
     if (!nextText) return;
     if (node.kind === 'finding') {
@@ -2810,51 +2424,6 @@ export function renderGraphHostScript(): string {
       }).catch(function(err) { graphToast('Update failed: ' + err.message, 'err'); });
       return;
     }
-    graphRequest('/api/tasks/update', 'POST', {
-      project: node.projectName,
-      item: node.stableId || node.id || node.tooltipLabel || node.fullLabel || node.displayLabel || '',
-      text: nextText,
-      section: node.editedSection || node.section || 'Queue',
-      priority: typeof node.editedPriority === 'string' ? node.editedPriority : (node.priority || '')
-    }).then(function(result) {
-      if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Save failed');
-      var api = graphApi();
-      if (api && api.updateNode) api.updateNode(node.id, {
-        text: nextText,
-        section: node.editedSection || node.section || 'Queue',
-        priority: typeof node.editedPriority === 'string' ? node.editedPriority : (node.priority || '')
-      });
-      graphToast('Task updated', 'ok');
-    }).catch(function(err) { graphToast('Update failed: ' + err.message, 'err'); });
-  }
-
-  function completeCurrentTask() {
-    if (!currentNode) return;
-    graphRequest('/api/tasks/complete', 'POST', {
-      project: currentNode.projectName,
-      item: currentNode.stableId || currentNode.id || currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || ''
-    }).then(function(result) {
-      if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Update failed');
-      graphToast('Task completed', 'ok');
-      return reloadGraph(null);
-    }).catch(function(err) {
-      graphToast('Update failed: ' + err.message, 'err');
-    });
-  }
-
-  function moveCurrentTask(section) {
-    if (!currentNode) return;
-    graphRequest('/api/tasks/update', 'POST', {
-      project: currentNode.projectName,
-      item: currentNode.stableId || currentNode.id || currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || '',
-      section: section
-    }).then(function(result) {
-      if (!result || !result.ok) throw new Error(result && result.error ? result.error : 'Update failed');
-      graphToast('Task moved to ' + section, 'ok');
-      return reloadGraph({ kind: 'task', projectName: currentNode.projectName, tooltipLabel: currentNode.tooltipLabel || currentNode.fullLabel || currentNode.displayLabel || '' });
-    }).catch(function(err) {
-      graphToast('Update failed: ' + err.message, 'err');
-    });
   }
 
   function bindPopoverActions() {
@@ -2897,7 +2466,7 @@ export function renderGraphHostScript(): string {
           return;
         }
         if (action === 'edit') {
-          editMode = currentNode && (currentNode.kind === 'finding' || currentNode.kind === 'task') ? currentNode.kind : null;
+          editMode = currentNode && (currentNode.kind === 'finding') ? currentNode.kind : null;
           var point = currentPopoverPoint();
           renderPopover(currentNode, point.x, point.y);
         } else if (action === 'cancel-edit') {
@@ -2905,16 +2474,9 @@ export function renderGraphHostScript(): string {
           var point = currentPopoverPoint();
           renderPopover(currentNode, point.x, point.y);
         } else if (action === 'save-edit') {
-          if (editMode === 'task') saveTaskEdit();
-          else saveFindingEdit();
+          saveFindingEdit();
         } else if (action === 'delete') {
           deleteCurrentNode();
-        } else if (action === 'complete') {
-          completeCurrentTask();
-        } else if (action === 'move-active') {
-          moveCurrentTask('Active');
-        } else if (action === 'move-queue') {
-          moveCurrentTask('Queue');
         }
       });
     });

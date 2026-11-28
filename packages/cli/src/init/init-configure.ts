@@ -17,7 +17,6 @@ import {
 } from "../shared.js";
 import { STORE_SECRET_GITIGNORE_LINES } from "./store-gitignore.js";
 import { errorMessage } from "../utils.js";
-import { initializeTaskFormat } from "../data/task-format.js";
 import { configureAllHooks, installPhrenCliWrapper, ensureLocalBinOnWindowsPath } from "../hooks.js";
 import { updateWorkflowPolicy } from "../shared/governance.js";
 import {
@@ -176,31 +175,25 @@ export function applyOnboardingPreferences(phrenPath: string, opts: InitOptions)
   }
   const runtimePatch: {
     proactivityFindings?: ProactivityLevel;
-    proactivityTask?: ProactivityLevel;
   } = {};
   if (opts.findingsProactivity) runtimePatch.proactivityFindings = opts.findingsProactivity;
-  if (opts.taskProactivity) runtimePatch.proactivityTask = opts.taskProactivity;
   if (Object.keys(runtimePatch).length > 0) {
     writeInstallPreferences(phrenPath, runtimePatch);
   }
   const governancePatch: {
     proactivityFindings?: ProactivityLevel;
-    proactivityTask?: ProactivityLevel;
   } = {};
   if (opts.findingsProactivity) governancePatch.proactivityFindings = opts.findingsProactivity;
-  if (opts.taskProactivity) governancePatch.proactivityTask = opts.taskProactivity;
   if (Object.keys(governancePatch).length > 0) {
     writeGovernanceInstallPreferences(phrenPath, governancePatch);
   }
   const workflowPatch: {
     lowConfidenceThreshold?: number;
     riskySections?: ("Review" | "Stale" | "Conflicts")[];
-    taskMode?: "off" | "manual" | "suggest" | "auto";
     findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";
   } = {};
   if (typeof opts.lowConfidenceThreshold === "number") workflowPatch.lowConfidenceThreshold = opts.lowConfidenceThreshold;
   if (Array.isArray(opts.riskySections)) workflowPatch.riskySections = opts.riskySections;
-  if (opts.taskMode) workflowPatch.taskMode = opts.taskMode;
   if (opts.findingSensitivity) workflowPatch.findingSensitivity = opts.findingSensitivity;
   if (Object.keys(workflowPatch).length > 0) {
     updateWorkflowPolicy(phrenPath, workflowPatch);
@@ -337,14 +330,6 @@ export async function warmSemanticSearch(phrenPath: string, profile?: string): P
   }
 }
 
-/** A new store has no old writers, so task metadata starts on. Init still succeeds without it. */
-export function enableTaskMetadataForNewStore(phrenPath: string): void {
-  try {
-    initializeTaskFormat(phrenPath);
-  } catch (e: unknown) {
-    log(`  Task metadata left off: ${errorMessage(e)}. Turn it on later with phren task format enable --all-writers-compatible.`);
-  }
-}
 
 export async function runProjectLocalInit(opts: InitOptions = {}): Promise<void> {
   const detectedRoot = detectProjectDir(process.cwd(), path.join(process.cwd(), ".phren")) || process.cwd();
@@ -393,7 +378,6 @@ export async function runProjectLocalInit(opts: InitOptions = {}): Promise<void>
     primaryProject: projectName,
   });
   ensureGovernanceFiles(phrenPath);
-  if (!existingManifest) enableTaskMetadataForNewStore(phrenPath);
   repairPreexistingInstall(phrenPath);
   fs.mkdirSync(path.join(phrenPath, "global", "skills"), { recursive: true });
   ensurePrivateDir(path.join(phrenPath, ".runtime"));

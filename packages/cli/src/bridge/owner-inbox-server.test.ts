@@ -12,7 +12,6 @@ import * as peerReads from "./peer-reads.js";
 import * as peers from "./peers.js";
 import { ApprovalPushService } from "./push.js";
 import { serve } from "./server.js";
-import { StaleTaskSources } from "./task-stale.js";
 
 // Use serve's actual request handler and intervals without a listening socket.
 const http = vi.hoisted(() => ({ handler: undefined as RequestListener | undefined }));
@@ -82,7 +81,7 @@ it("sends a CLI add made in the ledger's initialization millisecond with an orig
   const store = path.join(root, "store");
   const config = path.join(store, ".config");
   await mkdir(config, { recursive: true });
-  await writeFile(path.join(config, "modules.yaml"), "version: 1\nenabled: { hook: true, conductor: true, tasks: true }\n");
+  await writeFile(path.join(config, "modules.yaml"), "version: 1\nenabled: { hook: true, conductor: true }\n");
   vi.stubEnv("PHREN_PATH", store);
   vi.stubEnv("PHREN_OWNER_INBOX_BACKFILL_ID", undefined);
   vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
@@ -97,8 +96,6 @@ it("sends a CLI add made in the ledger's initialization millisecond with an orig
   const readPeerConfig = vi.spyOn(peers, "optionalHookPeers").mockResolvedValue({ peers: [legacyPeer] });
   // origin/main serves Inbox reads and has no Inbox push capability.
   vi.spyOn(peerReads, "peerRead").mockResolvedValue({ ok: true, items: [REMOTE] });
-  const staleTask = { kind: "needs-you", title: "Stale shared task", source: "task-stale:phren:1234abcd" } as const;
-  const staleSources = vi.spyOn(StaleTaskSources.prototype, "sources").mockReturnValue([]);
   const devices = vi.spyOn(ApprovalPushService.prototype, "ownerInboxPushDevices").mockReturnValue([]);
   const sent = vi.spyOn(ApprovalPushService.prototype, "notifyOwnerInbox").mockResolvedValue(true);
   const serving = serve("test");
@@ -122,7 +119,6 @@ it("sends a CLI add made in the ledger's initialization millisecond with an orig
     expect(item).toMatchObject({ createdAt: initializedAt });
     const { id, title } = item as { id: string; title: string };
     devices.mockReturnValue([DEVICE]);
-    staleSources.mockReturnValue([staleTask]);
 
     // Both a peer fetching this Hook's list and a phone's aggregate read see
     // open rows before the next tick. Neither read may enqueue or send.
@@ -132,7 +128,6 @@ it("sends a CLI add made in the ledger's initialization millisecond with an orig
     expect(await inboxRead("compact=1")).toMatchObject({
       items: expect.arrayContaining([
         expect.objectContaining({ id, inboxComputer: "local" }),
-        expect.objectContaining({ title: staleTask.title, inboxComputer: "local" }),
         expect.objectContaining({ id: REMOTE.id, inboxComputer: legacyPeer.name }),
       ]),
     });

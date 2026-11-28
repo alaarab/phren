@@ -2,7 +2,6 @@ import * as fs from "fs";
 import * as path from "path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { readFindings, readReviewQueue } from "../data/access.js";
-import { readTasks } from "../data/tasks.js";
 import { listNotes } from "../data/notes.js";
 import { grantAdmin, makeTempDir, REPO_ROOT } from "../test-helpers.js";
 
@@ -90,28 +89,7 @@ describe("Swift-written fixtures read by the CLI (bidirectional conformance)", (
     expect(edited?.status).toBe("active");
   });
 
-  it("readTasks parses tasks.md written by TasksFile.add/.complete/.update", () => {
-    importSwiftFixture("tasks.md", "tasks.md");
-    const result = readTasks(tmpDir, PROJECT);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
 
-    expect(result.data.items.Active).toHaveLength(1);
-    // §4.2: priority is a dual source of truth — it is both the parsed field
-    // AND a literal `[medium]` substring still sitting in `.line`.
-    expect(result.data.items.Active[0].line).toBe("Investigate widget refresh timing on iOS 18 [medium]");
-    expect(result.data.items.Active[0].priority).toBe("medium");
-    expect(result.data.items.Active[0].stableId).toMatch(STABLE_ID);
-
-    expect(result.data.items.Queue).toHaveLength(1);
-    expect(result.data.items.Queue[0].line).toBe("Ship the PhrenKit conformance suite [high]");
-    expect(result.data.items.Queue[0].priority).toBe("high");
-    expect(result.data.items.Queue[0].stableId).toMatch(STABLE_ID);
-
-    expect(result.data.items.Done).toHaveLength(1);
-    expect(result.data.items.Done[0].line).toBe("Draft app store notes");
-    expect(result.data.items.Done[0].checked).toBe(true);
-  });
 
   it("readReviewQueue parses review.md written by ReviewFile.edit/.approve", () => {
     importSwiftFixture("review.md", "review.md");

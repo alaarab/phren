@@ -52,7 +52,6 @@ Periodic remote checks are off by default. Enable them with `phren config pull-i
 **Issues:**
 - Work is tracked as forge issues: gitboy.dev for private repos, GitHub for public ones. Create and claim them with `phren issue` or the `create_issue` / `claim_issue` MCP tools; a PR that says `Closes <repo>#N` closes its issue.
 - Work only you can do (merges, logins, decisions) goes to the owner Inbox, the one human queue.
-- Phren tasks are retired in 0.4.0: `get_tasks` and the task views still read, but every task write returns `tasks-retired`. Move existing tasks with `phren migrate tasks`. See [issues](docs/issues.md).
 
 ---
 
@@ -62,7 +61,7 @@ One store, seven ways in. Every surface reads and writes the same markdown files
 
 | Surface | Open it | What it is for |
 |---------|---------|----------------|
-| **Terminal shell** | `phren shell` (or just `phren`) | Full-screen dashboard: projects, issues, findings, review queue, skills, hooks, health. Deep-link with `--view tasks --here` for the read-only task view. |
+| **Terminal shell** | `phren shell` (or just `phren`) | Full-screen dashboard: projects, findings, review queue, skills, hooks, health. Deep-link with `--view findings --here` to open findings for the current project. |
 | **Terminal graph** | `phren shell --view graph`, or `g` in the shell | The knowledge graph drawn on a braille canvas: walk it with the arrows, `/` to search and fly, `[ ]` to focus a project, `1`–`9` to jump to a neighbour. Watches live, so nodes light up as phren reads and writes them, and shows the coding agents running on your machine. |
 | **Web UI** | `phren web-ui` | The 3D memory viewer: projects as containment fields, findings and fragments inside, a contents pane to review, edit, merge, and prune. |
 | **VS Code** | `phren-vscode` from the Marketplace | Sidebar tree for everything phren holds, the same 3D graph as a webview, `Ctrl+Shift+K` search. |
@@ -126,7 +125,7 @@ phren store unsubscribe team-store legacy-projects
 Run `phren import vault <dir> --project <name> --dry-run` to preview which notes will be added. Imported notes become searchable reference docs and are committed and synced with your store. [Vault import guide](docs/obsidian.md#import-a-vault)
 
 ### Clanker mode
-`phren config clanker on` makes the prompt hook, `search_knowledge`, `get_tasks` and `get_findings` return one short row per hit (id, title, a few keywords, a score) instead of the text. The agent opens what it needs with `get_memory_detail(id)`; a `fid:` or `bid:` id returns just that finding or task. New installs start with it on; `phren config clanker off` turns it off.
+`phren config clanker on` makes the prompt hook, `search_knowledge` and `get_findings` return one short row per hit (id, title, a few keywords, a score) instead of the text. The agent opens what it needs with `get_memory_detail(id)`; a `fid:` or `bid:` id returns just that finding or task. New installs start with it on; `phren config clanker off` turns it off.
 
 ### Semantic dedup & conflict detection
 Optional: enable LLM-based duplicate detection and contradiction flagging on `add_finding`. Prevents near-duplicate entries and catches "always use X" vs "never use X" contradictions.
@@ -162,7 +161,7 @@ phren session_start <project>           Start a session
 phren store list                        List personal + team stores
 phren team init <name> --remote <url>
 phren team join <url>                   Join a team store
-phren shell --view tasks --here         Open the shell on this project's tasks (read-only)
+phren shell --view findings --here      Open the shell on this project's findings
 phren shell --view graph                Walk the knowledge graph in the terminal
 phren web-ui [--port 3499]              Launch the web UI (3D graph, dashboard)
 phren export vault <dir>                Generate a linked Obsidian vault
@@ -218,7 +217,6 @@ All use the same phren store. No vendor lock-in.
 
 Phren combines changes when the computers next sync through the same Git remote.
 Findings added on either computer are kept, and a removed finding stays removed if the other computer left it unchanged.
-Notes merge per note. Tasks still merge per task during the read-only window, with completed tasks taking precedence when both sides change them; they are retired in 0.4.0 and move to forge issues with `phren migrate tasks`.
 A conflicting handwritten summary paragraph takes the incoming copy; conflicting config or policy files stop sync and need your choice.
 See [sync conflicts across computers](docs/sync-conflicts.md) for the full rules and how to fix a conflict.
 

@@ -120,19 +120,13 @@ describe("updateRetentionPolicy", () => {
 describe("getWorkflowPolicy", () => {
   it("returns defaults when no file exists", () => {
     const policy = getWorkflowPolicy(phrenPath);
-    expect(policy.taskMode).toBe("auto");
     expect(policy.findingSensitivity).toBe("balanced");
     expect(policy.lowConfidenceThreshold).toBe(0.7);
     expect(policy.riskySections).toContain("Stale");
     expect(policy.riskySections).toContain("Conflicts");
   });
 
-  it("normalizes invalid taskMode to default", () => {
-    writeGovJson(phrenPath, "workflow-policy.json", { taskMode: "bogus" });
-    const policy = getWorkflowPolicy(phrenPath);
-    expect(policy.taskMode).toBe("auto");
-    expect(policy.findingSensitivity).toBe("balanced");
-  });
+
 
   it("normalizes invalid findingSensitivity to default", () => {
     writeGovJson(phrenPath, "workflow-policy.json", { findingSensitivity: "extreme" });
@@ -155,24 +149,9 @@ describe("getWorkflowPolicy", () => {
 });
 
 describe("updateWorkflowPolicy", () => {
-  it("patches and persists workflow policy", () => {
-    const result = updateWorkflowPolicy(phrenPath, { taskMode: "manual" });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.data.taskMode).toBe("manual");
-    expect(result.data.findingSensitivity).toBe("balanced"); // unchanged
 
-    const reread = getWorkflowPolicy(phrenPath);
-    expect(reread.taskMode).toBe("manual");
-  });
 
-  it("rejects invalid taskMode in patch", () => {
-    const result = updateWorkflowPolicy(phrenPath, { taskMode: "invalid" as any });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    // Should keep the current/default value
-    expect(result.data.taskMode).toBe("auto");
-  });
+
 
   it("updates findingSensitivity", () => {
     const result = updateWorkflowPolicy(phrenPath, { findingSensitivity: "aggressive" });
@@ -200,12 +179,12 @@ describe("updateWorkflowPolicy", () => {
   it("reads the policy under the write lock, so a concurrent writer's change survives", async () => {
     const file = path.join(phrenPath, ".config", "workflow-policy.json");
     const lock = `${file}.lock`;
-    // Another process holds the lock, writes taskMode, then releases it.
+    // Another process holds the lock, writes the confidence threshold, then releases it.
     const writer = spawn(process.execPath, ["-e", `
       const fs = require("fs");
       fs.writeFileSync(process.argv[1] + ".lock", process.pid + "\\n" + Date.now(), { flag: "wx" });
       setTimeout(() => {
-        fs.writeFileSync(process.argv[1], JSON.stringify({ taskMode: "manual" }));
+        fs.writeFileSync(process.argv[1], JSON.stringify({ lowConfidenceThreshold: 0.75 }));
         fs.unlinkSync(process.argv[1] + ".lock");
       }, 300);
     `, file], { stdio: "ignore" });
@@ -217,10 +196,9 @@ describe("updateWorkflowPolicy", () => {
     const result = updateWorkflowPolicy(phrenPath, { findingSensitivity: "aggressive" });
     await exited;
 
-    expect(result.ok && result.data.taskMode).toBe("manual");
     const reread = getWorkflowPolicy(phrenPath);
-    expect(reread.taskMode).toBe("manual");
     expect(reread.findingSensitivity).toBe("aggressive");
+    expect(reread.lowConfidenceThreshold).toBe(0.75);
   });
 });
 
@@ -321,7 +299,6 @@ describe("validateGovernanceJson", () => {
   it("returns true for valid workflow policy", () => {
     const filePath = path.join(phrenPath, ".config", "workflow-policy.json");
     writeGovJson(phrenPath, "workflow-policy.json", {
-      taskMode: "auto",
       findingSensitivity: "balanced",
     });
     expect(validateGovernanceJson(filePath, "workflow-policy")).toBe(true);
@@ -663,9 +640,9 @@ describe("pruneDeadMemories TTL promotion", () => {
 
 describe("retention budgets in the policy file", () => {
   it("takes only a numeric 0 as off, falls back on junk, and reads age-out days under a week as the 30-day default", () => {
-    writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { openTasks: "0", reviewEntries: 0, runtimeMB: -5, runtimeAgeOutDays: 1, runtimeAgeOut: "yes" } });
+    writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { reviewEntries: 0, runtimeMB: -5, runtimeAgeOutDays: 1, runtimeAgeOut: "yes" } });
     expect(getRetentionPolicy(phrenPath).budgets).toEqual({
-      openTasks: 150, reviewEntries: 0, runtimeMB: 1024, fanoutArchiveMB: 512, runtimeAgeOutDays: 30, runtimeAgeOut: false,
+      reviewEntries: 0, runtimeMB: 1024, fanoutArchiveMB: 512, runtimeAgeOutDays: 30, runtimeAgeOut: false,
     });
     for (const days of [0, 6.5, 7, 45]) {
       writeGovJson(phrenPath, "retention-policy.json", { schemaVersion: 1, budgets: { runtimeAgeOutDays: days } });

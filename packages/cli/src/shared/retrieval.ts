@@ -97,9 +97,6 @@ const MIN_MATCH_RARITY = 0.1;
 const MIN_SHARE_OF_BEST_RARITY = 0.6;
 /** Rarity for a token the index never saw, or when no index is at hand. */
 const DEFAULT_TOKEN_RARITY = 0.5;
-const TASK_RESCUE_MIN_OVERLAP = 0.3;
-const TASK_RESCUE_OVERLAP_MARGIN = 0.12;
-const TASK_RESCUE_SCORE_MARGIN = 0.6;
 
 /** Fraction of bullets that must be low-value before applying the low-value penalty. */
 const LOW_VALUE_BULLET_FRACTION = 0.5;
@@ -112,17 +109,6 @@ const INTENT_DEBUG_RE = /\b(bug(?:s|gy)?|debug(?:s|ged|ging|gers?)?|errors?|fix(
 const INTENT_REVIEW_RE = /\b(review(?:s|ed|ing|ers?)?|audit(?:s|ed|ing)?|prs?|pull requests?|nits?|nitpick(?:s|ed|ing)?|refactor(?:s|ed|ing)?)\b/;
 const INTENT_BUILD_RE = /\b((?:re)?build(?:s|ing)?|deploy(?:s|ed|ing|ments?)?|releas(?:e[sd]?|ing)|ci|workflows?|pipelines?|test(?:s|ing|ed)?)\b/;
 const INTENT_DOCS_RE = /\b(doc|docs|readme|explain|guide|instructions?)\b/;
-
-const WANTS_TASKS_RE = /\b(tasks?|todos?|backlog|queue|what'?s (left|next|remaining)|what is (left|next|remaining)|next up|remaining work|priorit(y|ies))\b/i;
-
-/**
- * Tasks are a backlog, not memory: a to-do list injected into a debugging
- * question is noise that costs findings their budget. They go in only when the
- * prompt is about building or asks about the work itself.
- */
-export function wantsTasks(prompt: string, intent: ReturnType<typeof detectTaskIntent>): boolean {
-  return intent === "build" || WANTS_TASKS_RE.test(prompt);
-}
 
 export function detectTaskIntent(prompt: string): "debug" | "review" | "build" | "docs" | "skill" | "general" {
   const p = prompt.toLowerCase();
@@ -137,7 +123,7 @@ export function detectTaskIntent(prompt: string): "debug" | "review" | "build" |
 function intentBoost(intent: string, docType: string): number {
   if (intent === "debug" && (docType === "findings" || docType === "reference")) return 3;
   if (intent === "review" && (docType === "canonical" || docType === "changelog")) return 3;
-  if (intent === "build" && (docType === "task" || docType === "reference")) return 2;
+  if (intent === "build" && docType === "reference") return 2;
   if (intent === "docs" && (docType === "summary" || docType === "claude")) return 2;
   if (docType === "canonical") return 2;
   return 0;
@@ -514,24 +500,6 @@ function compactSnippet(snippet: string, maxLines: number, maxChars: number): st
   return out;
 }
 
-// ── Task priority filtering ───────────────────────────────────────────────
-
-const PRIORITY_TAG_RE = /\[(high|medium|low)\]/i;
-
-export function filterTaskByPriority(items: string[], allowedPriorities?: string[]): string[] {
-  const envPriorities = (process.env.PHREN_TASK_PRIORITY);
-  const allowed = new Set(
-    (allowedPriorities || (envPriorities ? envPriorities.split(",").map(s => s.trim().toLowerCase()) : ["high", "medium"]))
-  );
-
-  return items.filter(item => {
-    const match = item.match(PRIORITY_TAG_RE);
-    if (!match) {
-      return allowed.has("high") || allowed.has("medium");
-    }
-    return allowed.has(match[1].toLowerCase());
-  });
-}
 
 // ── Search ───────────────────────────────────────────────────────────────────
 
@@ -1052,7 +1020,7 @@ export function rankResults(
   cwd?: string,
   query?: string,
   /** `rarity`: the prompt's keyword rarity, so a doc's best chunk is the one the floor will judge. */
-  opts?: { filterType?: string | null; skipTaskFilter?: boolean; rarity?: Map<string, number> },
+  opts?: { filterType?: string | null; rarity?: Map<string, number> },
   explain?: (row: DocRow, score: number) => void
 ): DocRow[] {
   let ranked = [...rows];
@@ -1212,32 +1180,10 @@ export function rankResults(
     for (const [n, i] of slots.entries()) scored[i] = reordered[n];
   }
 
-  const shouldFilterTask = intent !== "build" && !opts?.skipTaskFilter && opts?.filterType !== "task";
-  const rescuedTaskPaths = new Set<string>();
-  if (shouldFilterTask && queryTokens.length > 0) {
-    const bestTask = scored.find((entry) => entry.doc.type === "task");
-    if (bestTask && bestTask.queryOverlap >= TASK_RESCUE_MIN_OVERLAP) {
-      const bestNonTask = scored.find((entry) => entry.doc.type !== "task");
-      if (
-        !bestNonTask
-        || bestTask.queryOverlap >= bestNonTask.queryOverlap + TASK_RESCUE_OVERLAP_MARGIN
-        || bestTask.score >= bestNonTask.score + TASK_RESCUE_SCORE_MARGIN
-      ) {
-        rescuedTaskPaths.add(bestTask.doc.path || `${bestTask.doc.project}/${bestTask.doc.filename}`);
-      }
-    }
-  }
   ranked = scored.map((s) => s.doc);
 
   ranked = ranked.slice(0, 8);
 
-  if (shouldFilterTask) {
-    ranked = ranked.filter((r) => {
-      if (r.type !== "task") return true;
-      const key = r.path || `${r.project}/${r.filename}`;
-      return rescuedTaskPaths.has(key);
-    });
-  }
 
   if (explain) {
     const scoreOf = new Map(scored.map((entry) => [entry.doc, entry.score]));

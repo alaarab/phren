@@ -4,7 +4,7 @@ import { fillFromCommits } from "./git-host-gitlab.js";
 import { apiRoot, HostApiError, hostJson, safeLink } from "./git-host-http.js";
 import type { Json } from "./protocol.js";
 import { git } from "./projects.js";
-import { mergeableWord } from "../task/work.js";
+import { mergeableWord } from "../forge/links.js";
 
 /** gitboy, the self-hosted forge, over its REST API (/api/v1). gitboy names a
  * pull request by `index`, and an older gitboy has no draft state, no aggregate review decision

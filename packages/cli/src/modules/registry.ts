@@ -46,7 +46,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       { agents: ["claude", "codex", "copilot", "cursor"], events: ["Stop"], handler: "phren hook-stop" },
       { agents: ["claude"], events: ["PostToolUse"], handler: "phren hook-tool" },
     ],
-    hookRoutes: [...routes("GET", ["/v1/store/head", "/v1/store/tree", "/v1/store/blob"]), ...routes("POST", ["/v1/store/pull-now", "/v1/store/blobs", "/v1/store/file", "/v1/store/delete"])],
+    hookRoutes: [...routes("GET", ["/v1/store/directory", "/v1/store/head", "/v1/store/tree", "/v1/store/blob"]), ...routes("POST", ["/v1/store/pull-now", "/v1/store/blobs", "/v1/store/file", "/v1/store/delete"])],
     capabilities: ["memory", "memoryStore", "memoryStoreBatch", "projectMemory"],
     storeFiles: [
       "phren.root.yaml", "machines.yaml", "profiles/*.yaml", ".config/modules.yaml", ".config/*.json",
@@ -58,16 +58,6 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     localFiles: [],
     phoneScreens: [{ screen: "ProjectsView", capability: "memory" }, { screen: "SearchView", capability: "memory" }],
     skills: ["phren-init", "phren-sync", "phren-profiles", "phren-discover", "phren-consolidate", "phren-summarize"],
-  },
-  {
-    schemaVersion: 1, name: "tasks", version: VERSION, defaultEnabled: false, requires: ["memory"],
-    tools: [
-      ...core(["get_tasks", "add_task", "manage_task"]),
-      ...full(["complete_task", "remove_task", "update_task", "tidy_done_tasks", "pin_task", "claim_task"]),
-    ],
-    cliCommands: ["task", "tasks", "config task-mode", "config proactivity.tasks"], agentHooks: [], hookRoutes: [{ method: "GET", path: "/v1/tasks" }, { method: "GET", path: "/v1/tasks/stores" }, { method: "GET", path: "/v1/tasks/detail" }, { method: "POST", path: "/v1/tasks/update" }, { method: "POST", path: "/v1/tasks/create" }, { method: "POST", path: "/v1/tasks/save" }, { method: "POST", path: "/v1/tasks/launch" }], capabilities: ["tasks", "taskDependencies", "taskWriterSafety", "taskAtomicCreate", "taskAtomicSave", "taskBoundLaunch", "taskWork"],
-    storeFiles: ["<project>/tasks.md", ".sessions/checkpoint-*.json", ".config/task-format.json", ".config/task-archive/*.md", "stores.yaml"], localFiles: [".runtime/task-dependencies.lock"],
-    phoneScreens: [{ screen: "TasksView", capability: "tasks" }], skills: [],
   },
   {
     schemaVersion: 1, name: "hook", version: VERSION, defaultEnabled: false, requires: ["memory"],

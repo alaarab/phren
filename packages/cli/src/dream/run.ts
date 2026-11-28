@@ -15,7 +15,6 @@ import { applyChangeset, countOutcomes, findingVersions, PAGE_PATH, readLastRun,
   type DreamCounts, type DreamDrop, type DreamMode, type DreamOutcome } from "./apply.js";
 import { collect, projectStoreDir, type CollectOptions, type DreamInputs } from "./collect.js";
 import { buildDreamPrompt, DREAM_PHASES, PHASE_OPS, type DreamPhase } from "./prompt.js";
-import { requeueStaleTasks } from "./stale-tasks.js";
 import type { DreamChange, DreamChangeset, DreamEvidence, DreamOp } from "./types.js";
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -262,8 +261,6 @@ export interface DreamResult {
   outcomes: DreamOutcome[];
   dropped: DreamDrop[];
   counts?: DreamCounts;
-  /** Stale Active tasks this scheduled run returned to the Queue. */
-  requeued?: number;
   /** dreams/<runId>.json, when recorded. */
   record?: string;
   model?: string;
@@ -305,13 +302,6 @@ export async function dream(project: string, opts: DreamOptions = {}): Promise<D
   if (!release) return { ...base, status: "busy", mode, message: `A dream is already running for ${project}.` };
   try {
     const now = opts.now ?? new Date();
-    // The nightly dream's own chore, before any collection: stale Active tasks
-    // go back to the Queue. A manual or dry run never moves them.
-    let requeued = 0;
-    if (!dryRun && opts.trigger === "scheduled") {
-      try { requeued = requeueStaleTasks(phrenPath, project, now).requeued.length; } catch { /* task moves are best effort */ }
-    }
-    const requeuedNote = requeued ? ` Returned ${requeued} stale ${requeued === 1 ? "task" : "tasks"} to the Queue.` : "";
     const last = readLastRun(phrenPath, project);
     const fromMs = last ? Date.parse(last.to) : now.getTime() - config.lookbackHours * 3_600_000;
     const from = new Date(Math.min(fromMs, now.getTime()));
@@ -330,8 +320,8 @@ export async function dream(project: string, opts: DreamOptions = {}): Promise<D
 
     if (!inputs.transcripts.length && !inputs.budget.over && !opts.force) {
       if (!dryRun) writeLastRun(phrenPath, project, { runId, startedAt: changesetBase.startedAt, finishedAt: new Date().toISOString(), to: watermark, mode, status: "empty", trigger: opts.trigger ?? "manual" });
-      return { ...base, status: "empty", mode, runId, ...report, ...(requeued ? { requeued } : {}),
-        message: `No sessions in ${project} since ${inputs.from}; nothing to dream about.${collectionNotice}${requeuedNote}` };
+      return { ...base, status: "empty", mode, runId, ...report,
+        message: `No sessions in ${project} since ${inputs.from}; nothing to dream about.${collectionNotice}` };
     }
 
     const phases = config.phases;
@@ -367,8 +357,8 @@ export async function dream(project: string, opts: DreamOptions = {}): Promise<D
     const record = recordDream(phrenPath, project, { changeset, findingVersions: versions, ...report, mode, ...spend, finishedAt, outcomes, dropped });
     const counts = countOutcomes(outcomes, dropped);
     writeLastRun(phrenPath, project, { runId, startedAt: changeset.startedAt, finishedAt, to: watermark, mode, status: "ok", counts, trigger: opts.trigger ?? "manual" });
-    return { ...base, status: "ok", mode, runId, ...report, ...(requeued ? { requeued } : {}), changeset, outcomes, dropped, counts, record, ...spend,
-      message: `${project}: ${counts.applied} applied, ${counts.proposed} proposed, ${counts.skipped} skipped, ${counts.deferred ? `${counts.deferred} deferred (review queue over budget), ` : ""}${counts.failed} failed, ${counts.dropped} dropped.${collectionNotice}${requeuedNote}` };
+    return { ...base, status: "ok", mode, runId, ...report,  changeset, outcomes, dropped, counts, record, ...spend,
+      message: `${project}: ${counts.applied} applied, ${counts.proposed} proposed, ${counts.skipped} skipped, ${counts.deferred ? `${counts.deferred} deferred (review queue over budget), ` : ""}${counts.failed} failed, ${counts.dropped} dropped.${collectionNotice}` };
   } finally {
     release();
   }

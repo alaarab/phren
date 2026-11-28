@@ -226,8 +226,8 @@ describe("ToolCardPresentationTests", () => {
     const mcpError = MCPToolPresentation.of("mcp__github__merge_pull_request", "{}", envelope)!;
     expect(mcpError.status).toBe(MCPToolPresentation.Status.FAILED); expect(mcpError.resultLines).toEqual(["Rate limited"]);
     for (const name of ["mcp__github__get_pull_request", "functions.mcp__herdr__list_panes", "mcp__a__b__c"]) expect(MCPToolPresentation.recognizes(name)).toBe(true);
-    for (const name of ["mcp__phren__add_task", "functions.mcp__phren__session", "mcp__github", "mcp____tool", "Read", "WebFetch", null]) expect(MCPToolPresentation.recognizes(name)).toBe(false);
-    expect(MCPToolPresentation.of("mcp__phren__add_task", "{}")).toBeNull();
+    for (const name of ["mcp__phren__add_finding", "functions.mcp__phren__session", "mcp__github", "mcp____tool", "Read", "WebFetch", null]) expect(MCPToolPresentation.recognizes(name)).toBe(false);
+    expect(MCPToolPresentation.of("mcp__phren__add_finding", "{}")).toBeNull();
   });
 
   it("sentenceCaseAndPlainValues", () => {

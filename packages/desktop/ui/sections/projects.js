@@ -10,7 +10,7 @@ import { openLaunchSheet } from "../shell/launch.js";
 import { sessions as allSessions, projectOf, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 import { storeBlobText, storeTree } from "../store-cache.js";
-import { clear, countActiveFindings, countOpenTasks, firstLine, parseKnows, projectFiles } from "./projects/data.js";
+import { clear, countActiveFindings, firstLine, parseKnows, projectFiles } from "./projects/data.js";
 import { createSheets } from "./projects/sheets.js";
 import { createDialogs } from "./projects/dialogs.js";
 import { createForge } from "./projects/forge.js";
@@ -69,7 +69,7 @@ export function mountProjects(root) {
   /** One project's card facts: the summary line, the counts. Assigned together, so a render mid-read keeps the last values. */
   async function hydrate(computer, project) {
     const files = project.files;
-    const counts = { findings: null, tasks: null };
+    const counts = { findings: null };
     let knowsText = null, summaryLine;
     const summaryNode = files.get("summary.md");
     if (summaryNode) {
@@ -79,15 +79,10 @@ export function mountProjects(root) {
         knowsText = knows?.text ?? null;
         summaryLine = knows?.summaryLine || firstLine(summary);
         if (knows?.counts.findings !== null && knows?.counts.findings !== undefined) counts.findings = knows.counts.findings;
-        if (knows?.counts.tasks !== null && knows?.counts.tasks !== undefined) counts.tasks = knows.counts.tasks;
       } catch { /* summary is optional detail */ }
     }
-    const tasks = files.get("tasks.md"), findings = files.get("FINDINGS.md");
-    const [taskText, findingText] = await Promise.all([
-      counts.tasks === null && tasks ? storeBlobText(computer, tasks.sha).catch(() => null) : null,
-      counts.findings === null && findings ? storeBlobText(computer, findings.sha).catch(() => null) : null,
-    ]);
-    if (taskText !== null) counts.tasks = countOpenTasks(taskText);
+    const findings = files.get("FINDINGS.md");
+    const findingText = counts.findings === null && findings ? await storeBlobText(computer, findings.sha).catch(() => null) : null;
     if (findingText !== null) counts.findings = countActiveFindings(findingText);
     Object.assign(project, { knows: knowsText, summaryLine, counts, hydrated: true });
     return project;
@@ -131,7 +126,7 @@ export function mountProjects(root) {
             const name = node.path.slice(0, slash);
             // Only folders holding Phren's own files are projects (not profiles/, scripts/, templates/).
             const file = node.path.slice(slash + 1);
-            if (!/^(FINDINGS\.md|tasks\.md|summary\.md|phren\.project\.yaml)$/.test(file)) continue;
+            if (!/^(FINDINGS\.md|summary\.md|phren\.project\.yaml)$/.test(file)) continue;
             if (name !== "global" && !name.startsWith(".") && !projects.has(name)) projects.set(name, { name, computer });
           }
         } catch { /* the store is unavailable; repos remain */ }

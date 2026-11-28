@@ -33,7 +33,7 @@ export interface MenuRenderResult {
 // ── View cycling order (same as the shell tab bar) ──────────────────────────
 
 const VIEW_ORDER: MenuView[] = [
-  "Projects", "Tasks", "Findings", "Review Queue", "Skills", "Hooks",
+  "Projects", "Findings", "Review Queue", "Skills", "Hooks",
 ];
 
 // ── Render ──────────────────────────────────────────────────────────────────
@@ -74,9 +74,7 @@ export async function renderMenuFrame(
     0,            // help scroll (unused: no help)
     "Tab: Chat  ←→: Views  ↑↓: Navigate  Enter: Select  /: Filter  Esc: Back",
     stubDoctor,
-    null,         // subsectionsCache
     () => {},     // setHealthLineCount
-    () => {},     // setSubsectionsCache
   );
 
   const listCount = getListItems(phrenPath, profile, shellState, 0).length;
@@ -131,7 +129,7 @@ export function handleMenuKey(
           : cards;
         const selected = filtered[state.cursor];
         if (selected) {
-          return { ...state, view: "Tasks", project: selected.name, cursor: 0, scroll: 0 };
+          return { ...state, view: "Findings", project: selected.name, cursor: 0, scroll: 0 };
         }
       }
       // Escape from sub-view back to Projects

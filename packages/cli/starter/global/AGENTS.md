@@ -8,7 +8,7 @@ phren already knows this user's projects. Ask it before asking them to repeat th
 
 - Recall: `search_knowledge(query)`, then `get_memory_detail(id)` for the full entry. `get_project_summary(project)` when starting on a project.
 - Save: `add_finding(project, finding, findingType?)` the moment you learn something non-obvious that would save time next session. `kind: "note"` for a lightweight daily note.
-- Issues: work lives in forge issues (`phren issue`, `list_issues`, `create_issue`, `claim_issue`, `comment_issue`; a PR says `Closes repo#N`). The owner Inbox holds human actions. Phren tasks are retired in 0.4.0: `get_tasks` still reads, every task write returns `tasks-retired`.
+- Issues: work lives in forge issues (`phren issue`, `list_issues`, `create_issue`, `claim_issue`, `comment_issue`; a PR says `Closes repo#N`). The owner Inbox holds human actions.
 - Sessions: `session(action: "start", project)` for substantial work, `session(action: "end", summary)` when done. Hooks do not do this for you.
 - Everything else: `phren_admin(action: …)`; `phren_admin(action: "list_actions")` lists it.
 - Do not write to `~/.claude/projects/*/memory/`. phren is the memory.

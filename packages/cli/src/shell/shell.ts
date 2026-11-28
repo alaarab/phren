@@ -1,8 +1,7 @@
-import { moduleEnabled } from "../modules/runtime.js";
+
 import * as fs from "fs";
 import * as path from "path";
 import {
-  addTask,
   addFinding,
   loadShellState,
   saveShellState,
@@ -27,7 +26,6 @@ import {
 import { runDoctor } from "../link/link.js";
 import {
   renderShell,
-  type SubsectionsCache,
   type ViewContext,
 } from "./view.js";
 import { renderWidth } from "./render.js";
@@ -87,7 +85,6 @@ export class PhrenShell {
   private viewScrollMap: Partial<Record<string, number>> = {};
   private healthLineCount = 0;
   private helpScroll = 0;
-  private _subsectionsCache: SubsectionsCache | null = null;
   private _graph?: GraphController;
   private repaintHandler: (() => void) | null = null;
   private suspendHandler: ((run: () => Promise<void> | void) => Promise<void>) | null = null;
@@ -111,11 +108,11 @@ export class PhrenShell {
     startup: ShellStartup = {},
   ) {
     this.state = loadShellState(phrenPath);
-    // A deep link (`phren shell --view tasks --here`) wins over the view the
+    // A deep link (`phren shell --view findings --here`) wins over the view the
     // last session happened to leave behind; without one we always land home.
     if (startup.project) this.state.project = startup.project;
     this.graphLive = startup.live;
-    this.state.view = startup.view === "Tasks" && !moduleEnabled(phrenPath, "tasks", profile) ? "Findings" : startup.view ?? "Projects";
+    this.state.view = startup.view ?? "Projects";
     this.message = startup.notice
       ? `  ${style.yellow("⚠")}  ${startup.notice}`
       : this.state.view === "Graph"
@@ -186,7 +183,6 @@ export class PhrenShell {
   }
 
   setView(view: ShellView): void {
-    if (view === "Tasks" && !moduleEnabled(this.phrenPath, "tasks", this.profile)) view = "Findings";
     if (this.state.view === "Graph" && view !== "Graph") this._graph?.stopAnimation();
     const hadMouse = this.state.view === "Graph";
     this.state.view = view;
@@ -228,7 +224,6 @@ export class PhrenShell {
     return this.state.project;
   }
 
-  invalidateSubsectionsCache(): void { this._subsectionsCache = null; }
 
   // ── Cursor management ────────────────────────────────────────────────────
 
@@ -263,7 +258,6 @@ export class PhrenShell {
         break;
       }
       case "command": await this.runPalette(buf.startsWith(":") ? buf.slice(1) : buf); break;
-      case "add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addTask(this.phrenPath, p, buf))}`); break; }
       case "learn-add": { const p = this.ensureProjectSelected(); if (!p) return; this.setMessage(`  ${resultMsg(addFinding(this.phrenPath, p, buf))}`); break; }
       case "skill-add": {
         const p = this.ensureProjectSelected();
@@ -301,7 +295,6 @@ export class PhrenShell {
   private closeEditor(message: string): void {
     this.editor = undefined;
     this.navMode = "navigate";
-    this.invalidateSubsectionsCache();
     this.setMessage(message);
   }
 
@@ -406,8 +399,7 @@ export class PhrenShell {
     // The editor path returned above, so this is only ever navigate or input.
     const viewMode = this.navMode === "input" ? "input" : "navigate";
     return renderShell(ctx, viewMode, this.inputCtx, this.inputBuf, this.showHelp, this.helpScroll, this.message,
-      () => this.doctorSnapshot(), this._subsectionsCache,
-      (n) => { this.healthLineCount = n; }, (c) => { this._subsectionsCache = c; });
+      () => this.doctorSnapshot(), (n) => { this.healthLineCount = n; });
   }
 
   // ── Navigation host adapter ────────────────────────────────────────────
@@ -426,7 +418,6 @@ export class PhrenShell {
       confirmThen: (label, action) => this.confirmThen(label, action),
       snapshotForUndo: (label, file) => this.snapshotForUndo(label, file),
       ensureProjectSelected: () => this.ensureProjectSelected(),
-      invalidateSubsectionsCache: () => this.invalidateSubsectionsCache(),
       popUndo: () => this.popUndo(),
       currentCursor: () => this.currentCursor(),
       setCursor: (n) => this.setCursor(n),

@@ -14,9 +14,9 @@ import {
 } from "../governance/policy.js";
 
 describe("config schema", () => {
-  it("defines all nine domains", () => {
+  it("defines all eight domains", () => {
     expect(CONFIG_DOMAINS.map((d) => d.id).sort()).toEqual(
-      ["access", "dreaming", "findingSensitivity", "index", "proactivity", "retention", "taskMode", "topic", "workflow"],
+      ["access", "dreaming", "findingSensitivity", "index", "proactivity", "retention", "topic", "workflow"],
     );
   });
 
@@ -57,7 +57,6 @@ describe("config schema", () => {
   it("derives defaults from the canonical policy constants", () => {
     expect(getConfigField("retention.ttlDays")?.default).toBe(DEFAULT_POLICY.ttlDays);
     expect(getConfigField("retention.decay.d90")?.default).toBe(DEFAULT_POLICY.decay.d90);
-    expect(getConfigField("taskMode")?.default).toBe(DEFAULT_WORKFLOW_POLICY.taskMode);
     expect(getConfigField("findingSensitivity")?.default).toBe(DEFAULT_WORKFLOW_POLICY.findingSensitivity);
     expect(getConfigField("workflow.lowConfidenceThreshold")?.default)
       .toBe(DEFAULT_WORKFLOW_POLICY.lowConfidenceThreshold);
@@ -74,7 +73,6 @@ describe("config schema", () => {
   });
 
   it("resolves historical CLI subcommand aliases to canonical domains", () => {
-    expect(resolveConfigDomainAlias("task-mode")).toBe("taskMode");
     expect(resolveConfigDomainAlias("finding-sensitivity")).toBe("findingSensitivity");
     expect(resolveConfigDomainAlias("policy")).toBe("retention");
     expect(resolveConfigDomainAlias("PROACTIVITY")).toBe("proactivity");

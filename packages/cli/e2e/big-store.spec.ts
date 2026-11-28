@@ -57,7 +57,6 @@ test.describe.serial("web-ui against a large store", () => {
     expect(g.groups.project).toBe(10);
     expect(g.groups.reference).toBeGreaterThanOrEqual(30);
     expect(g.groups.topic).toBeGreaterThanOrEqual(150); // findings render as topic:* nodes
-    expect((g.groups["task-active"] ?? 0) + (g.groups["task-queue"] ?? 0)).toBeGreaterThanOrEqual(40);
   });
 
   test("activity feed is populated with authentic lookups carrying finding nodeIds", async ({ page }) => {

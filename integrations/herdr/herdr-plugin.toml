@@ -1,6 +1,6 @@
 # Phren for Herdr
 #
-# Puts phren's dashboard — projects, tasks, findings, review queue — one
+# Puts phren's dashboard — projects, findings, review queue — one
 # keypress away from whatever pane you are in, scoped to that pane's project.
 #
 #   herdr plugin install alaarab/phren/integrations/herdr
@@ -10,7 +10,7 @@
 id = "phren"
 name = "Phren"
 version = "0.1.0"
-description = "Phren memory in a pane: tasks, findings, and the review queue for the project the pane is sitting in."
+description = "Phren memory in a pane: findings and the review queue for the project the pane is sitting in."
 min_herdr_version = "0.8.0"
 platforms = ["linux", "macos"]
 
@@ -21,27 +21,27 @@ platforms = ["linux", "macos"]
 [[panes]]
 id = "dashboard"
 title = "phren"
-description = "Full phren dashboard: projects, tasks, findings, review queue, skills, hooks"
+description = "Full phren dashboard: projects, findings, review queue, skills, hooks"
 placement = "popup"
 width = "90%"
 height = "88%"
 command = ["bash", "-lc", "exec \"$HERDR_PLUGIN_ROOT/bin/phren-pane.sh\" dashboard"]
 
 [[panes]]
-id = "tasks"
-title = "phren tasks"
-description = "Phren tasks for this pane's project"
+id = "findings"
+title = "phren findings"
+description = "Phren findings for this pane's project"
 placement = "popup"
 width = "80%"
 height = "70%"
-command = ["bash", "-lc", "exec \"$HERDR_PLUGIN_ROOT/bin/phren-pane.sh\" tasks"]
+command = ["bash", "-lc", "exec \"$HERDR_PLUGIN_ROOT/bin/phren-pane.sh\" findings"]
 
 [[panes]]
 id = "dock"
 title = "phren"
-description = "Dock the phren task list beside the current pane"
+description = "Dock the phren findings beside the current pane"
 placement = "split"
-command = ["bash", "-lc", "exec \"$HERDR_PLUGIN_ROOT/bin/phren-pane.sh\" tasks"]
+command = ["bash", "-lc", "exec \"$HERDR_PLUGIN_ROOT/bin/phren-pane.sh\" findings"]
 
 [[panes]]
 id = "web"
@@ -61,16 +61,16 @@ contexts = ["global", "pane", "workspace"]
 command = ["bin/open-pane.sh", "dashboard"]
 
 [[actions]]
-id = "tasks"
-title = "Phren tasks"
-description = "Open phren tasks for this pane's project"
+id = "findings"
+title = "Phren findings"
+description = "Open phren findings for this pane's project"
 contexts = ["global", "pane", "workspace"]
-command = ["bin/open-pane.sh", "tasks"]
+command = ["bin/open-pane.sh", "findings"]
 
 [[actions]]
 id = "dock"
 title = "Dock phren"
-description = "Split phren tasks in beside the current pane"
+description = "Split phren findings in beside the current pane"
 contexts = ["global", "pane", "workspace"]
 command = ["bin/open-pane.sh", "dock"]
 

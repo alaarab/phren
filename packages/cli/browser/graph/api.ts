@@ -12,7 +12,7 @@ import {
   state,
   stepDossier,
 } from "./state.js";
-import { applyHighlight, refreshNodeVisual } from "./nodes.js";
+import { refreshNodeVisual } from "./nodes.js";
 import { benchLabelTick, forgetEagerLabel, resetLabels, refreshLabels, updateEagerLabelText } from "./labels.js";
 import { applyFilters, disposeScene, setupForceGraph } from "./scene.js";
 import { buildFilterBar, buildHudOverlays } from "./hud.js";
@@ -170,11 +170,10 @@ function removeNode(nodeId: string, opts?: { animate?: boolean }): boolean {
     // Keep the project's eager-label count honest after a client-side delete
     // (the count is payload-sourced and would otherwise go stale until reload).
     const removed = state.nodeById.get(nodeId);
-    if (removed && (removed.kind === "finding" || removed.kind === "task") && removed.project) {
+    if (removed && (removed.kind === "finding") && removed.project) {
       const projectNode = state.rawNodes.find((n) => n.kind === "project" && (n.project || n.id) === removed.project);
       if (projectNode) {
         if (removed.kind === "finding" && typeof projectNode.findingCount === "number" && projectNode.findingCount > 0) projectNode.findingCount--;
-        if (removed.kind === "task" && typeof projectNode.taskCount === "number" && projectNode.taskCount > 0) projectNode.taskCount--;
         const projectFg = state.fgNodeById.get(projectNode.id);
         if (projectFg) updateEagerLabelText(projectFg);
       }

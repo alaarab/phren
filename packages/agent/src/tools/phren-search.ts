@@ -6,7 +6,7 @@ import { searchKnowledgeRows, rankResults, isInjectableDocType } from "@phren/cl
 export function createPhrenSearchTool(ctx: PhrenContext): AgentTool {
   return {
     name: "phren_search",
-    description: "Search phren knowledge base for past findings, tasks, and reference docs. Use BEFORE starting work to check for relevant context, error resolutions, or architecture notes from prior sessions. Also use when you encounter an unfamiliar pattern or error.",
+    description: "Search phren knowledge base for past findings and reference docs. Use BEFORE starting work to check for relevant context, error resolutions, or architecture notes from prior sessions. Also use when you encounter an unfamiliar pattern or error.",
     input_schema: {
       type: "object",
       properties: {

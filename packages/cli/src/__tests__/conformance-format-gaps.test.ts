@@ -2,7 +2,6 @@ import * as fs from "fs";
 import * as path from "path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFindings, editFinding, removeFinding, readReviewQueue } from "../data/access.js";
-import { readTasks, updateTask } from "../data/tasks.js";
 import { addFindingToFile } from "../content/learning.js";
 import { FINDING_TAGS } from "../phren-core.js";
 import { grantAdmin, makeTempDir, REPO_ROOT } from "../test-helpers.js";
@@ -151,38 +150,7 @@ describe("format conformance gaps (docs/store-format.md §7)", () => {
   // recomputes both from the *new* text whenever text changes, so a rename
   // that doesn't re-supply them silently drops them. This pins the actual
   // behaviour; it does not fix it.
-  describe("gap 4: pinned+prioritised task edited by text only drops both (documented rough edge)", () => {
-    it("has priority and pinned state before the text-only edit", () => {
-      fs.copyFileSync(path.join(FIXTURES_DIR, "tasks-pinned-before-text-edit.md"), path.join(projectDir, "tasks.md"));
-      const before = readTasks(tmpDir, PROJECT);
-      expect(before.ok).toBe(true);
-      if (!before.ok) return;
-      const item = before.data.items.Queue.find((t) => t.stableId === "0000b001");
-      expect(item?.priority).toBe("high");
-      expect(item?.pinned).toBe(true);
-      expect(item?.line).toBe("Ship urgent fix [high] [pinned]");
-    });
 
-    it("ACTUAL behaviour: a text-only rename silently drops both", () => {
-      fs.copyFileSync(path.join(FIXTURES_DIR, "tasks-pinned-before-text-edit.md"), path.join(projectDir, "tasks.md"));
-      // Every task write stamps lastActivity (#934); a fixed clock keeps the fixture byte-exact.
-      vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-07-24T10:00:00.000Z") });
-      const result = (() => { try { return updateTask(tmpDir, PROJECT, "Ship urgent fix", { text: "Ship urgent fix (renamed)" }); } finally { vi.useRealTimers(); } })();
-      expect(result.ok).toBe(true);
-
-      const after = readTasks(tmpDir, PROJECT);
-      expect(after.ok).toBe(true);
-      if (!after.ok) return;
-      const item = after.data.items.Queue.find((t) => t.stableId === "0000b001");
-      expect(item?.line).toBe("Ship urgent fix (renamed)");
-      expect(item?.priority).toBeUndefined();
-      expect(item?.pinned).toBeUndefined();
-
-      // The committed fixture is this exact behaviour, byte for byte.
-      const rendered = fs.readFileSync(path.join(projectDir, "tasks.md"), "utf8");
-      expect(rendered).toBe(readFixture("tasks-pinned-after-text-only-edit.md"));
-    });
-  });
 
   // --- Gap 5 (§2.2, §4.3): lengths and slice offsets are counted in UTF-16
   // code units (JS's `.length`/`.slice`), not Unicode scalars or grapheme

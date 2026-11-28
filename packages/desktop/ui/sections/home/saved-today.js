@@ -1,13 +1,13 @@
+import { showSection } from "../../shell/sections.js";
 import { el } from "../../dom.js";
 import { hookGet } from "../../api.js";
-import { loadTaskSources, loadTaskDoc, TASK_FRESH_MS } from "../../shell/task-cache.js";
-import { showSection } from "../../shell/sections.js";
 import { savedToday, dayBounds, SAVED_TODAY_ROWS } from "../../shell/saved-today.js";
 import { savedAgo } from "../../time.js";
 
 // Findings are read once per computer and project and kept five minutes. Each read parses FINDINGS.md and
 // checks citation freshness on the Hook, so they are fetched only when Home is shown (or a computer first
 // comes online), never on a timer.
+const REFRESH_MS = 60_000;
 const FINDINGS_TTL_MS = 5 * 60_000;
 const PER_COMPUTER = 2;
 const ONLINE_DEBOUNCE_MS = 1500;
@@ -58,12 +58,7 @@ export function memorySearchFor(text) {
 }
 
 export function openSaved(entry) {
-  if (entry.kind === "task") {
-    showSection("tasks")?.openTask?.({ computer: entry.computer, storeId: entry.storeId, project: entry.project, id: entry.id });
-  } else {
-    // Memory targets a finding by project and text filter, not by id.
-    showSection("memory")?.open?.({ computer: entry.computer, project: entry.project, segment: "findings", search: memorySearchFor(entry.text) });
-  }
+  showSection("memory")?.open?.({ computer: entry.computer, project: entry.project, segment: "findings", search: memorySearchFor(entry.text) });
 }
 
 export function createSavedToday({ block, state }) {
@@ -150,7 +145,7 @@ export function createSavedToday({ block, state }) {
   }
 
   // mode "show" fetches missing and stale findings, "online" only missing ones (a computer just came
-  // online), "tick" none: tasks come from the shared task cache, findings from what is already read.
+  // online), "tick" none: findings come from what is already read.
   // One burst runs at a time; a request that arrives meanwhile runs once after it.
   async function refresh(mode) {
     if (running) { if (queued === null || PRIORITY[mode] > PRIORITY[queued]) queued = mode; return; }
@@ -160,21 +155,13 @@ export function createSavedToday({ block, state }) {
     let attempts = 0;
     let ok = 0;
     try {
-      const sources = await loadTaskSources(state.merged?.computers ?? []);
-      const tasks = (await Promise.all(sources.flatMap((source) => source.projects.map(async (project) => {
-        attempts++;
+      const computers = (state.merged?.computers ?? []).filter(row => row.state === "online");
+      const sources = (await Promise.all(computers.map(async ({ computer }) => {
         try {
-          const doc = await loadTaskDoc(source, project, mode === "force");
-          ok++;
-          return [...(doc.items?.Active ?? []), ...(doc.items?.Queue ?? [])].filter((item) => !item.checked && item.createdAt).map((item) => {
-            const id = item.stableId ?? item.id;
-            return {
-              kind: "task", key: `task:${source.computer}:${source.id}:${project}:${id}`, dedupe: `task|${source.id}|${project}|${id}`, rank: rankOf(source.computer),
-              text: String(item.line ?? ""), created: item.createdAt, computer: source.computer, storeId: source.id, project, id,
-            };
-          });
+          const { stores = [] } = await hookGet(computer, "/v1/store/directory");
+          return stores.filter(store => store.available && store.id).map(store => ({ ...store, computer }));
         } catch { return []; }
-      })))).flat();
+      }))).flat();
       // One read per store and project: a store synced to several computers is read from the preferred one.
       const jobs = new Map();
       for (const source of sources) {
@@ -203,7 +190,7 @@ export function createSavedToday({ block, state }) {
         } catch { /* counted by attempts */ }
       })));
       if (alive()) {
-        entries = [...tasks, ...findings];
+        entries = findings;
         failed = attempts > 0 && ok === 0;
         render();
       }
@@ -223,13 +210,13 @@ export function createSavedToday({ block, state }) {
 
   return {
     render,
-    /** Read every task document and project's findings again, ignoring what is cached. */
+    /** Read each project's findings again, ignoring what is cached. */
     reload() { return refresh("force"); },
     show() {
       visible = true;
       onlineKey = onlineKeyNow();
       void refresh("show");
-      tick = setInterval(() => { void refresh("tick"); }, TASK_FRESH_MS);
+      tick = setInterval(() => { void refresh("tick"); }, REFRESH_MS);
       scheduleMidnight();
     },
     hide() {

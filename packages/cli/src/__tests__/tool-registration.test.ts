@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { register as registerSearch } from "../tools/search.js";
-import { register as registerTask } from "../tools/tasks.js";
 import { register as registerFinding } from "../tools/finding.js";
 import { register as registerMemory } from "../tools/memory.js";
 import { register as registerData } from "../tools/data.js";
@@ -30,7 +29,6 @@ import type { McpContext } from "../tools/types.js";
 // 54) — its 5 tools were never covered by the duplicate-name check.
 const ALL_REGISTER_FNS = [
   registerSearch,
-  registerTask,
   registerFinding,
   registerMemory,
   registerData,
@@ -142,7 +140,6 @@ describe("MCP module enablement", () => {
     rebuildIndex: async () => {}, updateFileInIndex: () => {}, withWriteQueue: async fn => fn(),
   };
   it.each([
-    { names: ["memory", "tasks"], core: 12 },
     { names: ["memory"], core: 9 },
     { names: ["memory", "git"], core: 9 },
   ])("filters both presentation profiles for $names", async ({ names, core }) => {
@@ -154,14 +151,9 @@ describe("MCP module enablement", () => {
       const expected = modules.flatMap(module => module.tools.filter(tool => tool.profiles.includes(profile)).map(tool => tool.name));
       expect([...gate.exposed].sort()).toEqual(expected.sort());
       if (profile === "core") expect(gate.exposed.size).toBe(core);
-      expect(gate.catalog.has("get_tasks")).toBe(names.includes("tasks"));
       expect(gate.catalog.has("auto_extract_findings")).toBe(names.includes("git"));
       expect(gate.catalog.has("dispatch")).toBe(false);
       expect(JSON.stringify(await gate.catalog.get("phren_admin")!.handler({ action: "dispatch" }))).toContain("module conductor is disabled");
-      if (!names.includes("tasks")) {
-        expect(JSON.stringify(await dispatch(gate.catalog, "manage_task", { action: "complete" }))).toContain("module tasks is disabled");
-        expect(JSON.stringify(await gate.catalog.get("phren_admin")!.handler({ action: "add_task" }))).toContain("module tasks is disabled");
-      }
     }
   });
 });

@@ -14,14 +14,12 @@ function payload(): GraphPayload {
   const nodes: GraphPayload["nodes"] = [];
   const links: GraphPayload["links"] = [];
   for (const project of ["harbor", "api", "billing"]) {
-    nodes.push({ id: project, label: project, group: "project", project, findingCount: 6, taskCount: 1 });
+    nodes.push({ id: project, label: project, group: "project", project, findingCount: 6 });
     for (let i = 0; i < 6; i++) {
       const id = `${project}:f${i}`;
       nodes.push({ id, label: `${project} finding ${i} about retries 日本語`, fullLabel: `${project} finding ${i} about retries and backoff behaviour 日本語`, group: "topic:architecture", project, topicSlug: "architecture" });
       links.push({ source: project, target: id });
     }
-    nodes.push({ id: `${project}:t`, label: `${project} task`, group: "task-active", project, section: "Active" });
-    links.push({ source: project, target: `${project}:t` });
   }
   nodes.push({ id: "e", label: "RetryPolicy", group: "entity", entityType: "class", refCount: 3, refDocs: [{ doc: "harbor/FINDINGS.md", project: "harbor" }] });
   links.push({ source: "e", target: "harbor" }, { source: "e", target: "api" }, { source: "harbor:f0", target: "harbor:f1", kind: "supersedes" }, { source: "harbor:f2", target: "harbor:f3", kind: "contradicts" });
@@ -114,7 +112,7 @@ describe("labels on a crowded canvas", () => {
     const nodes: GraphPayload["nodes"] = [];
     const links: GraphPayload["links"] = [];
     for (const [pi, name] of NAMES.entries()) {
-      nodes.push({ id: name, label: name, group: "project", project: name, findingCount: 20 - pi, taskCount: 3 });
+      nodes.push({ id: name, label: name, group: "project", project: name, findingCount: 20 - pi });
       for (let i = 0; i < 20; i++) {
         const id = `${name}:f${i}`;
         nodes.push({ id, label: `${name} finding ${i}`, fullLabel: `${name} finding ${i} about retries`, group: "topic:architecture", project: name, topicSlug: "architecture" });

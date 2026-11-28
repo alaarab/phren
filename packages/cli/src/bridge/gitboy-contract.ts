@@ -22,14 +22,6 @@ export function isRepoPath(value: string): boolean {
   return value.split("/").every(segment => segment !== "." && segment !== ".." && segment.trim() === segment);
 }
 
-/** A branch as git allows it, narrowed: no `..`, `@{`, leading `-` or `/`,
- * trailing `/`, `.lock` or `.`, at most 200 characters. */
-export function isBranchName(value: string): boolean {
-  if (!/^[A-Za-z0-9._\/+-]{1,200}$/.test(value)) return false;
-  if (value.startsWith("-") || value.startsWith("/") || value.endsWith("/") || value.endsWith(".") || value.endsWith(".lock")) return false;
-  return !value.includes("..") && !value.includes("//") && !value.split("/").some(part => part.startsWith("."));
-}
-
 /** Search text: an error excerpt may carry tabs and newlines, nothing else below space. */
 export function isSearchText(value: string): boolean {
   return value.trim().length > 0 && value.length <= MAX_SEARCH_QUERY && !/[\x00-\x08\x0b-\x1f\x7f]/.test(value);
@@ -48,7 +40,4 @@ export const findingWriteSchema = z.object({
     name: z.string().min(1).max(200).refine(value => !/[\x00-\x1f\x7f]/.test(value)).optional(),
   }).strict().optional(),
 }).strict();
-/** Complete one task by its stable id (`bid:` plus 8 hex digits), as `/tasks?branch=` lists it. */
-export const taskCompleteSchema = z.object({ id: z.string().regex(/^bid:[0-9a-f]{8}$/) }).strict();
-export type TaskComplete = z.infer<typeof taskCompleteSchema>;
 export type FindingWrite = z.infer<typeof findingWriteSchema>;

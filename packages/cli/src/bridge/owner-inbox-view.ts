@@ -68,13 +68,13 @@ export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnl
       const view = await peerRead(peer, localList, options);
       return { ...view, items: project(objects(view.items).map(item => placed(item, computer))), unreachable: [] };
     }
-    const needsActions = local.command !== undefined || local.task !== undefined || local.pr !== undefined || local.key !== undefined || local.ifUpdatedAt !== undefined;
+    const needsActions = local.command !== undefined || local.pr !== undefined || local.key !== undefined || local.ifUpdatedAt !== undefined;
     const needsIssues = local.issue !== undefined;
     if (needsActions || needsIssues) {
       const health = await peerRequest(peer, "/v1/health", undefined, 5_000);
       const supported = object(health.capabilities);
       if (needsActions && supported.ownerInboxActions !== true) {
-        throw new BridgeError(409, `Upgrade the Hook on ${computer} to use inbox commands, task or PR links, keys or guarded resolves.`, { code: "owner-inbox-actions-unsupported" });
+        throw new BridgeError(409, `Upgrade the Hook on ${computer} to use inbox commands, PR links, keys or guarded resolves.`, { code: "owner-inbox-actions-unsupported" });
       }
       if (needsIssues && supported.ownerInboxIssues !== true) {
         throw new BridgeError(409, `Upgrade the Hook on ${computer} to link an inbox item to an issue.`, { code: "owner-inbox-issues-unsupported" });

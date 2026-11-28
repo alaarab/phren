@@ -10,11 +10,11 @@ const totals: StoreHealthCounts = {
   activeFindings: 20, archivedBullets: 4, olderBullets: 2, retiredBullets: 4,
   contradictedBullets: 0, bulletsWithoutFid: 0, duplicateTexts: 3, duplicateFids: 1,
   citations: { none: 0, timestampOnly: 0, withFile: 26, withCommit: 0, withSymbol: 0, withRemote: 0 },
-  checkableCitations: { any: 15, withFile: 15 }, openTasks: 8, doneTasks: 0, reviewEntries: 6,
+  checkableCitations: { any: 15, withFile: 15 }, reviewEntries: 6,
 };
 const store = { name: "example", path: ".", projects: [], totals, citationCoverage: 0.75 };
 const overBudget: OverBudget[] = [
-  { component: "openTasks", store: "example", project: "project-a", value: 8, budget: 5, effect: "capture paused" },
+  { component: "reviewEntries", store: "example", project: "project-a", value: 8, budget: 5, effect: "capture paused" },
   { component: "reviewEntries", store: "example", project: "project-b", value: 6, budget: 5, effect: "queue paused" },
   { component: "runtimeBytes", value: 3_145_728, budget: 2_097_152, effect: "reported only" },
   { component: "fanoutArchiveBytes", value: 200, budget: 100, effect: "reported only" },
@@ -86,7 +86,7 @@ describe("phren status store health", () => {
 
     const budget = statusHealth().split("\n").find(line => line.includes("over budget"));
     expect(budget?.trim()).toBe(count === 3
-      ? "3 items over budget (example/project-a open tasks, example/project-b review entries, .runtime)"
+      ? "3 items over budget (example/project-a review entries, example/project-b review entries, .runtime)"
       : "4 items over budget");
   });
 

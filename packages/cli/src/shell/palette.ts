@@ -1,5 +1,5 @@
 import { execFileSync } from "child_process";
-import type { TaskItem, QueueItem } from "../data/access.js";
+import type { QueueItem } from "../data/access.js";
 import { runLink } from "../link/link.js";
 import { runPhrenUpdate } from "../update.js";
 import { resolveEntryScript } from "../init/shared.js";
@@ -54,13 +54,6 @@ export function splitCommandLine(input: string): string[] {
   return out;
 }
 
-export function tasksByFilter(items: TaskItem[], filter: string): TaskItem[] {
-  const needle = filter.toLowerCase().trim();
-  if (!needle) return items;
-  return items.filter((item) =>
-    `${item.id} ${item.line} ${item.context || ""} ${item.githubIssue ? `#${item.githubIssue}` : ""} ${item.githubUrl || ""}`.toLowerCase().includes(needle),
-  );
-}
 
 export function queueByFilter(items: QueueItem[], filter: string): QueueItem[] {
   const needle = filter.toLowerCase().trim();
@@ -70,32 +63,7 @@ export function queueByFilter(items: QueueItem[], filter: string): QueueItem[] {
   );
 }
 
-export function expandIds(input: string): string[] {
-  const parts = input.split(",").map((s) => s.trim()).filter(Boolean);
-  const result: string[] = [];
-  for (const part of parts) {
-    const rangeMatch = part.match(/^([AQD])(\d+)-\1?(\d+)$/i);
-    if (rangeMatch) {
-      const prefix = rangeMatch[1].toUpperCase();
-      const start  = Number.parseInt(rangeMatch[2], 10);
-      const end    = Number.parseInt(rangeMatch[3], 10);
-      for (let i = Math.min(start, end); i <= Math.max(start, end); i++) {
-        result.push(`${prefix}${i}`);
-      }
-    } else {
-      result.push(part);
-    }
-  }
-  return result;
-}
 
-export function normalizeSection(sectionRaw: string): "Active" | "Queue" | "Done" | null {
-  const normalized = sectionRaw.toLowerCase();
-  if (["active", "a"].includes(normalized)) return "Active";
-  if (["queue", "queued", "q"].includes(normalized)) return "Queue";
-  if (["done", "d"].includes(normalized)) return "Done";
-  return null;
-}
 
 // ── Infrastructure ───────────────────────────────────────────────────────────
 

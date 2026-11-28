@@ -12,13 +12,6 @@ export const vscodeManifest: CapabilityManifest = {
     "finding.pin": { implemented: true, handler: "extension.ts:phren.pinMemory" },
 
     // Task management
-    "task.add": { implemented: true, handler: "extension.ts:phren.addTask" },
-    "task.complete": { implemented: true, handler: "extension.ts:phren.completeTask" },
-    "task.remove": { implemented: true, handler: "extension.ts:phren.removeTask" },
-    "task.update": { implemented: true, handler: "extension.ts:phren.updateTask, taskViewer.ts:save" },
-    "task.list": { implemented: true, handler: "PhrenTreeProvider.ts:tasks section" },
-    "task.pin": { implemented: true, handler: "extension.ts:phren.pinTask" },
-    "task.github_link": { implemented: false, reason: "GitHub link/promote is MCP-only" },
 
     // Hook management
     "hook.list": { implemented: true, handler: "extension.ts:phren.hooksStatus" },

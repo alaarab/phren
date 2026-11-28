@@ -4,7 +4,7 @@ import { git } from "./projects.js";
 import { runCombined } from "./git-publish.js";
 import { gitboy } from "./git-host-gitboy.js";
 import { gitlab } from "./git-host-gitlab.js";
-import { mergeableWord, type ForgeItem } from "../task/work.js";
+import { mergeableWord, type ForgeItem } from "../forge/links.js";
 
 
 /** Where a repository's pull or merge requests live. Phren supports three git

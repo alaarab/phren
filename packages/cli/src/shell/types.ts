@@ -1,13 +1,12 @@
-import { moduleEnabled } from "../modules/runtime.js";
+
 import type { ShellState } from "../data/access.js";
 import type { runDoctor } from "../link/link.js";
 
 // Projects is level 0 (the home screen); these sub-views are level 1 (drill-down into a project)
 // Health is NOT a sub-view — it's a global overlay accessible from anywhere via [h]
-export const SUB_VIEWS = ["Tasks", "Findings", "Review Queue", "Skills", "Hooks"] as const;
+export const SUB_VIEWS = ["Findings", "Review Queue", "Skills", "Hooks"] as const;
 export const TAB_ICONS: Record<string, string> = {
   Projects:      "◉",
-  Tasks:         "▤",
   Findings:      "✦",
   "Review Queue": "◈",
   Skills:        "◆",
@@ -47,5 +46,5 @@ export interface DoctorResultLike {
 }
 
 export function enabledSubViews(store: string, profile?: string): readonly typeof SUB_VIEWS[number][] {
-  return moduleEnabled(store, "tasks", profile) ? SUB_VIEWS : SUB_VIEWS.filter(view => view !== "Tasks");
+  return SUB_VIEWS;
 }

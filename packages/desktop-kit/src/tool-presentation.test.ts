@@ -109,7 +109,7 @@ describe("ToolPresentationTests", () => {
     expect(ToolPresentation.of("Bash", "{\"command\":\"sed -i '' 's/a/b/' ~/work/app/README.md\"}").editedPaths).toEqual(["~/work/app/README.md"]);
     expect(ToolPresentation.of("Bash", "{\"command\":\"touch ./notes/today.md\"}").editsFiles).toBe(true);
     expect(ToolPresentation.of("Bash", "{\"command\":\"touch ./notes/today.md\"}").editedPaths).toEqual(["./notes/today.md"]);
-    const read = ToolPresentation.of("Bash", "{\"command\":\"cat /Users/me/.phren/phren/tasks.md | head\"}");
+    const read = ToolPresentation.of("Bash", "{\"command\":\"cat /Users/me/.phren/phren/FINDINGS.md | head\"}");
     expect(read.editsFiles).toBe(false); expect(read.editedPaths).toEqual([]);
   });
 });

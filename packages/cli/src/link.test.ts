@@ -723,66 +723,9 @@ describe("link", () => {
       expect(policyCheck!.ok).toBe(false);
     });
 
-    it("checkData validates task format", async () => {
-      // Need a profile for getProjectDirs to work
-      const profilesDir = path.join(phrenPath, "profiles");
-      fs.mkdirSync(profilesDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(profilesDir, "test.yaml"),
-        yaml.dump({ name: "test", description: "Test", projects: ["doc-proj"] })
-      );
-      fs.writeFileSync(
-        path.join(phrenPath, "machines.yaml"),
-        `${getMachineName()}: test\n`
-      );
 
-      const projDir = path.join(phrenPath, "doc-proj");
-      fs.mkdirSync(projDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(projDir, "tasks.md"),
-        "# doc-proj Task\n\n## Active\n\n- Task one\n\n## Queue\n\n## Done\n\n"
-      );
 
-      const result = await runDoctor(phrenPath, false, true);
-      const tasksCheck = result.checks.find(c => c.name === "data:tasks:doc-proj");
-      expect(tasksCheck).toBeDefined();
-      expect(tasksCheck!.ok).toBe(true);
-    });
 
-    it("checkData flags task items whose specific terms do not match repo/docs", async () => {
-      initTestPhrenRoot(phrenPath);
-      const profilesDir = path.join(phrenPath, "profiles");
-      const projectsRoot = path.join(tmpRoot, "projects");
-      process.env.PROJECTS_DIR = projectsRoot;
-      fs.mkdirSync(projectsRoot, { recursive: true });
-      fs.mkdirSync(profilesDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(profilesDir, "test.yaml"),
-        yaml.dump({ name: "test", description: "Test", projects: ["doc-proj"] })
-      );
-      fs.writeFileSync(
-        path.join(phrenPath, "machines.yaml"),
-        `${getMachineName()}: test\n`
-      );
-
-      const projDir = path.join(phrenPath, "doc-proj");
-      fs.mkdirSync(projDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(projDir, "tasks.md"),
-        "# doc-proj Task\n\n## Active\n\n- Refactor `shell-view.ts` selection rendering\n\n## Queue\n\n- Improve chart interface with bubble details and device type filters\n\n## Done\n\n"
-      );
-
-      const repoDir = path.join(projectsRoot, "doc-proj");
-      fs.mkdirSync(path.join(repoDir, "src"), { recursive: true });
-      fs.writeFileSync(path.join(repoDir, "src", "shell-view.ts"), "export const shellView = true;\n");
-
-      const result = await runDoctor(phrenPath, false, true);
-      const hygieneCheck = result.checks.find(c => c.name === "data:task-hygiene:doc-proj");
-      expect(hygieneCheck).toBeDefined();
-      expect(hygieneCheck!.ok).toBe(false);
-      expect(hygieneCheck!.detail).toContain("suspect task");
-      expect(hygieneCheck!.detail).toContain("Q1");
-    });
 
     it("checkData validates findings format", async () => {
       const profilesDir = path.join(phrenPath, "profiles");
@@ -860,88 +803,9 @@ describe("link", () => {
       expect(result.checks.find((c) => c.name === "codex-hooks")?.ok).toBe(true);
     });
 
-    it("detects zombie blocked tasks and reports without --fix", async () => {
-      const profilesDir = path.join(phrenPath, "profiles");
-      fs.mkdirSync(profilesDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(profilesDir, "test.yaml"),
-        yaml.dump({ name: "test", description: "T", projects: ["zproj"] })
-      );
-      fs.writeFileSync(path.join(phrenPath, "machines.yaml"), `${getMachineName()}: test\n`);
-      const projDir = path.join(phrenPath, "zproj");
-      fs.mkdirSync(projDir, { recursive: true });
-      fs.writeFileSync(path.join(projDir, "phren.project.yaml"), "ownership: detached\n");
-      fs.writeFileSync(path.join(projDir, "tasks.md"), [
-        "# zproj tasks",
-        "",
-        "## Active",
-        "",
-        "- [ ] Real task that should stay <!-- bid:aaaaaaaa rank:1 -->",
-        "  Context: Some real context",
-        "- [ ] Zombie one <!-- bid:bbbbbbbb rank:2 -->",
-        "  Context: Blocked: Command failed: git add -A",
-        "- [ ] Zombie two <!-- bid:cccccccc rank:3 -->",
-        "  Context: Blocked: Command failed: git commit",
-        "",
-        "## Queue",
-        "",
-        "## Done",
-        "",
-      ].join("\n"));
 
-      const result = await runDoctor(phrenPath, false);
-      const zombieCheck = result.checks.find((c) => c.name === "zombie-blocked-tasks");
-      expect(zombieCheck).toBeDefined();
-      expect(zombieCheck!.ok).toBe(false);
-      expect(zombieCheck!.detail).toContain("2 zombie");
-      // File untouched without --fix.
-      const after = fs.readFileSync(path.join(projDir, "tasks.md"), "utf8");
-      expect(after).toContain("Zombie one");
-      expect(after).toContain("Zombie two");
-    });
 
-    it("--fix archives zombie blocked tasks to Done", async () => {
-      const profilesDir = path.join(phrenPath, "profiles");
-      fs.mkdirSync(profilesDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(profilesDir, "test.yaml"),
-        yaml.dump({ name: "test", description: "T", projects: ["zproj"] })
-      );
-      fs.writeFileSync(path.join(phrenPath, "machines.yaml"), `${getMachineName()}: test\n`);
-      const projDir = path.join(phrenPath, "zproj");
-      fs.mkdirSync(projDir, { recursive: true });
-      fs.writeFileSync(path.join(projDir, "phren.project.yaml"), "ownership: detached\n");
-      fs.writeFileSync(path.join(projDir, "tasks.md"), [
-        "# zproj tasks",
-        "",
-        "## Active",
-        "",
-        "- [ ] Real task <!-- bid:aaaaaaaa rank:1 -->",
-        "  Context: Some real context",
-        "- [ ] Zombie <!-- bid:bbbbbbbb rank:2 -->",
-        "  Context: Blocked: Command failed: git add -A",
-        "",
-        "## Queue",
-        "",
-        "## Done",
-        "",
-      ].join("\n"));
 
-      const result = await runDoctor(phrenPath, true);
-      const zombieCheck = result.checks.find((c) => c.name === "zombie-blocked-tasks");
-      expect(zombieCheck).toBeDefined();
-      expect(zombieCheck!.ok).toBe(true);
-      expect(zombieCheck!.detail).toContain("archived 1");
-
-      const after = fs.readFileSync(path.join(projDir, "tasks.md"), "utf8");
-      // Active still has the real task.
-      expect(after).toMatch(/## Active[\s\S]*Real task/);
-      // Done has the archived zombie marked [x] with the phren-managed comment.
-      expect(after).toMatch(/## Done[\s\S]*- \[x\] Zombie[\s\S]*phren: archived zombie git-failure block/);
-      // Active no longer contains the zombie.
-      const activeSection = after.split("## Queue")[0];
-      expect(activeSection).not.toContain("Zombie");
-    });
   });
 
   describe("skill frontmatter validation (#294, #298)", () => {
@@ -1117,7 +981,7 @@ hooks:
 
     it("updateFileChecksums creates checksum store", () => {
       const result = updateFileChecksums(phren);
-      expect(result.updated).toBe(2);
+      expect(result.updated).toBe(1);
       const storePath = path.join(phren, ".config", "file-checksums.json");
       expect(fs.existsSync(storePath)).toBe(true);
       const store = JSON.parse(fs.readFileSync(storePath, "utf8"));

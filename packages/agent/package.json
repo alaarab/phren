@@ -1,7 +1,7 @@
 {
   "name": "@phren/agent",
-  "version": "0.3.100",
-  "description": "phren's coding agent: starts every session knowing your project's memory, tasks and decisions",
+  "version": "0.4.0",
+  "description": "phren's coding agent: starts every session knowing your project's memory and decisions",
   "type": "module",
   "bin": {
     "phren-agent": "dist/bin.js"

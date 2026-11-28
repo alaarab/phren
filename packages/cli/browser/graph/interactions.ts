@@ -168,7 +168,7 @@ export function selectNode(nodeId: string): boolean {
   flyToNode(fgNode, 800);
   // The node's screen position changes throughout the camera flight. Re-anchor
   // the contextual pane after the camera settles so it cannot end up covering
-  // the newly selected finding/task/fragment.
+  // the newly selected finding/fragment.
   cancelProjectPaneReveal();
   projectPaneTimer = setTimeout(() => {
     projectPaneTimer = null;

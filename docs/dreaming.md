@@ -80,30 +80,6 @@ All prompt inputs (including memory, page summaries, journal and commit subjects
 
 OpenCode plugin transcripts use session directory metadata when available. Sessions without a resolvable directory are skipped and reported; the transcript watermark is held back so they can be collected later. The last-run marker has one writer inside the engine's project lock, including its completion time (`at`) and manual/scheduled trigger.
 
-## Stale tasks and the weekly task audit
-
-Before it collects anything, a scheduled dream returns the project's stale
-Active tasks (untouched for 24 hours) to the Queue, releases their claims and
-notes why in their context. It does this without the model and even when there
-is nothing to dream about; a manual or dry-run dream leaves tasks alone. The
-result's `requeued` counts them. `PHREN_TASK_STALE=off` turns it off. See
-[settling tasks](task-responsibility.md#settling-tasks).
-
-The Hook also runs a weekly task audit for every project whose dreaming is
-enabled, inside the same window and only when no agent works in the project. It
-sends at most 40 open tasks to the project's helper model with the
-`phren-task-audit` skill's rules, the ones not audited longest first, and asks
-for one verdict per task. A `done` verdict with evidence closes the task with a
-`Weekly audit <date>: done: <evidence>` note; `partial` and `obsolete` add a
-dated note; `valid` and `unresolved` change nothing. No task is ever removed.
-Runs are recorded under `<project>/task-audits/`. `PHREN_TASK_AUDIT=off` stops
-the ticker.
-
-```bash
-phren task audit --project my-app --dry-run   # the verdicts, nothing changed
-phren task audit --project my-app             # apply them now
-```
-
 ## What a dream can change
 
 Each change in a dream's changeset is one of:

@@ -29,10 +29,6 @@ function git(cwd: string, ...args: string[]): string {
   }).trim();
 }
 
-const task = (bid: string, text: string, done = false, context = "") =>
-  `- [${done ? "x" : " "}] ${text} <!-- bid:${bid} rank:1 created:2026-10-01T00:00:00.000Z scope:shared -->${context ? `\n  Context: ${context}` : ""}`;
-const tasks = (active: string[], queue: string[], done: string[] = []) =>
-  ["# demo tasks", "", "## Active", "", ...active, "", "## Queue", "", ...queue, "", "## Done", "", ...done, ""].join("\n");
 const summary = (stamp: string, body: string) =>
   `# demo\n\nHand-written intro.\n\n<!-- phren:knows:start at=${stamp} -->\n## What phren knows\n\n${body}\n<!-- phren:knows:end -->\n`;
 
@@ -52,7 +48,6 @@ function stores() {
   };
   const mini = clone("mini");
   writeFile(path.join(mini, ".gitignore"), ".runtime/\n.sessions/\n");
-  writeFile(path.join(mini, "demo", "tasks.md"), tasks([], [task("aaaa0001", "Ship it"), task("bbbb0002", "Fix sync")]));
   writeFile(path.join(mini, "demo", "FINDINGS.md"), "# demo Findings\n\n## 2026-10-01\n\n- Base finding <!-- fid:f0000001 -->\n");
   writeFile(path.join(mini, "demo", "summary.md"), summary("2026-10-01T00:00:00.000Z", "- 1 finding."));
   git(mini, "add", ".");
@@ -69,32 +64,10 @@ function commitAll(repo: string, message: string): void {
 describe("syncStore with real Git clones", () => {
   it("reconciles diverged history without losing either side and reports it", async () => {
     const { mini, macbook } = stores();
-    // A task archive past 1 MiB, the size at which reading a conflict side once failed.
-    const archive = path.join(".config", "task-archive", "demo.md");
-    const archived = Array.from({ length: 9000 }, (_, i) => task(`d${String(i).padStart(7, "0")}`, `Archived work item ${i} ${"x".repeat(80)}`, true));
-    writeFile(path.join(mini, archive), ["# demo tasks archive", "", "## 2026-09-01T00:00:00.000Z", "", ...archived, ""].join("\n"));
-    commitAll(mini, "archive");
-    git(mini, "push", "--quiet");
-    git(macbook, "pull", "--quiet");
-    expect(fs.statSync(path.join(macbook, archive)).size).toBeGreaterThan(1024 * 1024);
-    fs.appendFileSync(path.join(mini, archive), `\n## 2026-10-02T00:00:00.000Z\n\n${task("eeee0005", "Archived on the Mini", true)}\n`);
-    fs.appendFileSync(path.join(macbook, archive), `\n## 2026-10-03T00:00:00.000Z\n\n${task("ffff0006", "Archived on the MacBook", true)}\n`);
-    // The Mini moves a task to Active but leaves its Queue copy behind (the
-    // duplicate that kept every computer diverged), edits a task, adds a
-    // finding and regenerates the summary.
-    writeFile(path.join(mini, "demo", "tasks.md"), tasks(
-      [task("aaaa0001", "Ship it", false, "release notes drafted")],
-      [task("aaaa0001", "Ship it"), task("bbbb0002", "Fix sync on Linux")],
-    ));
     fs.appendFileSync(path.join(mini, "demo", "FINDINGS.md"), "- Mini finding <!-- fid:f0000002 -->\n");
     writeFile(path.join(mini, "demo", "summary.md"), summary("2026-10-02T00:00:00.000Z", "- 2 findings (mini)."));
     commitAll(mini, "mini");
     git(mini, "push", "--quiet");
-    // The MacBook, offline meanwhile, completes one task, adds another and
-    // a finding, and regenerates the same summary block differently.
-    writeFile(path.join(macbook, "demo", "tasks.md"), tasks(
-      [], [task("bbbb0002", "Fix sync"), task("cccc0003", "Write docs")], [task("aaaa0001", "Ship it", true)],
-    ));
     fs.appendFileSync(path.join(macbook, "demo", "FINDINGS.md"), "- MacBook finding <!-- fid:f0000003 -->\n");
     writeFile(path.join(macbook, "demo", "summary.md"), summary("2026-10-03T00:00:00.000Z", "- 2 findings (macbook)."));
     commitAll(macbook, "macbook");
@@ -109,20 +82,13 @@ describe("syncStore with real Git clones", () => {
     expect(outcome.backupRef?.startsWith(BACKUP_REF_PREFIX)).toBe(true);
     expect(git(macbook, "rev-parse", outcome.backupRef!)).not.toBe(git(macbook, "rev-parse", "HEAD"));
 
-    const merged = fs.readFileSync(path.join(macbook, "demo", "tasks.md"), "utf8");
-    expect(merged.match(/bid:aaaa0001/g)).toHaveLength(1);
-    expect(merged).toContain("- [x] Ship it");
-    expect(merged).toContain("Fix sync on Linux");
-    expect(merged).toContain("Write docs");
-    const archiveText = fs.readFileSync(path.join(macbook, archive), "utf8");
-    for (const bid of ["d0000000", "d0008999", "eeee0005", "ffff0006"]) expect(archiveText).toContain(`bid:${bid}`);
     const findings = fs.readFileSync(path.join(macbook, "demo", "FINDINGS.md"), "utf8");
     for (const fid of ["f0000001", "f0000002", "f0000003"]) expect(findings).toContain(fid);
     // The generated block takes the remote's copy, the hand-written part stays.
     const knows = fs.readFileSync(path.join(macbook, "demo", "summary.md"), "utf8");
     expect(knows).toContain("(mini)");
     expect(knows).toContain("Hand-written intro.");
-    for (const file of ["tasks.md", "FINDINGS.md", "summary.md"]) {
+    for (const file of ["FINDINGS.md", "summary.md"]) {
       expect(fs.readFileSync(path.join(macbook, "demo", file), "utf8")).not.toMatch(/^(<{7}|>{7})/m);
     }
 
@@ -133,7 +99,6 @@ describe("syncStore with real Git clones", () => {
 
     // The other computer converges on the same content.
     expect((await syncStore(mini, { source: "test" })).status).toBe("updated");
-    expect(fs.readFileSync(path.join(mini, "demo", "tasks.md"), "utf8")).toBe(merged);
   });
 
   it("switches a GitHub SSH remote whose key is refused to HTTPS through gh", async () => {

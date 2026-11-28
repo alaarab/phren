@@ -4,7 +4,7 @@ Scheduled prompts let Phren run an agent on a chosen computer at a local time. T
 
 ## Store format
 
-Each project may contain `schedules.yaml` beside `tasks.md`:
+Each project may contain `schedules.yaml` in its store directory:
 
 ```yaml
 version: 1

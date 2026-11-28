@@ -250,7 +250,7 @@ async function main() {
   // Tools Claude reaches for during normal work in the full profile. Marked
   // anthropic/alwaysLoad so Claude Code keeps their schemas resident instead of
   // deferring them behind ToolSearch. The core profile marks all of its tools.
-  const ALWAYS_LOAD_TOOLS = ["add_note", "complete_task", "session_start", "session_end", "get_findings"];
+  const ALWAYS_LOAD_TOOLS = ["add_note", "session_start", "session_end", "get_findings"];
 
   // Every module registers its tools as before; the gate decides what the
   // client sees. `core` (the default) exposes ten tools and folds the rest
@@ -329,7 +329,6 @@ async function main() {
   const codeAvailable = hasModule("code") && !!(await (await import("./modules/code-package.js")).loadCodePackage(phrenPath));
   const toolModules = await Promise.all([
     import("./tools/search.js"),
-    ...(hasModule("tasks") ? [import("./tools/tasks.js")] : []),
     import("./tools/finding.js"),
     import("./tools/memory.js"),
     import("./tools/data.js"),

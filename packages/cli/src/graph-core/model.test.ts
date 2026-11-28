@@ -36,7 +36,7 @@ const noStoreColor = () => null;
 
 function filters(overrides: Partial<GraphFilters> = {}): GraphFilters {
   return {
-    filterTypes: { project: true, finding: true, task: true, entity: true, reference: true, topic: true, note: true },
+    filterTypes: { project: true, finding: true, entity: true, reference: true, topic: true, note: true },
     filterTopics: {},
     filterHealth: "all",
     filterProject: "all",
@@ -52,7 +52,6 @@ const RAW: RawNode[] = [
   { id: "p:api", label: "api", group: "project", project: "api" },
   { id: "f:1", label: "Retry uses jitter", group: "topic:architecture", project: "harbor", topicSlug: "architecture", scoreKey: "harbor/1", tagged: true },
   { id: "f:2", label: "Retries capped at 5", group: "topic:debugging", project: "harbor", topicSlug: "debugging" },
-  { id: "t:1", label: "Ship retry docs", group: "task-active", project: "harbor", section: "Active", priority: "high" },
   { id: "e:1", label: "PolicyRetry", group: "entity", entityType: "class", refCount: 14, refDocs: [{ doc: "harbor/FINDINGS.md", project: "harbor" }, { doc: "api/FINDINGS.md", project: "api" }] },
   { id: "r:1", label: "policies.md", group: "reference", project: "api", refDocs: [{ doc: "api/reference/retry-policy.md" }] },
 ];
@@ -60,7 +59,6 @@ const RAW: RawNode[] = [
 const LINKS: RawLink[] = [
   { source: "p:harbor", target: "f:1" },
   { source: "p:harbor", target: "f:2" },
-  { source: "p:harbor", target: "t:1" },
   { source: "e:1", target: "p:harbor" },
   { source: "e:1", target: "p:api" },
   { source: "p:api", target: "r:1" },
@@ -84,15 +82,14 @@ function model(): GraphModel {
 describe("deriveKind + normalizeNode", () => {
   it("maps every group prefix the builder emits", () => {
     const kinds = RAW.map((node) => deriveKind(node));
-    expect(kinds).toEqual(["project", "project", "finding", "finding", "task", "entity", "reference"]);
+    expect(kinds).toEqual(["project", "project", "finding", "finding", "entity", "reference"]);
     expect(deriveKind({ id: "x", label: "x", group: "mystery" })).toBe("other");
   });
 
-  it("colours findings by topic, tasks by section, and stores by assigner", () => {
+  it("colours findings by topic and stores by assigner", () => {
     const assigner = new StoreColorAssigner();
     const byId = new Map(RAW.map((node) => [node.id, normalizeNode(node, {}, (s) => assigner.color(s))] as const));
     expect(byId.get("f:1")!.baseColor).toBe(TOPIC_COLORS.architecture);
-    expect(byId.get("t:1")!.baseColor).toBe(KIND_COLORS["task-active"]);
     expect(byId.get("p:harbor")!.baseColor).toBe(KIND_COLORS.project);
     const team = normalizeNode({ id: "p:t", label: "t", group: "project", store: "team" }, {}, (s) => assigner.color(s));
     expect(team.baseColor).toBe(STORE_COLORS[1]);
@@ -127,7 +124,7 @@ describe("adjacency + detail", () => {
   it("ignores links to unknown ids and counts neighbours by kind", () => {
     const m = model();
     expect(m.fullAdjacency.get("p:harbor")!.has("ghost")).toBe(false);
-    expect(connectionCounts(m, "p:harbor")).toEqual({ total: 4, projects: 0, findings: 2, tasks: 1, entities: 1, references: 0, topics: 0, notes: 0 });
+    expect(connectionCounts(m, "p:harbor")).toEqual({ total: 3, projects: 0, findings: 2, entities: 1, references: 0, topics: 0, notes: 0 });
     expect(connectionCounts(m, "e:1").projects).toBe(2);
   });
 
@@ -166,14 +163,14 @@ describe("topic and note kinds", () => {
     expect(note.forceLabel).toBe(false);
   });
 
-  it("walk findings, then tasks, then notes, and back", () => {
+  it("walk findings, then notes, and back", () => {
     const nodes: RawNode[] = [...RAW, NOTE, { id: "n:2", label: "older", group: "note", project: "harbor", date: "2026-09-01" }];
     const ranked = rankedProjectIds(nodes, "harbor");
-    expect(ranked).toEqual(["f:1", "f:2", "t:1", "n:1", "n:2"]);
-    expect(stepRanked(ranked, "t:1", 1)).toBe("n:1");
+    expect(ranked).toEqual(["f:1", "f:2", "n:1", "n:2"]);
+    expect(stepRanked(ranked, "f:2", 1)).toBe("n:1");
     expect(stepRanked(ranked, "n:1", 1)).toBe("n:2");
     expect(stepRanked(ranked, "n:2", 1)).toBe("f:1");
-    expect(stepRanked(ranked, "n:1", -1)).toBe("t:1");
+    expect(stepRanked(ranked, "n:1", -1)).toBe("f:2");
   });
 
   it("stay visible under the default filters", () => {
@@ -212,7 +209,7 @@ describe("filters + visibility", () => {
 
   it("hides project nodes with no visible edges once projects are filtered out", () => {
     const m = model();
-    const noProjects = filters({ filterTypes: { project: false, finding: true, task: true, entity: true, reference: true, topic: true, note: true } });
+    const noProjects = filters({ filterTypes: { project: false, finding: true, entity: true, reference: true, topic: true, note: true } });
     const visible = buildVisibleData(m, noProjects, null);
     expect(visible.nodes.some((node) => node.kind === "project")).toBe(false);
   });
@@ -274,7 +271,7 @@ describe("the node cap under a real-sized store", () => {
         raw.push({ id: `${name}:f${i}`, label: `${name} finding ${i}`, group: "topic:architecture", project: name, topicSlug: "architecture" });
       }
       for (let i = 0; i < tasksEach; i++) {
-        raw.push({ id: `${name}:t${i}`, label: `${name} task ${i}`, group: "task-active", project: name, section: "Active" });
+        raw.push({ id: `${name}:t${i}`, label: `${name} task ${i}`, group: "reference", project: name, section: "Active" });
       }
     }
     raw.push({ id: "e:shared", label: "RetryPolicy", group: "entity", refCount: 40 });
@@ -310,12 +307,12 @@ describe("the node cap under a real-sized store", () => {
     expect(visible.nodes.length).toBeLessThanOrEqual(350 + 1); // +1 for a selected node
   });
 
-  it("keeps tasks visible instead of letting findings crowd them out", () => {
+  it("keeps references visible instead of letting findings crowd them out", () => {
     const model = bigStore();
     const visible = buildVisibleData(model, filters({ nodeLimit: 350 }), null);
     const kinds = new Set(visible.nodes.map((node) => node.kind));
     expect(kinds).toContain("finding");
-    expect(kinds).toContain("task");
+    expect(kinds).toContain("reference");
     expect(kinds).toContain("project");
   });
 

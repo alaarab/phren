@@ -71,9 +71,7 @@ export function createDetail(ctx) {
     work.append(el("h2", "section-label", "Open work"));
     const chips = el("div", "pj-chips");
     const findings = project.counts?.findings ?? 0;
-    const tasks = project.counts?.tasks ?? 0;
     chips.append(el("span", "pj-chip", countOf(findings, "finding")));
-    chips.append(el("span", "pj-chip", countOf(tasks, "open task")));
     work.append(chips);
     scope.append(work);
 

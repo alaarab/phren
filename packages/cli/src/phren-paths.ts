@@ -63,7 +63,7 @@ export interface AtomicWriteOptions {
 
 /**
  * Windows refuses to replace a file another process holds open (an MCP server
- * or hook reading the same tasks.md or FINDINGS.md) with EPERM, EACCES or
+ * or hook reading the same FINDINGS.md) with EPERM, EACCES or
  * EBUSY, where POSIX replaces it atomically. Readers hold it for
  * milliseconds, so retry briefly before giving up. bridge/protocol.ts does
  * the same for the Hook's async writes. `from` is a temp file: when the
@@ -751,7 +751,7 @@ export function computePhrenLiveStateToken(phrenPath: string): string {
   for (const projectDir of projectDirs) {
     const project = path.basename(projectDir);
     parts.push(`project:${project}`);
-    for (const file of ["AGENTS.md", "summary.md", FINDINGS_FILENAME, "tasks.md", "review.md", "truths.md", "topic-config.json", "phren.project.yaml"]) {
+    for (const file of ["AGENTS.md", "summary.md", FINDINGS_FILENAME, "review.md", "truths.md", "topic-config.json", "phren.project.yaml"]) {
       pushFileToken(parts, path.join(projectDir, file));
     }
     pushDirTokens(parts, path.join(projectDir, "reference"));

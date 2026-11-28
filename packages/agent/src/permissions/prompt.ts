@@ -29,7 +29,7 @@ const CYAN = "\x1b[36m";
 
 type Risk = "read" | "write" | "dangerous";
 
-const READ_TOOLS = new Set(["read_file", "glob", "grep", "git_status", "git_diff", "phren_search", "phren_get_tasks"]);
+const READ_TOOLS = new Set(["read_file", "glob", "grep", "git_status", "git_diff", "phren_search"]);
 const DANGEROUS_TOOLS = new Set(["shell"]);
 
 function classifyRisk(toolName: string): Risk {
@@ -103,8 +103,6 @@ function summarizeCall(toolName: string, input: Record<string, unknown>): string
     }
     case "phren_add_finding":
       return `Save finding to phren`;
-    case "phren_complete_task":
-      return `Complete phren task`;
     default: {
       const keys = Object.keys(input);
       return keys.length > 0 ? `${toolName}(${keys.join(", ")})` : toolName;

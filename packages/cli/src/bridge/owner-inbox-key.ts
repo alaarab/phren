@@ -8,5 +8,4 @@ export function ownerInboxKey(item: Json, computer: string): string | undefined 
     return JSON.stringify([computer.toLowerCase(), target.server, target.workspace, target.tab, target.pane,
       target.source, target.session ?? target.startingToken, item.actionId ?? "waiting"]);
   }
-  if (typeof item.source === "string" && item.source.startsWith("task-stale:")) return item.source;
 }

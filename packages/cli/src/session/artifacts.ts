@@ -13,7 +13,7 @@ import {
   writeSessionStateFile,
 } from "./utils.js";
 
-export type SessionCounterField = "findingsAdded" | "tasksCompleted";
+export type SessionCounterField = "findingsAdded";
 
 export interface SessionSummaryRecord {
   summary: string;
@@ -230,7 +230,6 @@ export function startSessionRecord(phrenPath: string, options: StartSessionOptio
     agentScope: options.agentScope,
     startedAt: new Date().toISOString(),
     findingsAdded: 0,
-    tasksCompleted: 0,
     hookCreated: options.hookCreated,
     agentCreated: options.agentCreated,
   };
@@ -258,7 +257,6 @@ export function endSessionRecord(phrenPath: string, sessionId: string, summary?:
         endedAt: new Date().toISOString(),
         summary: normalizedSummary ?? current.summary,
         findingsAdded: Number.isFinite(current.findingsAdded) ? current.findingsAdded : 0,
-        tasksCompleted: Number.isFinite(current.tasksCompleted) ? current.tasksCompleted : 0,
       };
 
       writeSessionStateFile(file, nextState);
@@ -293,8 +291,6 @@ export function incrementSessionStateCounter(
       const currentValue = Number.isFinite(current[field]) ? current[field] : 0;
       writeSessionStateFile(file, {
         ...current,
-        findingsAdded: Number.isFinite(current.findingsAdded) ? current.findingsAdded : 0,
-        tasksCompleted: Number.isFinite(current.tasksCompleted) ? current.tasksCompleted : 0,
         [field]: currentValue + count,
       });
     });

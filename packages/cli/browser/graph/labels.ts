@@ -7,7 +7,7 @@ import { esc, focusMode, nodeRadius, scoreForNode, state } from "./state.js";
 
 // DOM labels via CSS2DRenderer: crisp at any zoom, CSP-safe in both hosts
 // (pure DOM + CSS transforms, no workers, no eval). Projects get an eager
-// always-on label; findings/tasks/refs draw from a fixed pool assigned by
+// always-on label; findings/refs draw from a fixed pool assigned by
 // camera distance so "zoom in to read" is a real interaction with a hard
 // cap on live DOM nodes. Every frame the shared resolver in graph-core
 // projects those labels to screen space: group labels always win, leaves
@@ -77,7 +77,6 @@ const LABEL_CSS = `
   box-shadow:0 0 7px var(--pc,#7c9cff);
 }
 .phren-label--entity{color:#9fd6f0}
-.phren-label--task{color:#b7ecc9}
 `;
 
 export function injectLabelCss(): void {

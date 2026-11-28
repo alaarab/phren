@@ -157,8 +157,6 @@ function iconForType(type?: string): string {
       return "lightbulb";
     case "reference":
       return "book";
-    case "task":
-      return "checklist";
     case "skill":
       return "tools";
     case "summary":

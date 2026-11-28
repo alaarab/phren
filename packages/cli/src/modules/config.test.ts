@@ -14,7 +14,7 @@ const names = (profile?: string) => enabled(tmp.path, profile).map(module => mod
 describe("module configuration writes", () => {
   it("preserves unrelated overrides and distinguishes store and profile sources", () => {
     setModuleEnabled(tmp.path, "git", true);
-    setModuleEnabled(tmp.path, "tasks", false, "personal");
+    setModuleEnabled(tmp.path, "code", false, "personal");
     setModuleEnabled(tmp.path, "schedules", true, "work");
     expect(names()).toEqual(["memory", "git"]);
     expect(names("personal")).toEqual(["memory", "git"]);
@@ -22,7 +22,7 @@ describe("module configuration writes", () => {
     const config = readConfig(tmp.path);
     expect(moduleSource(config, "memory", "work")).toBe("default");
     expect(moduleSource(config, "git", "work")).toBe("store");
-    expect(moduleSource(config, "tasks", "personal")).toBe("profile");
+    expect(moduleSource(config, "code", "personal")).toBe("profile");
     expect(fs.existsSync(path.join(tmp.path, ".config", "modules.yaml.lock"))).toBe(false);
   });
 
@@ -41,7 +41,7 @@ describe("module configuration writes", () => {
     expect(() => setModuleEnabled(tmp.path, "conductor", true)).toThrow('requires enabled module "hook"');
     const file = path.join(tmp.path, ".config", "modules.yaml");
     fs.writeFileSync(file, "version: 2\n");
-    expect(() => setModuleEnabled(tmp.path, "tasks", false)).toThrow("Invalid");
+    expect(() => setModuleEnabled(tmp.path, "code", false)).toThrow("Invalid");
     expect(fs.readFileSync(file, "utf8")).toBe("version: 2\n");
   });
 
@@ -49,7 +49,7 @@ describe("module configuration writes", () => {
     initializeModules(tmp.path);
     migrateModules(tmp.path, true);
     expect(names()).toEqual(["memory"]);
-    setModuleEnabled(tmp.path, "tasks", false);
+    setModuleEnabled(tmp.path, "code", false);
     migrateModules(tmp.path, true);
     expect(names()).toEqual(["memory"]);
   });
@@ -58,14 +58,14 @@ describe("module configuration writes", () => {
     fs.mkdirSync(path.join(tmp.path, "demo"));
     fs.writeFileSync(path.join(tmp.path, "demo", "tasks.md"), "- [ ] Retained\n");
     migrateModules(tmp.path, true);
-    expect(names()).toEqual(["memory", "tasks", "hook", "git", "schedules", "conductor"]);
+    expect(names()).toEqual(["memory", "hook", "git", "schedules", "conductor"]);
     const file = path.join(tmp.path, ".config", "modules.yaml");
     const before = fs.readFileSync(file, "utf8");
     migrateModules(tmp.path, true);
     expect(fs.readFileSync(file, "utf8")).toBe(before);
     expect(fs.readFileSync(path.join(tmp.path, ".runtime", "modules.yaml.migration-backup"), "utf8")).toBe(before);
     expect(fs.existsSync(file + ".migration-backup")).toBe(false);
-    setModuleEnabled(tmp.path, "tasks", false);
+    setModuleEnabled(tmp.path, "code", false);
     expect(fs.readFileSync(path.join(tmp.path, "demo", "tasks.md"), "utf8")).toContain("Retained");
   });
 
@@ -81,7 +81,7 @@ it("keeps an unbound legacy Hook host-only without creating a store", () => {
   const snapshot = moduleSnapshot(tmp.path, "", true);
   expect(snapshot.has("hook")).toBe(true);
   expect(snapshot.has("memory")).toBe(false);
-  expect(snapshot.has("tasks")).toBe(false);
+  expect(snapshot.has("code")).toBe(false);
   expect(fs.readdirSync(tmp.path)).toEqual([]);
 });
 
@@ -95,17 +95,4 @@ it("keeps snapshots read-only until legacy runtime activation", async () => {
   expect(fs.existsSync(path.join(tmp.path, ".config", "modules.yaml"))).toBe(false);
   const { activateModules } = await import("./runtime.js");
   expect(activateModules(tmp.path, "").has("git")).toBe(true);
-});
-
-
-it("freezes omitted legacy tasks without changing profile overrides", async () => {
-  fs.mkdirSync(path.join(tmp.path, ".config"));
-  const file = path.join(tmp.path, ".config", "modules.yaml");
-  fs.writeFileSync(file, "version: 1\nenabled:\n  code: true\nprofiles:\n  personal:\n    enabled:\n      tasks: false\n");
-  const { activateModules } = await import("./runtime.js");
-  expect(activateModules(tmp.path, "").modules.map(module => module.name)).toEqual(["memory", "tasks", "code"]);
-  expect(activateModules(tmp.path, "personal").has("tasks")).toBe(false);
-  const frozen = fs.readFileSync(file, "utf8");
-  activateModules(tmp.path, "");
-  expect(fs.readFileSync(file, "utf8")).toBe(frozen);
 });

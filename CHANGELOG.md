@@ -5,17 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-28
+
 ### Added
 
-- Owner Inbox items can carry an `issue` link (`domain/owner/name#N`), accepted by `phren owner-inbox add --issue`, `owner_inbox` and the Hook add route. It is stored inside the item's title (`" (issue: <ref>)"`), so a 0.3.100 Hook and older phones keep reading every row; readers that ask for it (`issues=1`) receive the structured field instead. A linked title is stored whole: one that does not fit beside the link (500 characters together) is refused with 400 rather than trimmed. Capability `ownerInboxIssues`.
-- Forge issues core for GitHub and gitboy, with project repository lookup, checklists, and computer claims.
-- The phone's forge issue routes (`GET /v1/issues`, `GET /v1/issues/item`, `POST /v1/issues/{create,edit,comment,claim,close}`, capability `issues: 1`). They are owner-only, the writes are owner-proof signed, and a list covers every store project's repository when none is named. List bodies are trimmed to 2,000 characters and the answer stays under 256 KB; forge failures map to stable HTTP statuses.
-- Dispatches can bind to a forge issue, give workers its closing instructions, and post each reported PR link once per Hook.
-- `phren issue list|show|new|edit|claim|comment|close` and the `list_issues`, `get_issue`, `create_issue`, `update_issue`, `claim_issue`, `comment_issue` and `close_issue` MCP tools.
+- Manage GitHub and gitboy issues through `phren issue`, MCP, and the owner-only `/v1/issues` Hook routes. Create and edit issues with checklists, claim them for a computer, comment, and close them.
+- Dispatches can carry a forge issue. The worker brief asks for one summary comment and a closing reference in its PR. Dispatch returns show the issue and `dispatch_report` posts each PR link once.
+- Owner Inbox items can link to a forge issue through the CLI, MCP, and Hook.
 
-### Changed
+### Removed
 
-- Phren tasks are retired and read-only. `get_tasks` and the read-only task views still work; `add_task`, every `manage_task` action and the full-profile task writers, `phren task` write subcommands and the Hook's `/v1/tasks/{create,update,save,launch}` routes return code `tasks-retired` (the routes as HTTP 410) with a message pointing to forge issues, the owner Inbox and `phren migrate tasks`. The Stop hook no longer nags about open tasks, the prompt hook no longer captures tasks, the weekly task audit and stale-task inbox source are off, and the conductor, fanout and docs now use forge issues (`phren issue` / `create_issue`, PRs say `Closes repo#N`). See [issues](docs/issues.md).
+- Phren's local Tasks feature across the CLI, Hook, editor extension, desktop, and plugins. Existing `tasks.md` files stay on disk and are unused. The Tasks screen in older phone apps stops working when connected to a 0.4.0 Hook.
 
 ## [0.3.100] - 2026-11-27
 

@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as path from "path";
 import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
 import { register as registerSearch } from "../tools/search.js";
-import { register as registerTasks } from "../tools/tasks.js";
 import { buildIndex, extractSnippet, type SqlJsDatabase } from "../shared/index.js";
 import { mcpResponse, type McpContext } from "../tools/types.js";
 import {
@@ -75,7 +74,6 @@ describe("tool responses stay within the client budget", () => {
     };
     const server = { registerTool: (name: string, _meta: unknown, handler: ToolHandler) => tools.set(name, handler) };
     registerSearch(server as never, ctx);
-    registerTasks(server as never, ctx);
   });
 
   afterEach(() => {
@@ -122,22 +120,9 @@ describe("tool responses stay within the client budget", () => {
     expect(content.startsWith("# Huge\n")).toBe(true);
   });
 
-  it("get_tasks lists show the latest context and a single lookup returns it whole", async () => {
-    const list = (await call("get_tasks", { project: "proj-1" })).json;
-    const item = list.data.items.Active[0];
-    expect(item.context.length).toBeLessThanOrEqual(LIST_TEXT_MAX_CHARS);
-    expect(item.context.endsWith("latest note")).toBe(true);
-    expect(item.contextTruncated).toBe(true);
 
-    const one = (await call("get_tasks", { project: "proj-1", id: "bid:abcd1234" })).json;
-    expect(one.data.context.endsWith("latest note")).toBe(true);
-    expect(one.data.context.startsWith("note 0 ")).toBe(true);
-  });
 
-  it("get_tasks across projects stays under the list budget", async () => {
-    const { text } = await call("get_tasks", { status: "all", limit: 200, done_limit: 200 });
-    expect(text.length).toBeLessThanOrEqual(LIST_RESPONSE_MAX_CHARS);
-  });
+
 });
 
 describe("mcpResponse safety net", () => {

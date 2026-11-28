@@ -274,13 +274,7 @@ describe("PhrenClient: request shaping (pins what changed recently)", () => {
     expect(withType.params!.arguments).toStrictEqual({ project: "app", note: "n1", findingType: "pitfall" });
   });
 
-  it("getAllTasks omits the project key entirely (global board), unlike getTasks which is project-scoped", async () => {
-    const all = await callAndCapture((c) => c.getAllTasks({ status: "active+queue", limit: 100 }));
-    expect(all.params!.arguments).toStrictEqual({ status: "active+queue", limit: 100 });
 
-    const scoped = await callAndCapture((c) => c.getTasks("app", { status: "all" }));
-    expect(scoped.params!.arguments).toStrictEqual({ project: "app", status: "all" });
-  });
 
   it("toggleHooks only adds tool/project/event keys that were actually supplied", async () => {
     const bare = await callAndCapture((c) => c.toggleHooks(true));
@@ -290,15 +284,7 @@ describe("PhrenClient: request shaping (pins what changed recently)", () => {
     expect(full.params!.arguments).toStrictEqual({ enabled: false, tool: "claude-code", project: "app", event: "PreToolUse" });
   });
 
-  it("linkTaskIssue builds the updates object from only the fields provided (link vs unlink)", async () => {
-    const link = await callAndCapture((c) => c.linkTaskIssue("app", "t1", 42, "https://github.com/x/y/issues/42"));
-    expect(link.params!.arguments).toStrictEqual({
-      project: "app", item: "t1", updates: { github_issue: 42, github_url: "https://github.com/x/y/issues/42" },
-    });
 
-    const unlink = await callAndCapture((c) => c.linkTaskIssue("app", "t1", undefined, undefined, true));
-    expect(unlink.params!.arguments).toStrictEqual({ project: "app", item: "t1", updates: { unlink_github: true } });
-  });
 
   it("manageReviewItem includes new_text only for edit actions that pass one", async () => {
     const approve = await callAndCapture((c) => c.manageReviewItem("app", "some line", "approve"));

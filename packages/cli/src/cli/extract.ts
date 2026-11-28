@@ -22,7 +22,7 @@ import { storeAwareProjectPath } from "../store-routing.js";
 import { appendFindingJournal, compactFindingJournals } from "../finding/journal.js";
 import { findingQualityReason } from "../content/quality.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
-import { getProactivityLevelForTask, getProactivityLevelForFindings, shouldAutoCaptureFindingsForLevel } from "../proactivity.js";
+import { getProactivityLevelForFindings, shouldAutoCaptureFindingsForLevel } from "../proactivity.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -487,10 +487,6 @@ export async function handleExtractMemories(
   }
 
   const findingsLevel = getProactivityLevelForFindings(getPhrenPath());
-  const taskLevel = getProactivityLevelForTask(getPhrenPath());
-  if (taskLevel !== "high") {
-    debugLog(`extract-memories task proactivity=${taskLevel}`);
-  }
   if (findingsLevel === "low") {
     appendAuditLog(getPhrenPath(), "extract_memories", `project=${project} skipped=proactivity_low`);
     if (!silent) console.log(`Skipped memory extraction for ${project}: findings proactivity is low.`);

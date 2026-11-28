@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  PROJECT_NAME, findingWriteSchema, isBranchName, isRepoPath, isSearchText, taskCompleteSchema,
+  PROJECT_NAME, findingWriteSchema, isRepoPath, isSearchText, taskCompleteSchema,
 } from "./gitboy-contract.js";
 
 const findingIssues = (body: unknown) => {
@@ -117,68 +117,7 @@ describe("repository-relative paths on gitboy-read routes", () => {
   });
 });
 
-describe("branch names on the gitboy-read tasks route", () => {
-  it("admits ordinary branches, slash-separated branches and dotted names", () => {
-    const cases: Array<[string, string]> = [
-      ["main", "main"],
-      ["an issue branch", "fix/123-login"],
-      ["a slash branch", "feature/foo.bar"],
-      ["a release branch", "release/1.0"],
-      ["a dotted owner", "user.name/feature"],
-      ["a plus", "a+b"],
-      ["an underscore", "a_b"],
-      ["a hyphen", "a-1"],
-      ["a dependabot branch", "dependabot/npm_and_yarn/zod-4.6.5"],
-    ];
-    for (const [label, value] of cases) expect(isBranchName(value), label).toBe(true);
-  });
 
-  it("refuses traversal, dot-prefixed parts and double slashes", () => {
-    const cases: Array<[string, string]> = [
-      ["a double dot", "a..b"],
-      ["a parent segment", "a/../b"],
-      ["a leading parent segment", "../main"],
-      ["a double slash", "a//b"],
-      ["a dot-prefixed name", ".hidden"],
-      ["a dot-prefixed nested part", "feature/.hidden"],
-    ];
-    for (const [label, value] of cases) expect(isBranchName(value), label).toBe(false);
-  });
-
-  it("refuses branch shapes git does not allow", () => {
-    const cases: Array<[string, string]> = [
-      ["a leading hyphen", "-main"],
-      ["a leading slash", "/main"],
-      ["a trailing slash", "main/"],
-      ["a trailing dot", "main."],
-      ["a .lock name", "main.lock"],
-      ["a nested .lock name", "refs/main.lock"],
-    ];
-    for (const [label, value] of cases) expect(isBranchName(value), label).toBe(false);
-  });
-
-  it("refuses spaces, special characters and non-ASCII letters", () => {
-    const cases: Array<[string, string]> = [
-      ["a space", "a b"],
-      ["an at-brace sequence", "a@{b"],
-      ["a tilde", "a~b"],
-      ["a colon", "a:b"],
-      ["a backslash", "a\\b"],
-      ["a caret", "a^b"],
-      ["a question mark", "a?b"],
-      ["a hash", "a#b"],
-      ["an exclamation mark", "a!b"],
-      ["a non-ASCII letter", "máin"],
-    ];
-    for (const [label, value] of cases) expect(isBranchName(value), label).toBe(false);
-  });
-
-  it("bounds a branch name at 200 characters and refuses an empty one", () => {
-    expect(isBranchName("a".repeat(200))).toBe(true);
-    expect(isBranchName("a".repeat(201))).toBe(false);
-    expect(isBranchName("")).toBe(false);
-  });
-});
 
 describe("search text on the gitboy-read search route", () => {
   it("admits text with tabs and newlines, as an error excerpt has", () => {
@@ -332,37 +271,6 @@ describe("the finding body gitboy-write may save", () => {
   it("refuses finding bodies that are not an object", () => {
     for (const [label, body] of [["null", null], ["an array", ["x"]], ["a string", "x"]] as Array<[string, unknown]>) {
       expect(findingWriteSchema.safeParse(body).success, label).toBe(false);
-    }
-  });
-});
-
-describe("the task-completion body gitboy-write may send", () => {
-  it("admits a stable task id", () => {
-    for (const id of ["bid:cccc0001", "bid:00000000"]) expect(taskCompleteSchema.safeParse({ id }).success, id).toBe(true);
-  });
-
-  it("refuses anything but an exact lowercase stable id", () => {
-    const cases: Array<[string, string]> = [
-      ["a task title", "Fix login"],
-      ["uppercase hex", "bid:CCCC0001"],
-      ["seven hex digits", "bid:cccc000"],
-      ["nine hex digits", "bid:cccc00011"],
-      ["a non-hex digit", "bid:cccc000g"],
-      ["no prefix", "cccc0001"],
-      ["another prefix", "task:cccc0001"],
-    ];
-    for (const [label, id] of cases) expect(atPath(taskIssues({ id }), "id"), label).toBeDefined();
-  });
-
-  it("requires exactly an id and nothing else", () => {
-    expect(atPath(taskIssues({ id: "bid:cccc0001", text: "Fix login" }), "")).toBeDefined();
-    expect(atPath(taskIssues({}), "id")).toBeDefined();
-    expect(atPath(taskIssues({ id: 1 }), "id")).toBeDefined();
-  });
-
-  it("refuses task bodies that are not an object", () => {
-    for (const [label, body] of [["null", null], ["an array", ["bid:cccc0001"]], ["a string", "bid:cccc0001"]] as Array<[string, unknown]>) {
-      expect(taskCompleteSchema.safeParse(body).success, label).toBe(false);
     }
   });
 });

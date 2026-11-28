@@ -35,7 +35,7 @@ import { isToolHookEnabled, runPrePromptHooks } from "../hooks.js";
 import { handleExtractMemories } from "./extract.js";
 import { appendAuditLog } from "../shared.js";
 import { updateRuntimeHealth } from "../shared/governance.js";
-import { getProactivityLevel, getProactivityLevelForTask, getProactivityLevelForFindings } from "../proactivity.js";
+import { getProactivityLevel, getProactivityLevelForFindings } from "../proactivity.js";
 import { FINDING_SENSITIVITY_CONFIG } from "./config-policy.js";
 import * as fs from "fs";
 
@@ -59,7 +59,6 @@ export {
 // Retrieval
 export {
   detectTaskIntent,
-  filterTaskByPriority,
   searchDocuments,
   applyTrustFilter,
   rankResults,
@@ -104,8 +103,6 @@ import {
 } from "./hooks-session.js";
 import { approximateTokens, SNIPPET_OVERHEAD_TOKENS } from "../shared/retrieval.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
-import { handleTaskPromptLifecycle } from "../task/lifecycle.js";
-import { TASKS_RETIRED } from "../task/retired.js";
 import { bestFindingNodeId } from "../finding-graph-id.js";
 import { readKnowsBlock } from "../content/summarize.js";
 
@@ -262,28 +259,11 @@ export async function handleHookPrompt() {
         }
       }
     }
-    // Task capture runs even when recall abstains, and its budget pause belongs in the saved trace.
-    const taskLevel = resolvedConfig.proactivity.tasks
-      ?? resolvedConfig.proactivity.base
-      ?? getProactivityLevelForTask(getPhrenPath());
-    // tasks retired (0.4.0): the prompt hook no longer captures tasks.
-    const taskLifecycle = !TASKS_RETIRED && moduleEnabled(getPhrenPath(), "tasks") ? handleTaskPromptLifecycle({
-      phrenPath: getPhrenPath(),
-      prompt,
-      project: detectedProject,
-      sessionId,
-      intent: result.intent,
-      taskLevel,
-      // The primary store's merged budgets, reused only for a project that lives there.
-      resolvedBudgets: { store: getPhrenPath(), budgets: resolvedConfig.retentionPolicy.budgets },
-    }) : { noticeLines: [] };
-    const paused = "budgetPaused" in taskLifecycle ? taskLifecycle.budgetPaused : undefined;
-
     if (result.abstained) {
       if (seen && sessionId) writeRecallSeen(getPhrenPath(), sessionId, seen);
       recordRecallTrace(getPhrenPath(), traceEntryFromResult(getPhrenPath(), prompt, result, [],
-        { session: sessionId, indexMs, taskCapturePaused: paused }));
-      const parts = [...taskLifecycle.noticeLines];
+        { session: sessionId, indexMs }));
+      const parts: string[] = [];
       const prePromptOutput = runPrePromptHooks(getPhrenPath(), raw);
       if (prePromptOutput) parts.unshift(prePromptOutput);
       if (parts.length > 0) console.log(parts.join("\n"));
@@ -344,7 +324,7 @@ export async function handleHookPrompt() {
     recordRecallTrace(getPhrenPath(), traceEntryFromResult(getPhrenPath(), prompt, result,
       budgetSelected.map((s, i) => ({ project: s.doc.project, filename: s.doc.filename, type: s.doc.type, path: s.doc.path, key: s.key,
         ...(clanker && i < COMPACT_INDEX_ROWS ? { id: compactRowId(s, getPhrenPath()) } : {}) })),
-      { session: sessionId, indexMs, taskCapturePaused: paused }));
+      { session: sessionId, indexMs }));
 
     // Live activity: what a prompt pulled in is a recall as much as a search
     // hit is, and it is by far the most common kind. Recording it here is what
@@ -376,10 +356,6 @@ export async function handleHookPrompt() {
     }
 
     const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, result.tokenBudget, getPhrenPath(), sessionId, keywords);
-    if (taskLifecycle.noticeLines.length > 0) {
-      parts.push("");
-      parts.push(...taskLifecycle.noticeLines);
-    }
 
     // Inject finding sensitivity agent instruction
     try {
@@ -393,12 +369,11 @@ export async function handleHookPrompt() {
       // ignore — non-fatal
     }
 
-    // Add budget info to trace, and say when the open-task budget kept this prompt from filing a task
+    // Add budget info to trace
     if (parts.length > 0) {
       const traceIdx = parts.findIndex(p => p.includes("trace:"));
       if (traceIdx !== -1) {
         parts[traceIdx] = parts[traceIdx].replace(/tokens≈/, `budget=${budgetUsedTokens}/${maxInjectTokens};tokens≈`);
-        if (paused) parts[traceIdx] += `; tasks=paused open ${paused.open}/${paused.budget}`;
       }
     }
 

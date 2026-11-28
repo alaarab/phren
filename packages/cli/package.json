@@ -1,6 +1,6 @@
 {
   "name": "@phren/cli",
-  "version": "0.3.100",
+  "version": "0.4.0",
   "description": "Knowledge layer for AI agents - CLI, MCP server, and data layer",
   "type": "module",
   "bin": {
@@ -52,14 +52,6 @@
     "./data/access": {
       "types": "./dist/data/access.d.ts",
       "default": "./dist/data/access.js"
-    },
-    "./data/tasks": {
-      "types": "./dist/data/tasks.d.ts",
-      "default": "./dist/data/tasks.js"
-    },
-    "./task/retired": {
-      "types": "./dist/task/retired.d.ts",
-      "default": "./dist/task/retired.js"
     },
     "./data/notes": {
       "types": "./dist/data/notes.d.ts",

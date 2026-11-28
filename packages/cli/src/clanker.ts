@@ -1,10 +1,10 @@
 /**
  * Clanker mode: keyword-first retrieval.
  *
- * With it on, the prompt hook, search_knowledge, get_tasks and get_findings
+ * With it on, the prompt hook, search_knowledge and get_findings
  * return one short row per hit (id, title, a few keywords, a score) instead
  * of the text itself, and the agent fetches what it needs with
- * get_memory_detail. Findings and tasks get their own fid:/bid: ids, so
+ * get_memory_detail. Findings get their own fid: ids, so
  * fetching one returns that entry, not the whole file it lives in.
  *
  * `phren config clanker on|off` sets it per install; PHREN_CLANKER overrides
@@ -143,17 +143,17 @@ export function formatRow(row: ClankerRow, showProject = false): string {
 
 // ── Entries inside a document ────────────────────────────────────────────────
 
-const ENTRY_ID = /<!--\s*(?:fid:([a-z0-9]{8})|bid:([a-f0-9]{8}))\b/i;
+const ENTRY_ID = /<!--\s*fid:([a-z0-9]{8})\b/i;
 
 export interface DocEntry {
-  /** `fid:xxxxxxxx` or `bid:xxxxxxxx`. */
+  /** `fid:xxxxxxxx`. */
   id: string;
   line: string;
-  /** The bullet plus its indented continuation (task Context, citations). */
+  /** The bullet plus its indented continuation (such as citations). */
   text: string;
 }
 
-/** The bullets in a findings, task or archive document that carry a stable id. */
+/** The bullets in a findings or archive document that carry a stable id. */
 export function docEntries(content: string): DocEntry[] {
   const lines = content.split("\n");
   const entries: DocEntry[] = [];
@@ -164,7 +164,7 @@ export function docEntries(content: string): DocEntry[] {
     let end = i + 1;
     while (end < lines.length && /^\s+\S/.test(lines[end])) end++;
     entries.push({
-      id: match[1] ? `fid:${match[1].toLowerCase()}` : `bid:${match[2].toLowerCase()}`,
+      id: `fid:${match[1].toLowerCase()}`,
       line: lines[i],
       text: lines.slice(i, end).join("\n"),
     });
@@ -172,14 +172,14 @@ export function docEntries(content: string): DocEntry[] {
   return entries;
 }
 
-/** Find one entry by `fid:`/`bid:` id in a document's content. */
+/** Find one entry by `fid:` id in a document's content. */
 export function findEntry(content: string, id: string): DocEntry | null {
   const wanted = id.toLowerCase();
   return docEntries(content).find((entry) => entry.id === wanted) ?? null;
 }
 
 /**
- * Rows for one search hit. Findings, tasks and archive topics become one row
+ * Rows for one search hit. Findings and archive topics become one row
  * per matching entry (best first, at most `max`); other documents are one row
  * for the matched line under the document's mem: id.
  */

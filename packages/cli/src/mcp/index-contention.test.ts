@@ -26,9 +26,7 @@ it("keeps concurrent MCP calls from several servers working while other processe
   tmp = makeTempDir("mcp-index-contention-");
   const store = path.join(tmp.path, "store");
   writeFile(path.join(store, "phren.root.yaml"), "version: 1\ninstallMode: shared\nsyncMode: managed-git\n");
-  writeFile(path.join(store, ".config", "modules.yaml"), "version: 1\nenabled:\n  tasks: true\n");
   writeFile(path.join(store, "demo", "summary.md"), "# Demo\nA demo project.\n");
-  writeFile(path.join(store, "demo", "tasks.md"), "# Tasks\n\n## Queue\n\n- Seed task\n");
   execFileSync("git", ["init", "--quiet", store]);
   const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
   Object.assign(env, {
@@ -59,7 +57,7 @@ it("keeps concurrent MCP calls from several servers working while other processe
       ...Array.from({ length: 5 }, (_, i) => client.callTool({ name: "add_finding", arguments: { project: "demo", finding: [`Contention note ${c}-${i} about index lock waits`] } })),
       ...Array.from({ length: 2 }, (_, i) => client.callTool({ name: "add_finding", arguments: { project: "demo", finding: [`Contention finding zebracorn ${c}-${i} about index lock waits`] } })),
       ...Array.from({ length: 3 }, () => client.callTool({ name: "search_knowledge", arguments: { query: "demo" } })),
-      ...Array.from({ length: 2 }, () => client.callTool({ name: "get_tasks", arguments: { project: "demo" } })),
+      ...Array.from({ length: 2 }, () => client.callTool({ name: "get_project_summary", arguments: { name: "demo" } })),
     ]);
     const results = (await Promise.all(calls)).map(parse);
     const failures = results.filter(result => result.ok !== true);
@@ -70,9 +68,6 @@ it("keeps concurrent MCP calls from several servers working while other processe
     try { fs.unlinkSync(lock); } catch { /* already gone */ }
   }
 
-  // Task writes are retired: the read-only get_tasks calls above changed nothing.
-  const tasks = fs.readFileSync(path.join(store, "demo", "tasks.md"), "utf8");
-  expect(tasks).toBe("# Tasks\n\n## Queue\n\n- Seed task\n");
   // Once the lock is free the next index read refreshes past the last good index.
   await new Promise(resolve => setTimeout(resolve, 1100));
   const found = parse(await clients[0].callTool({ name: "search_knowledge", arguments: { query: "zebracorn" } }));

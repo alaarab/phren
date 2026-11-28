@@ -43,7 +43,6 @@ describe("mergeConfig", () => {
     const resolved = mergeConfig(phrenPath, "myproject");
 
     expect(resolved.findingSensitivity).toBe("balanced");
-    expect(resolved.taskMode).toBe("auto");
     expect(resolved.retentionPolicy.ttlDays).toBe(120);
     expect(resolved.retentionPolicy.retentionDays).toBe(365);
     expect(resolved.retentionPolicy.autoAcceptThreshold).toBe(0.75);
@@ -59,10 +58,8 @@ describe("mergeConfig", () => {
     writeProjectConfig(phrenPath, "myproject", {
       config: {
         findingSensitivity: "aggressive",
-        taskMode: "manual",
         proactivity: "low",
         proactivityFindings: "medium",
-        proactivityTask: "high",
         retentionPolicy: {
           ttlDays: 30,
           decay: { d30: 0.9, d60: 0.7 },
@@ -76,10 +73,8 @@ describe("mergeConfig", () => {
     const resolved = mergeConfig(phrenPath, "myproject");
 
     expect(resolved.findingSensitivity).toBe("aggressive");
-    expect(resolved.taskMode).toBe("manual");
     expect(resolved.proactivity.base).toBe("low");
     expect(resolved.proactivity.findings).toBe("medium");
-    expect(resolved.proactivity.tasks).toBe("high");
     expect(resolved.retentionPolicy.ttlDays).toBe(30);
     expect(resolved.retentionPolicy.decay.d30).toBe(0.9);
     expect(resolved.retentionPolicy.decay.d60).toBe(0.7);
@@ -95,7 +90,7 @@ describe("mergeConfig", () => {
       },
     });
 
-    writeGlobalWorkflowPolicy(phrenPath, { taskMode: "suggest", findingSensitivity: "balanced" });
+    writeGlobalWorkflowPolicy(phrenPath, { findingSensitivity: "balanced" });
     writeGlobalRetentionPolicy(phrenPath, { ttlDays: 90, retentionDays: 200, autoAcceptThreshold: 0.6, minInjectConfidence: 0.3, decay: { d30: 1.0, d60: 0.8, d90: 0.6, d120: 0.4 } });
 
     const resolved = mergeConfig(phrenPath, "myproject");
@@ -103,7 +98,6 @@ describe("mergeConfig", () => {
     // Project override wins for findingSensitivity
     expect(resolved.findingSensitivity).toBe("minimal");
     // Falls through to global for taskMode
-    expect(resolved.taskMode).toBe("suggest");
     // Falls through to global for retention fields
     expect(resolved.retentionPolicy.ttlDays).toBe(90);
     expect(resolved.retentionPolicy.retentionDays).toBe(200);
@@ -115,12 +109,11 @@ describe("mergeConfig", () => {
 
   // Test 4: no project arg returns global defaults directly
   it("returns global defaults when called with no project", () => {
-    writeGlobalWorkflowPolicy(phrenPath, { taskMode: "off", findingSensitivity: "conservative" });
+    writeGlobalWorkflowPolicy(phrenPath, { findingSensitivity: "conservative" });
 
     const resolved = mergeConfig(phrenPath);
 
     expect(resolved.findingSensitivity).toBe("conservative");
-    expect(resolved.taskMode).toBe("off");
     expect(resolved.proactivity).toEqual({});
     expect(resolved.retentionPolicy.ttlDays).toBe(120); // default
   });
@@ -154,7 +147,6 @@ describe("mergeConfig", () => {
   // Test 6: empty riskySections in project override falls back to global
   it("falls back to global riskySections when project override has empty array", () => {
     writeGlobalWorkflowPolicy(phrenPath, {
-      taskMode: "auto",
       findingSensitivity: "balanced",
       lowConfidenceThreshold: 0.7,
       riskySections: ["Review", "Stale", "Conflicts"],
@@ -178,7 +170,6 @@ describe("mergeConfig", () => {
   // Test 7: full resolution chain — project wins over global
   it("project config wins over global in full resolution chain", () => {
     writeGlobalWorkflowPolicy(phrenPath, {
-      taskMode: "auto",
       findingSensitivity: "balanced",
       lowConfidenceThreshold: 0.7,
       riskySections: ["Stale"],
@@ -194,7 +185,6 @@ describe("mergeConfig", () => {
     writeProjectConfig(phrenPath, "myproject", {
       config: {
         findingSensitivity: "conservative",
-        taskMode: "off",
         proactivity: "low",
         retentionPolicy: {
           ttlDays: 60,
@@ -211,7 +201,6 @@ describe("mergeConfig", () => {
 
     // Project values win
     expect(resolved.findingSensitivity).toBe("conservative");
-    expect(resolved.taskMode).toBe("off");
     expect(resolved.proactivity.base).toBe("low");
     expect(resolved.retentionPolicy.ttlDays).toBe(60);
     expect(resolved.retentionPolicy.minInjectConfidence).toBe(0.5);
@@ -226,7 +215,6 @@ describe("mergeConfig", () => {
 
   it("ignores invalid override types and falls back to global values", () => {
     writeGlobalWorkflowPolicy(phrenPath, {
-      taskMode: "suggest",
       findingSensitivity: "balanced",
       lowConfidenceThreshold: 0.6,
       riskySections: ["Stale"],
@@ -243,7 +231,6 @@ describe("mergeConfig", () => {
       config: {
         // Intentionally invalid at runtime; mergeConfig should ignore these.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        taskMode: "invalid-mode" as any,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         findingSensitivity: "invalid-sensitivity" as any,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -254,7 +241,6 @@ describe("mergeConfig", () => {
     });
 
     const resolved = mergeConfig(phrenPath, "myproject");
-    expect(resolved.taskMode).toBe("suggest");
     expect(resolved.findingSensitivity).toBe("balanced");
     expect(resolved.retentionPolicy.ttlDays).toBe(120);
     expect(resolved.retentionPolicy.decay.d30).toBe(1.0);
@@ -263,9 +249,8 @@ describe("mergeConfig", () => {
   });
 
   it("falls back to global config when project name is invalid", () => {
-    writeGlobalWorkflowPolicy(phrenPath, { taskMode: "manual", findingSensitivity: "minimal" });
+    writeGlobalWorkflowPolicy(phrenPath, { findingSensitivity: "minimal" });
     const resolved = mergeConfig(phrenPath, "../escape");
-    expect(resolved.taskMode).toBe("manual");
     expect(resolved.findingSensitivity).toBe("minimal");
     expect(resolved.proactivity).toEqual({});
   });
@@ -287,21 +272,19 @@ describe("getWorkflowPolicy with project", () => {
   });
 
   it("returns global policy when no project arg given", () => {
-    writeGlobalWorkflowPolicy(phrenPath, { taskMode: "suggest", findingSensitivity: "minimal" });
+    writeGlobalWorkflowPolicy(phrenPath, { findingSensitivity: "minimal" });
 
     const policy = getWorkflowPolicy(phrenPath);
-    expect(policy.taskMode).toBe("suggest");
     expect(policy.findingSensitivity).toBe("minimal");
   });
 
   it("returns merged project policy when project arg given", () => {
-    writeGlobalWorkflowPolicy(phrenPath, { taskMode: "auto", findingSensitivity: "balanced" });
+    writeGlobalWorkflowPolicy(phrenPath, { findingSensitivity: "balanced" });
     writeProjectConfig(phrenPath, "proj", {
       config: { taskMode: "off" },
     });
 
     const policy = getWorkflowPolicy(phrenPath, "proj");
-    expect(policy.taskMode).toBe("off");
     expect(policy.findingSensitivity).toBe("balanced"); // global fallthrough
   });
 });
@@ -399,12 +382,11 @@ describe("set_config writes to phren.project.yaml when project given", () => {
 
   // Test 6: get_config with project returns merged view
   it("get_config with project returns merged values from project and global", () => {
-    writeGlobalWorkflowPolicy(phrenPath, { taskMode: "auto", findingSensitivity: "balanced", lowConfidenceThreshold: 0.7, riskySections: ["Stale"] });
+    writeGlobalWorkflowPolicy(phrenPath, { findingSensitivity: "balanced", lowConfidenceThreshold: 0.7, riskySections: ["Stale"] });
 
     writeProjectConfig(phrenPath, "beta", {
       config: {
         findingSensitivity: "aggressive",
-        taskMode: "off",
       },
     });
 
@@ -412,7 +394,6 @@ describe("set_config writes to phren.project.yaml when project given", () => {
 
     // Returns project values
     expect(resolved.findingSensitivity).toBe("aggressive");
-    expect(resolved.taskMode).toBe("off");
     // Returns global for non-overridden fields
     expect(resolved.workflowPolicy.lowConfidenceThreshold).toBe(0.7);
     expect(resolved.workflowPolicy.riskySections).toContain("Stale");
