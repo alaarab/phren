@@ -3172,9 +3172,8 @@ schedules:
     it("dispatches an issue through a fake SSH pipe and binds the receiving Hook's brief", async () => {
       await dispatchFixture();
       const issue = { repo: "github.com/example/widgets", number: 42 };
-      const task = { storeId: "12345678", project: "phren", stableId: "12345678" };
       const sending = api("/v1/dispatch", { computer: "Devbox", project: "phren", harness: "codex", model: "test-model",
-        label: "Worker", prompt: "Run the assigned checks", issue: "github.com/example/widgets#42", task });
+        label: "Worker", prompt: "Run the assigned checks", issue: "github.com/example/widgets#42" });
       // The receiving Hook writes the brief and starts Codex with it as the first prompt.
       const briefs = path.join(root, "remote/briefs");
       await waitFor(async () => (await readdir(briefs).catch(() => [])).length > 0, 10_000);
@@ -3193,7 +3192,6 @@ schedules:
       expect(sent.data).toMatchObject({ ok: true, id, computer: "Devbox", state: "accepted", brief: "launch", target: worker });
       for (const folder of ["bridge", "remote"])
         expect(JSON.parse(await readFile(path.join(root, folder, "dispatch-issues", `${id}.json`), "utf8"))).toEqual(issue);
-      expect(await readdir(path.dirname(file))).not.toContain("task.json");
       // The remote Hook resolves the checkout through realpath; on macOS /tmp is a symlink.
       expect(commands.find(c => c.method === "workspace.create")?.params).toMatchObject({ cwd: await realpathAsync(path.join(root, "checkout")), env: { PHREN_DISPATCH_ID: id } });
       expect(commands.find(c => c.method === "agent.start")?.params.args).toEqual(["--model", "test-model", `Read and follow the brief in ${file}`, "-c", "check_for_update_on_startup=false"]);

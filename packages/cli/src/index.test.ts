@@ -11,9 +11,7 @@ import {
 } from "./shared/governance.js";
 import {
   validateFindingsFormat,
-  validateTaskFormat,
   mergeFindings,
-  mergeTask,
   filterTrustedFindings,
   addFindingToFile,
   extractConflictVersions,
@@ -221,32 +219,6 @@ describe("validateFindingsFormat", () => {
   });
 });
 
-describe("validateTaskFormat", () => {
-  it("returns no issues for valid content", () => {
-    const content = "# task\n\n## Active\n\n- Task A\n\n## Queue\n\n## Done\n";
-    expect(validateTaskFormat(content)).toEqual([]);
-  });
-
-  it("flags missing title heading", () => {
-    const content = "## Active\n\n- Task A\n";
-    const issues = validateTaskFormat(content);
-    expect(issues.some(i => i.includes("Missing title heading"))).toBe(true);
-    // No heading at all reports the title and the sections together.
-    expect(validateTaskFormat("no heading here").length).toBeGreaterThanOrEqual(2);
-  });
-
-  it("flags missing standard sections", () => {
-    const content = "# task\n\n- Task A\n";
-    const issues = validateTaskFormat(content);
-    expect(issues.some(i => i.includes("Missing expected sections"))).toBe(true);
-  });
-
-  it("accepts content with only Queue section", () => {
-    const content = "# task\n\n## Queue\n\n- Task B\n";
-    expect(validateTaskFormat(content)).toEqual([]);
-  });
-});
-
 describe("extractConflictVersions", () => {
   it("returns null for content without conflict markers", () => {
     expect(extractConflictVersions("normal content\nno conflicts")).toBeNull();
@@ -328,41 +300,6 @@ describe("mergeFindings", () => {
     const theirs = "# Other Title\n\n## 2024-01-01\n\n- B\n";
     const merged = mergeFindings(ours, theirs);
     expect(merged.startsWith("# My Project FINDINGS")).toBe(true);
-  });
-});
-
-describe("mergeTask", () => {
-  it("combines items from both sides", () => {
-    const ours = "# task\n\n## Active\n\n- Ours task\n\n## Queue\n\n## Done\n";
-    const theirs = "# task\n\n## Active\n\n- Their task\n\n## Queue\n\n## Done\n";
-    const merged = mergeTask(ours, theirs);
-    expect(merged).toContain("- Ours task");
-    expect(merged).toContain("- Their task");
-  });
-
-  it("deduplicates identical items", () => {
-    const content = "# task\n\n## Active\n\n- Same task\n\n## Queue\n\n## Done\n";
-    const merged = mergeTask(content, content);
-    const count = (merged.match(/- Same task/g) || []).length;
-    expect(count).toBe(1);
-  });
-
-  it("orders sections Active, Queue, Done first", () => {
-    const ours = "# task\n\n## Done\n\n- D\n\n## Active\n\n- A\n\n## Queue\n\n- Q\n";
-    const theirs = ours;
-    const merged = mergeTask(ours, theirs);
-    const activeIdx = merged.indexOf("## Active");
-    const queueIdx = merged.indexOf("## Queue");
-    const doneIdx = merged.indexOf("## Done");
-    expect(activeIdx).toBeLessThan(queueIdx);
-    expect(queueIdx).toBeLessThan(doneIdx);
-  });
-
-  it("preserves title from ours", () => {
-    const ours = "# My Task\n\n## Active\n\n## Queue\n\n## Done\n";
-    const theirs = "# Other\n\n## Active\n\n## Queue\n\n## Done\n";
-    const merged = mergeTask(ours, theirs);
-    expect(merged.startsWith("# My Task")).toBe(true);
   });
 });
 

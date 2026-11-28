@@ -14,7 +14,6 @@ import {
   buildHookOutput,
   trackSessionMetrics,
   applyTrustFilter,
-  filterTaskByPriority,
   type SelectedSnippet,
 } from "./cli/hooks.js";
 
@@ -298,59 +297,5 @@ describe("trackSessionMetrics", () => {
     const metrics = JSON.parse(fs.readFileSync(metricsFile, "utf8"));
     expect(metrics["old-session"]).toBeUndefined();
     expect(metrics["new-session"]).toBeDefined();
-  });
-});
-
-describe("filterTaskByPriority", () => {
-  const savedEnv = process.env.PHREN_TASK_PRIORITY;
-
-  afterEach(() => {
-    if (savedEnv === undefined) {
-      delete process.env.PHREN_TASK_PRIORITY;
-    } else {
-      process.env.PHREN_TASK_PRIORITY = savedEnv;
-    }
-  });
-
-  it("passes [high] and [medium] items through by default", () => {
-    const items = [
-      "- [high] Fix critical auth issue",
-      "- [medium] Improve caching",
-      "- [low] Rename variable",
-      "- Fix login bug",
-    ];
-    const result = filterTaskByPriority(items);
-    // Untagged items pass through by default too.
-    expect(result).toEqual(["- [high] Fix critical auth issue", "- [medium] Improve caching", "- Fix login bug"]);
-  });
-
-  it("filters based on PHREN_TASK_PRIORITY env var", () => {
-    process.env.PHREN_TASK_PRIORITY = "high";
-    const items = [
-      "- [high] Critical fix",
-      "- [medium] Nice to have",
-      "- [low] Polish",
-    ];
-    const result = filterTaskByPriority(items);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toContain("[high]");
-  });
-
-  it("allows explicit allowedPriorities parameter", () => {
-    const items = [
-      "- [high] Critical",
-      "- [medium] Medium",
-      "- [low] Low priority",
-    ];
-    const result = filterTaskByPriority(items, ["low"]);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toContain("[low]");
-  });
-
-  it("is case-insensitive for priority tags", () => {
-    const items = ["- [HIGH] Important task", "- [Low] Minor task"];
-    const result = filterTaskByPriority(items);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toContain("[HIGH]");
   });
 });

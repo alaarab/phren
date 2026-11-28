@@ -1,6 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { makeTempDir } from "../test-helpers.js";
@@ -42,7 +41,8 @@ describe("citation comment round-trip", () => {
       line: 42,
       commit: "abc123",
       supersedes: "old pattern",
-      task_item: "Fix the login bug",
+      symbol: "main()",
+      symbol_unresolved: true,
     };
     const comment = buildCitationComment(citation);
     expect(comment).toContain("phren:cite");
@@ -56,7 +56,8 @@ describe("citation comment round-trip", () => {
     expect(parsed!.line).toBe(42);
     expect(parsed!.commit).toBe("abc123");
     expect(parsed!.supersedes).toBe("old pattern");
-    expect(parsed!.task_item).toBe("Fix the login bug");
+    expect(parsed!.symbol).toBe("main()");
+    expect(parsed!.symbol_unresolved).toBe(true);
 
     const minimal = parseCitationComment(buildCitationComment({ created_at: "2025-01-01" }));
     expect(minimal).toEqual({ created_at: "2025-01-01" });

@@ -19,7 +19,6 @@ vi.mock("./shell/shell.js", () => {
     handleInput = vi.fn().mockResolvedValue(true);
     setMessage = vi.fn();
     close = vi.fn();
-    invalidateSubsectionsCache = vi.fn();
   }
   return { PhrenShell: MockPhrenShell };
 });

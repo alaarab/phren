@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir, } from "../test-helpers.js";
-import { incrementSessionFindings, incrementSessionTasksCompleted } from "../tools/session.js";
+import { makeTempDir } from "../test-helpers.js";
+import { incrementSessionFindings } from "../tools/session.js";
 
 function sessionFile(phrenPath: string, sessionId: string) {
   return path.join(phrenPath, ".runtime", "sessions", `session-${sessionId}.json`);
@@ -79,36 +79,5 @@ describe("incrementSessionFindings", () => {
 
     const otherState = JSON.parse(fs.readFileSync(sessionFile(tmp.path, "other-project"), "utf-8"));
     expect(otherState.findingsAdded).toBe(1);
-  });
-});
-
-describe("incrementSessionTasksCompleted", () => {
-  let tmp: { path: string; cleanup: () => void };
-
-  beforeEach(() => { tmp = makeTempDir("mcp-session-task-complete-"); });
-  afterEach(() => tmp.cleanup());
-
-  it("falls back to the most recent active session for the project", () => {
-    writeSession(tmp.path, {
-      sessionId: "other-project",
-      project: "other",
-      startedAt: "2026-03-09T09:00:00.000Z",
-      findingsAdded: 1,
-      tasksCompleted: 1,
-    });
-    writeSession(tmp.path, {
-      sessionId: "demo-session",
-      project: "demo",
-      startedAt: "2026-03-09T10:00:00.000Z",
-      findingsAdded: 2,
-      tasksCompleted: 2,
-    });
-
-    incrementSessionTasksCompleted(tmp.path, 3, undefined, "demo");
-
-    const demoState = JSON.parse(fs.readFileSync(sessionFile(tmp.path, "demo-session"), "utf-8"));
-    const otherState = JSON.parse(fs.readFileSync(sessionFile(tmp.path, "other-project"), "utf-8"));
-    expect(demoState.tasksCompleted).toBe(5);
-    expect(otherState.tasksCompleted).toBe(1);
   });
 });

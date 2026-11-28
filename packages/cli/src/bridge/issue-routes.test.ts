@@ -179,7 +179,7 @@ describe("forge errors map to HTTP statuses", () => {
 
 describe("the default repo set", () => {
   it("uses every store project's resolvable repo, cached for five minutes", async () => {
-    for (const [project, config] of [["zissue-one", "issues: gitboy.dev/example/one\n"], ["zissue-two", "issues: github.com/example/two\n"], ["zissue-none", ""]] as const) {
+    for (const [project, config] of [["zissue-one", "issues: gitboy.example/example/one\n"], ["zissue-two", "issues: github.com/example/two\n"], ["zissue-none", ""]] as const) {
       await mkdir(path.join(store, project), { recursive: true });
       if (config) await writeFile(path.join(store, project, "phren.project.yaml"), config);
     }
@@ -188,7 +188,7 @@ describe("the default repo set", () => {
     restore = setIssueRouteDeps({ ...forged, now: () => clock, list: async query => { repos.push([...query.repos ?? []]); return { issues: [], errors: [] }; } });
 
     expect((await request("GET", "/v1/issues", undefined, {}, store)).status).toBe(200);
-    expect(repos[0].sort()).toEqual(["gitboy.dev/example/one", "github.com/example/two"]);
+    expect(repos[0].sort()).toEqual(["gitboy.example/example/one", "github.com/example/two"]);
 
     // A named repo skips the walk entirely.
     await request("GET", "/v1/issues?repos=github.com/example/explicit", undefined, {}, store);
@@ -198,12 +198,12 @@ describe("the default repo set", () => {
     await writeFile(path.join(store, "zissue-two", "phren.project.yaml"), "issues: github.com/example/changed\n");
     clock += 60_000;
     await request("GET", "/v1/issues", undefined, {}, store);
-    expect(repos[2].sort()).toEqual(["gitboy.dev/example/one", "github.com/example/two"]);
+    expect(repos[2].sort()).toEqual(["gitboy.example/example/one", "github.com/example/two"]);
 
     // Past five minutes: the walk runs again and sees the change.
     clock += 5 * 60_000;
     await request("GET", "/v1/issues", undefined, {}, store);
-    expect(repos[3].sort()).toEqual(["gitboy.dev/example/one", "github.com/example/changed"]);
+    expect(repos[3].sort()).toEqual(["gitboy.example/example/one", "github.com/example/changed"]);
   });
 });
 

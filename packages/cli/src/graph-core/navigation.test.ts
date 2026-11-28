@@ -1,6 +1,6 @@
 /**
  * The dossier's Previous/Next walk. The ranked order is the order the Memory
- * list shows a project's rows (findings newest date first, then tasks), and
+ * list shows a project's rows (findings newest date first), and
  * the step wraps at both ends, so these tests pin the behaviour every host
  * (web dossier, phone webview, keyboard arrows) relies on.
  */
@@ -13,10 +13,6 @@ const PROJECT = "ledger";
 
 function finding(id: string, project: string, date?: string): RawNode {
   return { id, label: id, group: "topic:general", project, date, tagged: true };
-}
-
-function task(id: string, project: string, section = "Active"): RawNode {
-  return { id, label: id, group: section === "Active" ? "task-active" : "task-queue", project, section };
 }
 
 function project(id: string): RawNode {
@@ -50,18 +46,16 @@ describe("stepRanked", () => {
 });
 
 describe("rankedProjectIds", () => {
-  it("orders a project's findings newest date first, then its tasks", () => {
+  it("orders a project's findings newest date first", () => {
     const nodes: RawNode[] = [
       project(PROJECT),
       finding("old", PROJECT, "2026-09-01"),
       finding("new", PROJECT, "2026-09-16"),
       finding("mid", PROJECT, "2026-09-10"),
-      task("t:active", PROJECT, "Active"),
-      task("t:queue", PROJECT, "Queue"),
       finding("other", "phren", "2026-09-20"),
       project("phren"),
     ];
-    expect(rankedProjectIds(nodes, PROJECT)).toEqual(["new", "mid", "old", "t:active", "t:queue"]);
+    expect(rankedProjectIds(nodes, PROJECT)).toEqual(["new", "mid", "old"]);
   });
 
   it("breaks date ties by payload order and keeps undated findings last", () => {

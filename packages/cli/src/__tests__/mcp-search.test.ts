@@ -458,13 +458,13 @@ describe("mcp-search: get_findings", () => {
 
   it("surfaces provenance metadata in get_findings output", async () => {
     makeProject(tmp.path, "withmeta", {
-      "FINDINGS.md": "# withmeta FINDINGS\n\n## 2026-03-09\n\n- Provenance stays attached <!-- created: 2026-03-09 --> <!-- source: machine:testbox actor:codex tool:codex model:gpt-5 session:session-1234 -->\n  <!-- phren:cite {\"created_at\":\"2026-03-09T10:00:00Z\",\"task_item\":\"deadbeef\"} -->\n",
+      "FINDINGS.md": "# withmeta FINDINGS\n\n## 2026-03-09\n\n- Provenance stays attached <!-- created: 2026-03-09 --> <!-- source: machine:testbox actor:codex tool:codex model:gpt-5 session:session-1234 -->\n",
     });
 
     const res = parseResult(await server.call("get_findings", { project: "withmeta" }));
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("task=deadbeef");
-    expect(res.data.findings[0].taskItem).toBe("deadbeef");
+    expect(res.message).toContain("[from:codex@testbox]");
+    expect(res.data.findings[0]).toMatchObject({ actor: "codex", machine: "testbox", sessionId: "session-1234" });
   });
 
   it("hides historical findings by default and includes them when include_history=true", async () => {

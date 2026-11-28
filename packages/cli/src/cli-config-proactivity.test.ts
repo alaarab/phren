@@ -9,7 +9,6 @@ const originalEnv = {
   PHREN_PATH: process.env.PHREN_PATH,
   PHREN_PROACTIVITY: process.env.PHREN_PROACTIVITY,
   PHREN_PROACTIVITY_FINDINGS: process.env.PHREN_PROACTIVITY_FINDINGS,
-  PHREN_PROACTIVITY_TASKS: process.env.PHREN_PROACTIVITY_TASKS,
 };
 
 let tmpCleanup: (() => void) | undefined;
@@ -62,7 +61,6 @@ describe("handleConfig proactivity", () => {
     process.env.PHREN_PATH = phrenDir;
     delete process.env.PHREN_PROACTIVITY;
     delete process.env.PHREN_PROACTIVITY_FINDINGS;
-    delete process.env.PHREN_PROACTIVITY_TASKS;
   });
 
   afterEach(() => {
@@ -72,7 +70,6 @@ describe("handleConfig proactivity", () => {
     restoreEnv("PHREN_PATH");
     restoreEnv("PHREN_PROACTIVITY");
     restoreEnv("PHREN_PROACTIVITY_FINDINGS");
-    restoreEnv("PHREN_PROACTIVITY_TASKS");
     tmpCleanup?.();
   });
 
@@ -87,49 +84,42 @@ describe("handleConfig proactivity", () => {
     expect(data.path).toBe(governancePrefsPath());
     expect(data.configured.proactivity).toBeNull();
     expect(data.configured.proactivityFindings).toBeNull();
-    expect(data.configured.proactivityTask).toBeNull();
     expect(data.effective.proactivity).toBe("high");
     expect(data.effective.proactivityFindings).toBe("high");
-    expect(data.effective.proactivityTask).toBe("high");
   });
 
-  it("persists findings and task overrides independently", async () => {
+  it("persists base and findings levels independently", async () => {
     const { handleConfig } = await importCliConfig();
     const output = captureConsole();
 
     await handleConfig(["proactivity", "low"]);
     await handleConfig(["proactivity.findings", "high"]);
-    await handleConfig(["proactivity.tasks", "medium"]);
 
-    expect(output.logs).toHaveLength(3);
-    const data = JSON.parse(output.logs[2]);
+    expect(output.logs).toHaveLength(2);
+    const data = JSON.parse(output.logs[1]);
     expect(data.configured.proactivity).toBe("low");
     expect(data.configured.proactivityFindings).toBe("high");
-    expect(data.configured.proactivityTask).toBe("medium");
     expect(data.effective.proactivity).toBe("low");
     expect(data.effective.proactivityFindings).toBe("high");
-    expect(data.effective.proactivityTask).toBe("medium");
 
     const stored = JSON.parse(fs.readFileSync(governancePrefsPath(), "utf8"));
     expect(stored.proactivity).toBe("low");
     expect(stored.proactivityFindings).toBe("high");
-    expect(stored.proactivityTask).toBe("medium");
   });
 
-  it("--scope on the base command writes the findings or task override, not the base", async () => {
+  it("--scope on the base command writes only the findings override", async () => {
     const { handleConfig } = await importCliConfig();
     const output = captureConsole();
 
     await handleConfig(["proactivity", "high"]);
-    await handleConfig(["proactivity", "medium", "--scope", "tasks"]);
     await handleConfig(["proactivity", "--scope=findings", "low"]);
 
-    expect(output.logs).toHaveLength(3);
-    const data = JSON.parse(output.logs[2]);
-    expect(data.configured).toEqual({ proactivity: "high", proactivityFindings: "low", proactivityTask: "medium" });
-    expect(data.effective).toEqual({ proactivity: "high", proactivityFindings: "low", proactivityTask: "medium" });
+    expect(output.logs).toHaveLength(2);
+    const data = JSON.parse(output.logs[1]);
+    expect(data.configured).toEqual({ proactivity: "high", proactivityFindings: "low" });
+    expect(data.effective).toEqual({ proactivity: "high", proactivityFindings: "low" });
     const stored = JSON.parse(fs.readFileSync(governancePrefsPath(), "utf8"));
-    expect(stored).toMatchObject({ proactivity: "high", proactivityFindings: "low", proactivityTask: "medium" });
+    expect(stored).toMatchObject({ proactivity: "high", proactivityFindings: "low" });
   });
 
   it("rejects an unknown --scope and a --scope on an already scoped subcommand", async () => {
@@ -140,10 +130,11 @@ describe("handleConfig proactivity", () => {
       await handleConfig(["proactivity", "medium", "--scope", "notes"]);
       expect(process.exitCode).toBe(1);
       process.exitCode = previousExitCode;
-      await handleConfig(["proactivity.tasks", "medium", "--scope", "findings"]);
+      await handleConfig(["proactivity.findings", "medium", "--scope", "base"]);
       expect(process.exitCode).toBe(1);
       expect(output.logs).toHaveLength(0);
-      expect(output.errors.join("\n")).toContain("--scope base|findings|tasks");
+      expect(output.errors[0]).toContain("--scope base|findings");
+      expect(output.errors[1]).toContain("Usage: phren config proactivity.findings");
       expect(fs.existsSync(governancePrefsPath())).toBe(false);
     } finally { process.exitCode = previousExitCode; }
   });

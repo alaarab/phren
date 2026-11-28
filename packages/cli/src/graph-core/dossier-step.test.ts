@@ -14,7 +14,6 @@ const RAW: RawNode[] = [
   { id: "tp:1", label: "Architecture", group: "topic", project: "harbor", topicSlug: "architecture", refCount: 2 },
   { id: "f:1", label: "First", group: "topic:architecture", project: "harbor", topicSlug: "architecture", date: "2026-09-02" },
   { id: "f:2", label: "Second", group: "topic:architecture", project: "harbor", topicSlug: "architecture", date: "2026-09-01" },
-  { id: "t:1", label: "Ship it", group: "task-active", project: "harbor", section: "Active" },
   { id: "n:1", label: "2026-09-28", group: "note", project: "harbor", date: "2026-09-28" },
   { id: "n:2", label: "2026-09-27", group: "note", project: "harbor", date: "2026-09-27" },
 ];
@@ -25,17 +24,17 @@ afterEach(() => {
   state.visibleNodes = [];
 });
 
-describe("dossier stepping over findings, tasks and notes", () => {
-  it("walks forward and back, wrapping, with a five-row counter", () => {
+describe("dossier stepping over findings and notes", () => {
+  it("walks forward and back, wrapping, with a four-row counter", () => {
     state.rawNodes = RAW.map((node) => normalizeNode(node));
     state.nodeById = new Map(state.rawNodes.map((node) => [node.id, node] as const));
     state.visibleNodes = [];
 
-    const order = ["f:1", "f:2", "t:1", "n:1", "n:2"];
+    const order = ["f:1", "f:2", "n:1", "n:2"];
     order.forEach((id, index) => {
       expect(stepDossier(id, 1)).toBe(order[(index + 1) % order.length]);
       expect(stepDossier(id, -1)).toBe(order[(index + order.length - 1) % order.length]);
-      expect(dossierPosition(id)).toEqual({ index, total: 5 });
+      expect(dossierPosition(id)).toEqual({ index, total: 4 });
     });
 
     expect(stepDossier("p:harbor", 1)).toBeNull();

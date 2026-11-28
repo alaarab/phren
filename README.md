@@ -50,7 +50,7 @@ Periodic remote checks are off by default. Enable them with `phren config pull-i
 - Checkpoints track edited files and failing tests so you can resume exactly where you stopped
 
 **Issues:**
-- Work is tracked as forge issues: gitboy.dev for private repos, GitHub for public ones. Create and claim them with `phren issue` or the `create_issue` / `claim_issue` MCP tools; a PR that says `Closes <repo>#N` closes its issue.
+- Work is tracked as forge issues: gitboy for private repos, GitHub for public ones. Create and claim them with `phren issue` or the `create_issue` / `claim_issue` MCP tools; a PR that says `Closes <repo>#N` closes its issue.
 - Work only you can do (merges, logins, decisions) goes to the owner Inbox, the one human queue.
 
 ---

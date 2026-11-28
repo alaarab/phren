@@ -18,6 +18,7 @@ const CATEGORY_BY_MODULE: Record<string, string> = {
   "data": "Data management",
   "graph": "Fragments and graph",
   "session": "Session management",
+  "issues": "Forge issues",
   "ops": "Operations and review",
   "skills": "Skills management",
   "hooks": "Hooks management",

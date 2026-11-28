@@ -8,8 +8,7 @@ import {
   inferInitScaffoldFromRepo,
 } from "./project-registry.js";
 import { getProjectSourcePath, writeProjectConfig } from "../project-config.js";
-import { setModuleEnabled } from "../modules/config.js";
-import { FINDINGS_FILENAME, TASKS_FILENAME } from "../filenames.js";
+import { FINDINGS_FILENAME } from "../filenames.js";
 
 describe("inferInitScaffoldFromRepo", () => {
   let tmp: { path: string; cleanup: () => void };
@@ -69,7 +68,7 @@ describe("ensureProjectScaffold", () => {
       "AGENTS.md": "# curated\n\nHand-written agent notes.\n",
       "topic-config.json": "{\"version\":1,\"domain\":\"music\",\"topics\":[]}\n",
       [FINDINGS_FILENAME]: "# curated findings\n\nA real finding.\n",
-      [TASKS_FILENAME]: "# curated tasks\n\n## Active\n\n- Ship it\n",
+      "tasks.md": "# curated tasks\n\n## Active\n\n- Ship it\n",
     };
     for (const [name, content] of Object.entries(curated)) {
       fs.writeFileSync(path.join(projectDir, name), content);
@@ -80,18 +79,6 @@ describe("ensureProjectScaffold", () => {
     for (const [name, content] of Object.entries(curated)) {
       expect(fs.readFileSync(path.join(projectDir, name), "utf8")).toBe(content);
     }
-  });
-
-  it("writes the tasks file only when the tasks module is enabled", () => {
-    const withoutTasks = path.join(phrenPath, "without-tasks");
-    setModuleEnabled(phrenPath, "tasks", false);
-    ensureProjectScaffold(withoutTasks, "without-tasks");
-    expect(fs.existsSync(path.join(withoutTasks, TASKS_FILENAME))).toBe(false);
-
-    const withTasks = path.join(phrenPath, "with-tasks");
-    setModuleEnabled(phrenPath, "tasks", true);
-    ensureProjectScaffold(withTasks, "with-tasks");
-    expect(fs.existsSync(path.join(withTasks, TASKS_FILENAME))).toBe(true);
   });
 });
 
