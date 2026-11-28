@@ -149,13 +149,14 @@ One conversation reads the project's tasks and sends independent briefs to enrol
 
 ## CLI quick reference
 
-`phren` has 75 registered commands: 56 you will use (setup, projects, core, skills, hooks, config, maintain, stores, team) and 19 internal ones that hooks and background jobs call. `phren --help` prints the cheat sheet; `phren help <command>` the details.
+`phren` has 76 registered commands: 57 you will use (setup, projects, core, skills, hooks, config, maintain, stores, team) and 19 internal ones that hooks and background jobs call. `phren --help` prints the cheat sheet; `phren help <command>` the details.
 
 ```bash
 phren                                   Interactive memory shell
 phren search <query>                    Full-text search with FTS5
 phren add-finding <project> "insight"
 phren note add <project> "daily note"  Add a lightweight daily note
+phren issue list --project <p>         List this project's open forge issues
 phren task add <project> "item"         Add a task
 phren session_start <project>           Start a session
 phren store list                        List personal + team stores
@@ -203,7 +204,7 @@ All use the same phren store. No vendor lock-in.
 
 | Package | Description |
 |---------|-------------|
-| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (77 commands; 10 MCP tools by default, 83 implementation tools gated by enabled modules; FTS5, hooks), the interactive shell and terminal graph, the web UI |
+| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (78 commands; 12 MCP tools by default, 90 implementation tools gated by enabled modules; FTS5, hooks), the interactive shell and terminal graph, the web UI |
 | [`phren-vscode`](packages/vscode) | VS Code extension (sidebar, graph, onboarding) |
 | [`integrations/herdr`](integrations/herdr) | Herdr plugin: keybinding → `phren shell --here` in a pane |
 | [`integrations/omarchy`](integrations/omarchy) | Omarchy plugin: bar widget + app launcher entries for the shell and web viewer |

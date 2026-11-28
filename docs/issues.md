@@ -13,3 +13,26 @@ A claim adds `working-on:<computer>`, removes the other claim labels it read, an
 GitHub changes individual labels. Gitboy replaces the full label set, so Phren preserves the other labels from its last read when it writes a claim change. Until Gitboy adds targeted label endpoints, a release racing another computer's claim in the same second can clear the new claim if it lands between the release's read and write.
 
 Issue reads collect Markdown checkboxes throughout the body. Checklist edits replace the last block delimited by `<!-- phren:checklist -->` and `<!-- /phren:checklist -->` outside fenced code. The rest of the body is preserved byte for byte.
+
+## Command line
+
+```bash
+phren issue list --project widgets
+phren issue list --repo github.com/example/widgets --repo gitboy.example/example/gadgets --state all --assignee me
+phren issue show github.com/example/widgets#12
+phren issue new --project widgets --title "Tighten the widget" --body "Why it matters." --check "Write the test" --check "Ship it"
+phren issue edit github.com/example/widgets#12 --check-done 1 --check-add "Announce it"
+phren issue claim github.com/example/widgets#12
+phren issue comment github.com/example/widgets#12 "Done in #14."
+phren issue close github.com/example/widgets#12 --comment "Shipped."
+```
+
+An issue reference (`<ref>`) is `repo#N` (the repository may be `owner/name`, `domain/owner/name` or a URL), a full issue URL such as `https://github.com/example/widgets/issues/12`, or `#N` with `--repo` or `--project`. A bare `owner/name` in `--repo` inherits the project's forge domain when `--project` is also given. `--project` names the project whose `issues:` setting or checkout provides the repository.
+
+`list` reads the `--repo` flags, else the `--project`, else the project around the working directory, else every project with a resolvable repository. `--assignee me` resolves to the signed-in forge user. `--json` prints the machine payload instead of the table (`list` prints `{issues, errors}`, every other subcommand the issue or comment URL). A usage mistake exits 1; a forge failure exits 2 with the forge's message.
+
+`--check-done N` numbers the checklist items in the order `show` prints them. `edit` sends the complete list, so the managed block is rewritten from the current items plus your change. A checkbox written outside the managed block is still read, and is included in the rewritten block.
+
+## MCP tools
+
+`list_issues`, `get_issue`, `create_issue`, `update_issue`, `claim_issue`, `comment_issue` and `close_issue` take a repository (`repo`) or a project (`project`) plus the issue `number`. `list_issues` and `get_issue` are in the core tool profile; the rest are full-profile tools. Their parameters and response shapes are in the [API reference](api-reference.md#issues).

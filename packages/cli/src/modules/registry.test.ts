@@ -184,6 +184,7 @@ describe("built-in registration declarations", () => {
     gate.finish();
     expect([...gate.exposed].sort()).toEqual([
       "search_knowledge", "get_memory_detail", "get_project_summary", "add_finding", "revise_finding", "session", "phren_admin",
+      "list_issues", "get_issue",
     ].sort());
     expect(gate.catalog.has("get_tasks")).toBe(false);
     expect(gate.catalog.has("auto_extract_findings")).toBe(false);

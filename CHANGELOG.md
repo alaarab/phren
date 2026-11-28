@@ -11,6 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Forge issues core for GitHub and gitboy, with project repository lookup, checklists, and computer claims.
 - The phone's forge issue routes (`GET /v1/issues`, `GET /v1/issues/item`, `POST /v1/issues/{create,edit,comment,claim,close}`, capability `issues: 1`). They are owner-only, the writes are owner-proof signed, and a list covers every store project's repository when none is named. List bodies are trimmed to 2,000 characters and the answer stays under 256 KB; forge failures map to stable HTTP statuses.
 - Dispatches can bind to a forge issue, give workers its closing instructions, and post each reported PR link once per Hook.
+- `phren issue list|show|new|edit|claim|comment|close` and the `list_issues`, `get_issue`, `create_issue`, `update_issue`, `claim_issue`, `comment_issue` and `close_issue` MCP tools.
 
 ## [0.3.100] - 2026-11-27
 

@@ -20,7 +20,7 @@ the user's agents, deletes their tasks or stops an agent they launched.
 | Surface | Previous behavior | Runtime boundary |
 | --- | --- | --- |
 | `packages/cli/src/index.ts` | Imports all 15 `tools/*` registrars and calls `gate.finish()` | Resolve modules before importing optional registrars |
-| `packages/cli/src/mcp/profile.ts` | `core` exposes ten tools; the catalog keeps all tools, composites dispatch into it | Filter catalog membership by module first, then apply the MCP presentation profile |
+| `packages/cli/src/mcp/profile.ts` | `core` exposes twelve tools; the catalog keeps all tools, composites dispatch into it | Filter catalog membership by module first, then apply the MCP presentation profile |
 | `packages/cli/src/cli-registry.ts` | One unconditional catalog drives dispatch and help | Filter commands, aliases and nested subcommands together |
 | `packages/cli/src/init/config.ts`, `hooks.ts` | Install memory lifecycle callbacks and wrappers | Reconcile only enabled contributions, respecting management presets |
 | `packages/cli/src/bridge/install.ts` | Installs phone callbacks, usage status line and the OpenCode transcript plugin | Split Hook lifecycle callbacks from Git change capture; reconcile by owner |
@@ -81,7 +81,7 @@ descendants appear in help or dispatch.
 
 | Module | Default for a new store | Current contributions |
 | --- | --- | --- |
-| `memory` | Required | Findings, notes, truths, review, summaries, search, fragment graph, memory session continuity, skills, governance, project/store configuration, memory lifecycle integration and store sync |
+| `memory` | Required | Findings, notes, truths, review, summaries, search, fragment graph, memory session continuity, forge issues (`phren issue`, the issue MCP tools), skills, governance, project/store configuration, memory lifecycle integration and store sync |
 | `tasks` | Off | Seven task handlers plus `manage_task`; `task`/`tasks`; `tasks.md`, task checkpoints and task UI |
 | `hook` | Off | `bridge` service and phone transport, native agent chat, approvals, workspace control, transcript/subagent reading, files, web previews, usage and simulators |
 | `git` | Off | `auto_extract_findings`, `maintain extract`/`extract-memories`, repository diffs and `/v1/git/*`, change capture and Changes UI |

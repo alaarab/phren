@@ -587,6 +587,7 @@
           <div class="sidebar-group-items" data-group="cli">
             <a href="#cli-general" class="sidebar-link sub">General</a>
             <a href="#cli-search" class="sidebar-link sub">Search</a>
+            <a href="#cli-issues" class="sidebar-link sub">Issues</a>
             <a href="#cli-tasks" class="sidebar-link sub">Tasks</a>
             <a href="#cli-findings" class="sidebar-link sub">Findings</a>
             <a href="#cli-projects" class="sidebar-link sub">Projects</a>
@@ -613,6 +614,7 @@
             <a href="#mcp-profiles" class="sidebar-link sub">Tool Profiles</a>
             <a href="#mcp-search" class="sidebar-link sub">Search &amp; Browse</a>
             <a href="#mcp-notes" class="sidebar-link sub">Daily Notes</a>
+            <a href="#mcp-issues" class="sidebar-link sub">Issues</a>
             <a href="#mcp-tasks" class="sidebar-link sub">Task Management</a>
             <a href="#mcp-findings" class="sidebar-link sub">Finding Capture</a>
             <a href="#mcp-memory" class="sidebar-link sub">Memory Quality</a>
@@ -1404,6 +1406,43 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
           <div class="ref-card-desc">Show the fragment knowledge graph.</div>
         </div>
 
+        <h2 id="cli-issues">Issues <a href="#cli-issues" class="anchor-link">#</a></h2>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue list [--repo &lt;ref&gt;]... [--project &lt;p&gt;] [--state open|closed|all] [--assignee me|&lt;user&gt;] [--label &lt;l&gt;] [--search &lt;q&gt;] [--json]</div>
+          <div class="ref-card-desc">List open issues from GitHub or gitboy repositories, or a project's repository. Without flags it uses the project around the working directory, then every project with a resolvable repository. <a href="issues.md">Forge issues</a></div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue show &lt;ref&gt;</div>
+          <div class="ref-card-desc">Show one issue with its body, labels, assignees, claim and checklist. <code>&lt;ref&gt;</code> is <code>repo#N</code>, a full issue URL, or <code>#N</code> with <code>--repo</code>/<code>--project</code>.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue new (--repo &lt;ref&gt;|--project &lt;p&gt;) --title &lt;t&gt; [--body &lt;b&gt;] [--check "step"]...</div>
+          <div class="ref-card-desc">Open an issue. Each <code>--check</code> adds an unchecked step to the managed checklist block.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue edit &lt;ref&gt; [--title &lt;t&gt;] [--body &lt;b&gt;] [--check-done &lt;n&gt;]... [--check-add "step"]...</div>
+          <div class="ref-card-desc">Change an issue. <code>--check-done</code> numbers the steps <code>show</code> prints; <code>--check-add</code> appends one.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue claim &lt;ref&gt; [--release]</div>
+          <div class="ref-card-desc">Assign the issue to you and label it <code>working-on:&lt;this computer&gt;</code>, or release this computer's claim.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue comment &lt;ref&gt; &lt;text&gt;</div>
+          <div class="ref-card-desc">Post one comment on an issue.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren issue close &lt;ref&gt; [--comment &lt;text&gt;]</div>
+          <div class="ref-card-desc">Close an issue, optionally with one comment.</div>
+        </div>
+
         <h2 id="cli-tasks">Tasks <a href="#cli-tasks" class="anchor-link">#</a></h2>
 
         <div class="ref-card">
@@ -1764,8 +1803,8 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
             <tr><th>Profile</th><th>What the agent sees</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>core</code></td><td>The default. 10 tools: the ones used in normal work, plus composites that reach the rest by <code>action</code>.</td></tr>
-            <tr><td><code>full</code></td><td>Every tool from your enabled modules (70 with all modules on), plus the 4 composites.</td></tr>
+            <tr><td><code>core</code></td><td>The default. 12 tools: the ones used in normal work, plus composites that reach the rest by <code>action</code>.</td></tr>
+            <tr><td><code>full</code></td><td>Every tool from your enabled modules (77 with all modules on), plus the 4 composites.</td></tr>
           </tbody>
         </table></div>
 
@@ -1780,6 +1819,8 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
             <tr><td><code>get_project_summary</code></td><td>A project's summary and docs</td></tr>
             <tr><td><code>add_finding</code></td><td>Save findings. Pass <code>kind: "note"</code> for a daily note.</td></tr>
             <tr><td><code>revise_finding</code></td><td>Actions: supersede, retract, edit, remove, link, resolve_contradiction, pin, feedback</td></tr>
+            <tr><td><code>list_issues</code></td><td>List GitHub or gitboy issues</td></tr>
+            <tr><td><code>get_issue</code></td><td>Read one issue with its checklist</td></tr>
             <tr><td><code>get_tasks</code></td><td>Read tasks</td></tr>
             <tr><td><code>add_task</code></td><td>Add tasks to the queue</td></tr>
             <tr><td><code>manage_task</code></td><td>Actions: complete, update, remove, pin, tidy</td></tr>
@@ -1810,6 +1851,16 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <details class="ref-card"><summary><span class="ref-card-name">edit_note</span><span class="ref-card-desc">Replace note text</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, note, text)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">remove_note</span><span class="ref-card-desc">Remove one note</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, note)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">promote_note</span><span class="ref-card-desc">Copy a note to durable findings</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, note, findingType?)</div></div></details>
+
+        <h2 id="mcp-issues">Issues <span class="cat-badge cat-task">7 tools</span> <a href="#mcp-issues" class="anchor-link">#</a></h2>
+        <p>Work lives in forge issues (GitHub and gitboy). A tool takes a <code>repo</code> reference or a <code>project</code> whose <code>issues:</code> setting or checkout names one, plus the issue <code>number</code>. <a href="issues.md">Forge issues</a></p>
+        <details class="ref-card"><summary><span class="ref-card-name">list_issues</span><span class="ref-card-desc">List issues across repositories or a project; open by default, 50 results</span></summary><div class="ref-card-details"><div class="ref-card-params">(repos?, project?, state?, assignee?, label?, search?, limit?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">get_issue</span><span class="ref-card-desc">Read one issue: body, labels, assignees, claim and checklist</span></summary><div class="ref-card-details"><div class="ref-card-params">(repo?, project?, number)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">create_issue</span><span class="ref-card-desc">Open an issue; a checklist becomes the managed block</span></summary><div class="ref-card-details"><div class="ref-card-params">(repo?, project?, title, body?, checklist?, labels?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">update_issue</span><span class="ref-card-desc">Change title, body, checklist, labels or state</span></summary><div class="ref-card-details"><div class="ref-card-params">(repo?, project?, number, title?, body?, checklist?, add_labels?, remove_labels?, state?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">claim_issue</span><span class="ref-card-desc">Assign the issue to you for this computer, or release it</span></summary><div class="ref-card-details"><div class="ref-card-params">(repo?, project?, number, release?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">comment_issue</span><span class="ref-card-desc">Post one comment and return its URL</span></summary><div class="ref-card-details"><div class="ref-card-params">(repo?, project?, number, body)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">close_issue</span><span class="ref-card-desc">Close an issue, optionally with one comment</span></summary><div class="ref-card-details"><div class="ref-card-params">(repo?, project?, number, comment?)</div></div></details>
 
         <h2 id="mcp-tasks">Task Management <span class="cat-badge cat-task">7 tools</span> <a href="#mcp-tasks" class="anchor-link">#</a></h2>
 

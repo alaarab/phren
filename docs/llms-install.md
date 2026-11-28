@@ -1,6 +1,6 @@
 # phren: LLM Installation Guide
 
-phren keeps project memory portable across sessions and machines. It runs as an MCP server and a set of lifecycle hooks. The server's default `core` profile exposes ten tools; the tables below list every tool by its full-profile name, and in `core` the folded ones are reached as `revise_finding` / `manage_task` / `session` / `phren_admin` with an `action` parameter (see `api-reference.md`).
+phren keeps project memory portable across sessions and machines. It runs as an MCP server and a set of lifecycle hooks. The server's default `core` profile exposes twelve tools; the tables below list every tool by its full-profile name, and in `core` the folded ones are reached as `revise_finding` / `manage_task` / `session` / `phren_admin` with an `action` parameter (see `api-reference.md`).
 
 ## Quick Start
 
@@ -70,7 +70,7 @@ Team stores sync independently via git. Findings, notes, and tasks in a team sto
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (83)
+## MCP Tools (90)
 
 ### Search and Browse
 
@@ -93,6 +93,18 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | `promote_note` | `project`, `note`, `findingType?` | Copy a note to findings and retain it with a promoted marker. |
 
 Notes are explicitly searchable but excluded from automatic hook context, finding lifecycle/review, and the fragment graph.
+
+### Forge Issues
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `list_issues` | `repos?`, `project?`, `state?`, `assignee?`, `label?`, `search?`, `limit?` | List GitHub or gitboy issues across repositories, or a project's repository. `list_issues` and `get_issue` are in the core profile too. |
+| `get_issue` | `repo?`, `project?`, `number` | Read one issue: body, labels, assignees, claim and parsed checklist. |
+| `create_issue` | `repo?`, `project?`, `title`, `body?`, `checklist?`, `labels?` | Open an issue; a checklist becomes the managed block in the body. |
+| `update_issue` | `repo?`, `project?`, `number`, `title?`, `body?`, `checklist?`, `add_labels?`, `remove_labels?`, `state?` | Change an issue; `checklist` replaces the managed block. |
+| `claim_issue` | `repo?`, `project?`, `number`, `release?` | Assign the issue to you and label it `working-on:<computer>`, or release it. |
+| `comment_issue` | `repo?`, `project?`, `number`, `body` | Post one comment and return its URL. |
+| `close_issue` | `repo?`, `project?`, `number`, `comment?` | Close an issue, optionally with a comment. |
 
 ### Task Management (`task` tools)
 

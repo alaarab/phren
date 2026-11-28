@@ -29,6 +29,8 @@ export const CORE_TOOLS: readonly string[] = [
   "get_project_summary",
   "add_finding",
   "revise_finding",
+  "list_issues",
+  "get_issue",
   "get_tasks",
   "add_task",
   "manage_task",
