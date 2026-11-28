@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { Json } from "../bridge/protocol.js";
-import { parseChecklist, rewriteChecklist } from "./checklist.js";
+import { editChecklist, parseChecklist, rewriteChecklist } from "./checklist.js";
 import { forgeFailure, ForgeError } from "./errors.js";
 import type { ForgeKind, Issue, IssueEdit, IssueProvider, IssueQuery, IssueRef, RepoRef } from "./issues.js";
 import { repoParts } from "./repositories.js";
@@ -110,7 +110,9 @@ function editPatch(current: Issue, edit: IssueEdit): IssuePatch {
   if (edit.title !== undefined && edit.title !== current.title) patch.title = edit.title;
   if (edit.state !== undefined && edit.state !== current.state) patch.state = edit.state;
   const base = edit.body ?? current.body;
-  const body = edit.checklist ? rewriteChecklist(base, edit.checklist) : base;
+  const body = edit.checklistChanges
+    ? editChecklist(base, edit.checklistChanges.done, edit.checklistChanges.added)
+    : edit.checklist ? rewriteChecklist(base, edit.checklist) : base;
   if (body !== current.body) patch.body = body;
   if (edit.addLabels?.length || edit.removeLabels?.length) {
     const labels = unique([...current.labels.filter(label => !hasName(edit.removeLabels ?? [], label)), ...(edit.addLabels ?? [])]);

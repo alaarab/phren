@@ -77,6 +77,22 @@ describe("checklists", () => {
     ]);
   });
 
+  it("ticks handwritten and managed source checkboxes in place, skipping fenced examples", async () => {
+    const lines = ["Intro", "~~~markdown", "- [ ] Example", "~~~", "  - [ ] Add tests  ", "",
+      OPEN, "- [ ] Ship", CLOSE, "Footer"];
+    const provider = githubIssueBodyFixture(lines.join("\r\n"));
+    const ref = { repo: github, number: 1 };
+    const edit = { checklistChanges: { done: [1, 2], added: ["Announce it"] } };
+    const updated = await provider.edit(ref, edit);
+    expect(updated.body).toBe(["Intro", "~~~markdown", "- [ ] Example", "~~~", "  - [x] Add tests  ", "",
+      OPEN, "- [x] Ship", "- [ ] Announce it", CLOSE, "Footer"].join("\r\n"));
+    expect(updated.checklist).toEqual([
+      { text: "Add tests", done: true }, { text: "Ship", done: true }, { text: "Announce it", done: false },
+    ]);
+    const repeated = await provider.edit(ref, { checklistChanges: { done: [1, 2], added: [] } });
+    expect(repeated.body).toBe(updated.body);
+  });
+
   it("appends a block during creation and appends it once when an existing body has no block", async () => {
     const plain = "Keep this spacing.  \n- [ ] Handwritten";
     const gitboyBody = "## Details\n";

@@ -12,7 +12,7 @@ A claim adds `working-on:<computer>` and assigns the signed-in user only if no o
 
 Claim and release serialize across computers using a temporary, uniquely named repository label (`phren:claim-lock:<issue number>`). If a process dies while holding this label, an owner can delete it from the repository after confirming the process has stopped. Make claim changes through Phren to participate in the same coordination.
 
-Issue reads collect Markdown checkboxes throughout the body. Checklist edits replace the last block delimited by `<!-- phren:checklist -->` and `<!-- /phren:checklist -->` outside fenced code. The rest of the body is preserved byte for byte.
+Issue reads collect Markdown checkboxes outside fenced code. Checklist edits replace the last block delimited by `<!-- phren:checklist -->` and `<!-- /phren:checklist -->` outside fenced code. The rest of the body is preserved byte for byte.
 
 ## Command line
 
@@ -31,7 +31,7 @@ An issue reference (`<ref>`) is `repo#N` (the repository may be `owner/name`, `d
 
 `list` reads the `--repo` flags, else the `--project`, else the project around the working directory, else every project with a resolvable repository. `--assignee me` resolves to the signed-in forge user. `--json` prints the machine payload instead of the table (`list` prints `{issues, errors}`, every other subcommand the issue or comment URL). A usage mistake exits 1; a forge failure exits 2 with the forge's message.
 
-`--check-done N` numbers the checklist items in the order `show` prints them. `edit` sends the complete list, so the managed block is rewritten from the current items plus your change. A checkbox written outside the managed block is still read, and is included in the rewritten block.
+`--check-done N` numbers checkboxes in the order `show` prints them and edits the original checkbox in place. `--check-add` appends new items to the last managed block or creates one when needed. If you also pass `--body`, numbering applies to that replacement body.
 
 ## MCP tools
 

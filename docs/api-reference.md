@@ -1153,7 +1153,7 @@ Open an issue. `checklist` becomes the managed block between `<!-- phren:checkli
 
 ### `update_issue`
 
-Change an issue's title, body, checklist, labels or state. `checklist` is the complete list and replaces the managed block; pass the current items plus your change (the same rule the CLI's `--check-done`/`--check-add` follow). `add_labels` and `remove_labels` change individual labels; use `claim_issue` for a `working-on:<computer>` claim.
+Change an issue's title, body, checklist, labels or state. `checklist` is the complete list and replaces the managed block; pass the items you want in that block. `add_labels` and `remove_labels` change individual labels; use `claim_issue` for a `working-on:<computer>` claim.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

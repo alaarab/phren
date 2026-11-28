@@ -40,6 +40,7 @@ export interface IssueEdit {
   title?: string;
   body?: string;
   checklist?: ChecklistItem[];
+  checklistChanges?: { done: number[]; added: string[] };
   addLabels?: string[];
   removeLabels?: string[];
   state?: "open" | "closed";

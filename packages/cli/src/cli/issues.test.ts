@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ChecklistIndexError } from "../forge/checklist.js";
 import { ForgeError, type Issue } from "../forge/issues.js";
 import { makeTempDir } from "../test-helpers.js";
 import { handleIssueCommand, parseIssueArgs, resolveIssueRef, splitIssueRef } from "./issues.js";
@@ -221,14 +222,12 @@ describe("new", () => {
 
 describe("edit", () => {
   it("ticks a checklist item by position and appends a step", async () => {
-    const provider = fakeProvider({
-      get: vi.fn(async () => issue({ checklist: [{ text: "Test it", done: false }, { text: "Ship it", done: false }] })),
-    });
+    const provider = fakeProvider();
     forge.providerFor.mockReturnValue(provider);
     const code = await handleIssueCommand(["edit", "github.com/example/widgets#12", "--check-done", "2", "--check-add", "Announce it"], store.path);
     expect(code).toBe(0);
     expect(provider.edit).toHaveBeenCalledWith({ repo, number: 12 }, {
-      checklist: [{ text: "Test it", done: false }, { text: "Ship it", done: true }, { text: "Announce it", done: false }],
+      checklistChanges: { done: [2], added: ["Announce it"] },
     });
   });
 
@@ -242,7 +241,7 @@ describe("edit", () => {
 
   it("refuses an out-of-range step and a no-op edit", async () => {
     forge.providerFor.mockReturnValue(fakeProvider({
-      get: vi.fn(async () => issue({ checklist: [{ text: "Only", done: false }] })),
+      edit: vi.fn(async () => { throw new ChecklistIndexError(2, 1); }),
     }));
     expect(await handleIssueCommand(["edit", "github.com/example/widgets#12", "--check-done", "2"], store.path)).toBe(1);
     expect(await handleIssueCommand(["edit", "github.com/example/widgets#12"], store.path)).toBe(1);

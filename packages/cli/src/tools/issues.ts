@@ -85,7 +85,7 @@ const issueRefShape = {
 const checklistShape = z.array(z.object({
   text: z.string().describe("The step."),
   done: z.boolean().optional().describe("Whether the step is complete (default false)."),
-}).strict()).describe("The issue's complete checklist; it replaces the managed block in the body. Pass the current items plus your changes.");
+}).strict()).describe("The complete list of items for the managed block, which this replaces.");
 
 export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
@@ -190,7 +190,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     "update_issue",
     {
       title: "◆ phren · update issue",
-      description: "Change an issue's title, body, checklist, labels or state. checklist replaces the managed block in the body; pass the complete list. add_labels and remove_labels change individual labels (a working-on:<computer> label is how a claim is shown; use claim_issue for that).",
+      description: "Change an issue's title, body, checklist, labels or state. checklist replaces the managed block in the body; pass the complete list for that block. add_labels and remove_labels change individual labels (a working-on:<computer> label is how a claim is shown; use claim_issue for that).",
       inputSchema: z.object({
         ...issueRefShape,
         title: z.string().optional().describe("New title."),

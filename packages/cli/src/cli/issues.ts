@@ -1,11 +1,11 @@
 import path from "node:path";
+import { ChecklistIndexError } from "../forge/checklist.js";
 import {
   ForgeError,
   listAcross,
   parseRepoForProject,
   providerFor,
   repoForProject,
-  type ChecklistItem,
   type Issue,
   type IssueEdit,
   type IssueQuery,
@@ -284,22 +284,11 @@ async function edit(args: ParsedArgs, store: string): Promise<void> {
   const body = one(args.flags, "--body");
   if (title !== undefined) edit.title = title;
   if (body !== undefined) edit.body = body;
-  const doneIndexes = many(args.flags, "--check-done");
+  const done = many(args.flags, "--check-done").map(text => positiveInteger(text, "--check-done"));
   const added = many(args.flags, "--check-add");
-  const provider = providerFor(ref.repo);
-  if (doneIndexes.length || added.length) {
-    const current = await provider.get(ref);
-    const checklist: ChecklistItem[] = current.checklist.map(item => ({ ...item }));
-    for (const text of doneIndexes) {
-      const index = positiveInteger(text, "--check-done");
-      if (index > checklist.length) throw new UsageError(`--check-done ${index} is past the ${checklist.length} checklist item(s) on this issue.`);
-      checklist[index - 1]!.done = true;
-    }
-    for (const text of added) checklist.push({ text, done: false });
-    edit.checklist = checklist;
-  }
+  if (done.length || added.length) edit.checklistChanges = { done, added };
   if (!Object.keys(edit).length) throw new UsageError("Pass --title, --body, --check-done or --check-add.");
-  const issue = await provider.edit(ref, edit);
+  const issue = await providerFor(ref.repo).edit(ref, edit);
   if (has(args.flags, "--json")) json(issue);
   else renderWrite(issue, "Updated");
 }
@@ -351,7 +340,7 @@ export async function handleIssueCommand(args: string[], store: string, profile 
     else throw new UsageError(USAGE);
     return 0;
   } catch (error) {
-    if (error instanceof UsageError) {
+    if (error instanceof UsageError || error instanceof ChecklistIndexError) {
       console.error(error.message);
       return 1;
     }
