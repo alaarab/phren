@@ -5,6 +5,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { hookRequest } from "../bridge/client.js";
 import { dispatchSchema } from "../bridge/dispatch.js";
+import { dispatchIssueSchema } from "../bridge/dispatch-issue.js";
 import { handOff, handOffSchema, listLiveSessions, moveSession, moveSessionSchema } from "../bridge/hand-off.js";
 import { readAccountUsage, usageSummary } from "../bridge/account-usage.js";
 import { machineHealthReport, readComputers } from "../computers/read.js";
@@ -32,8 +33,9 @@ export function register(server: McpServer): void {
   });
   server.registerTool("dispatch_report", {
     title: "◆ phren · report PRs",
-    description: "Report PR evidence to this worker's own Hook before finishing the turn. The done return carries prs (url, repo, branch, tests summary, notes), and the Hook queues it to the configured integrator. No direct worker messaging or GitHub comment is needed. Does not claim tests passed or complete a task.",
-    inputSchema: { prs: prsSchema, task: mergeTaskIdentitySchema.optional().describe("Private task to link; otherwise use the launch association. Never publish this identity to GitHub.") },
+    description: "Report PR evidence to this worker's own Hook before finishing the turn. The done return carries prs (url, repo, branch, tests summary, notes), and the Hook queues it to the configured integrator. The Hook posts each PR link on the dispatch's issue or the issue named here. Check issueLinks for the result.",
+    inputSchema: { prs: prsSchema, issue: dispatchIssueSchema.optional(),
+      task: mergeTaskIdentitySchema.optional().describe("Deprecated task identity, accepted and ignored.") },
   }, async input => {
     try {
       const origin = await terminalPaneFromEnv();
@@ -41,7 +43,10 @@ export function register(server: McpServer): void {
       // The launch's dispatch id lets the Hook accept a report whose turn it did not record (worker-reports.ts).
       const dispatch = dispatchIdFromEnv();
       const result = await hookRequest("/v1/dispatch/report", { ...input, origin, ...(dispatch ? { dispatch } : {}) });
-      return mcpResponse({ ok: result.ok === true, data: result, message: "PR evidence recorded for this turn's done return." });
+      const linkError = object(result.issueLinks).error;
+      return mcpResponse({ ok: result.ok === true, data: result, message: typeof linkError === "string"
+        ? `PR evidence recorded for this turn's done return. Issue linkage: ${linkError}`
+        : "PR evidence recorded for this turn's done return." });
     } catch (error) { return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not report PR evidence." }); }
   });
   server.registerTool("owner_inbox", {

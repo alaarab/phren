@@ -259,7 +259,7 @@ export const REGISTRY: Command[] = [
     },
   },
   {
-    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere|local> <project> --prompt <brief> | --prompt-file <path|-> [--harness codex|claude|opencode|copilot] [--label <label>] [--idempotency-key <key>] [--worktree [--branch <name>]] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
+    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere|local> <project> --prompt <brief> | --prompt-file <path|-> [--harness codex|claude|opencode|copilot] [--label <label>] [--issue <repo#N>] [--idempotency-key <key>] [--worktree [--branch <name>]] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
     summary: "Dispatch a worker brief through Phren Hook",
     subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List the 100 local dispatch receipts with the newest activity" },
       { name: "wait", usage: "phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json] [--follow]", summary: "Follow one local dispatch to its end as NDJSON; exits 0 done, 1 failed or gone, 124 timeout" },
@@ -267,7 +267,7 @@ export const REGISTRY: Command[] = [
       { name: "returns", usage: "phren dispatch returns [--watch [--json] [--consume]]", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read; --watch prints them as they land until Ctrl-C, leaving them unread unless --consume" },
       { name: "sessions", usage: "phren dispatch sessions", summary: "List live agent sessions on this and every enrolled computer" },
       { name: "usage", usage: "phren dispatch usage [--json]", summary: "Show agent usage on this and every enrolled computer, merged by account" },
-      { name: "report", usage: "phren dispatch report --prs <JSON>", summary: "Record this worker turn's PR evidence for the integrator" },
+      { name: "report", usage: "phren dispatch report --prs <JSON> [--issue <repo#N>]", summary: "Record this worker turn's PR evidence and link it on the issue" },
       { name: "close-self", usage: "phren dispatch close-self", summary: "Close the pane this agent runs in once its work is committed and reported (the sanctioned form of herdr pane close)" }],
     run: async args => (await import("./bridge/dispatch-command.js")).runDispatch(args),
   },

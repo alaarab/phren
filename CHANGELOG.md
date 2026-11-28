@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Owner Inbox items can carry an `issue` link (`domain/owner/name#N`), accepted by `phren owner-inbox add --issue`, `owner_inbox` and the Hook add route. It is stored inside the item's title (`" (issue: <ref>)"`), so a 0.3.100 Hook and older phones keep reading every row; readers that ask for it (`issues=1`) receive the structured field instead. A linked title is stored whole: one that does not fit beside the link (500 characters together) is refused with 400 rather than trimmed. Capability `ownerInboxIssues`.
 - Forge issues core for GitHub and gitboy, with project repository lookup, checklists, and computer claims.
 - The phone's forge issue routes (`GET /v1/issues`, `GET /v1/issues/item`, `POST /v1/issues/{create,edit,comment,claim,close}`, capability `issues: 1`). They are owner-only, the writes are owner-proof signed, and a list covers every store project's repository when none is named. List bodies are trimmed to 2,000 characters and the answer stays under 256 KB; forge failures map to stable HTTP statuses.
+- Dispatches can bind to a forge issue, give workers its closing instructions, and post each reported PR link once per Hook.
 
 ## [0.3.100] - 2026-11-27
 

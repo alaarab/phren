@@ -1,5 +1,5 @@
 import { mergeTaskIdentitySchema } from "../task/merge-links.js";
-import { recordDispatchWorker, resolveBriefTask, taskWorkEnabled } from "./task-work.js";
+import { dispatchIssueSchema, issueBriefBlock, writeDispatchIssue } from "./dispatch-issue.js";
 import { redactPeerHandoff } from "./peer-handoff.js";
 import { integratorSchema, prsSchema } from "./return-contract.js";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -39,9 +39,9 @@ export const DISPATCH_PROMPT_LIMIT = 32768;
 /** The harnesses a dispatch, a code note's hand-off or a schedule can start. */
 export const PEER_COPILOT_REASON = "Copilot cannot continue on another computer: its harness does not confirm launch-brief arrival. Continue locally or choose another harness.";
 export const DISPATCH_HARNESSES = ["codex", "claude", "opencode", "copilot"] as const;
-export const dispatchSchema = z.object({
+const dispatchMetadataSchema = z.object({
   computer: z.union([z.literal("anywhere"), computerName]).describe("Enrolled computer name, local for this computer, or anywhere for the least busy connected computer."),
-  task: mergeTaskIdentitySchema.optional().describe("Private task identity for merge reconciliation. Never put it in commits or GitHub."),
+  task: mergeTaskIdentitySchema.optional().describe("Deprecated task identity, accepted and ignored."),
   project: projectName.describe("Project slug registered on the receiving computer."),
   harness: z.enum(DISPATCH_HARNESSES).describe("Agent harness on the receiving computer."),
   model: text(200).optional().describe("Explicit model, otherwise the remote harness default."),
@@ -62,6 +62,7 @@ export const dispatchSchema = z.object({
   parent: dispatchParentSchema.optional().describe("Explicit local conversation parent for work-tree attachment."),
   parentTarget: targetSchema.optional().describe("Complete live target for the explicit parent."),
 }).strict();
+export const dispatchSchema = dispatchMetadataSchema.extend({ issue: dispatchIssueSchema.optional() });
 export type DispatchInput = z.infer<typeof dispatchSchema>;
 /** Where a session moves to (session-move.ts): a harness with its account, model and effort, as a dispatch names them. */
 export const moveToSchema = z.object({
@@ -91,7 +92,7 @@ export const workerTaskSchema = z.object({
 }).strict();
 export type WorkerTask = z.infer<typeof workerTaskSchema>;
 const timestamp = z.string().datetime();
-const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
+const receiptSchema = dispatchMetadataSchema.omit({ prompt: true }).extend({
   id: z.string().uuid(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
   computerId: z.string().uuid().optional(),
   state: z.enum(["launching", "sending", "accepted", "uncertain", "failed"]),
@@ -231,8 +232,6 @@ async function saveReceipt(receipt: Receipt): Promise<void> {
   const root = path.join(bridgeRoot(), "dispatches");
   await mkdir(root, { recursive: true, mode: 0o700 });
   await atomic(path.join(root, `${receipt.id}.json`), receipt);
-  // The task the dispatch works on shows its worker and follows its state (task-work.ts).
-  if (receipt.task) try { recordDispatchWorker(receipt); } catch { /* The receipt is the record; the task link catches up on the next write. */ }
 }
 
 const IGNORED_MODE = "The receiving Hook is older and ignored permissionMode; the worker runs in that computer's default mode. Update its Hook.";
@@ -1193,8 +1192,6 @@ export class DispatchService {
    * `continues` names the dispatch whose worker hit its usage limit (account-failover.ts). */
   async dispatch(input: unknown, originValue?: unknown, continues?: string): Promise<Json> {
     const data = dispatchSchema.parse(input);
-    // A brief that names a task (bid:, its stable id, or its quoted title) binds the dispatch to it.
-    if (!data.task && taskWorkEnabled()) try { data.task = resolveBriefTask(phrenStoreRoot(), data.prompt, data.project); } catch { /* Unbound, as before. */ }
     if (data.idempotencyKey && data.worktree !== true) {
       throw new BridgeError(400, "A dispatch with an idempotency key requires --worktree: keyed workers run only in a Phren-managed clone.");
     }
@@ -1371,8 +1368,12 @@ export class DispatchService {
       const authority = checked?.authority ?? await readAuthority().then(policy => projectAuthority(policy, data.project)).catch(() => undefined);
       const origin = await this.origin(originValue);
       // Prompts are sent over the pipe, never stored in the dispatch ledger.
-      const { prompt: originalPrompt, ...metadata } = data;
-      const prompt = peer.local ? originalPrompt : redactPeerHandoff(originalPrompt);
+      const { prompt: originalPrompt, issue, task: _task, ...metadata } = data;
+      const body = peer.local ? originalPrompt : redactPeerHandoff(originalPrompt);
+      const issueBlock = issue ? issueBriefBlock(issue) : undefined;
+      const prompt = issueBlock ? `${body.trimEnd()}\n\n${issueBlock}` : body;
+      if (issueBlock && prompt.length > DISPATCH_PROMPT_LIMIT)
+        throw new BridgeError(400, "The prompt and issue instructions exceed the worker brief limit. Shorten the prompt.");
       // A fresh worktree per dispatch: the caller may name its branch (gitboy's
       // brief does), otherwise it is derived from the idempotency key or the id.
       const worktree = data.worktree === true ? (data.branch ?? worktreeBranchFor(data.idempotencyKey, dispatchId)) : undefined;
@@ -1385,6 +1386,7 @@ export class DispatchService {
         ...(checked?.confirmation ? { authorityConfirmed: checked.confirmation.confirmedAt } : {}),
         ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}), ...(continues ? { continues } : {}),
         ...(keyed?.paths ? { cloneDir: keyed.paths.cloneDir, gitConfigFile: keyed.paths.gitConfigFile, agentTokenFile: keyed.paths.agentTokenFile, ...(keyed.paths.workerFile ? { workerFile: keyed.paths.workerFile } : {}) } : {}) };
+      if (issue) await writeDispatchIssue(receipt.id, issue);
       if (keyed) {
         await withIdempotencyKeyLock(keyed.key, async record => {
           if (record?.cancelRequestedAt) {
@@ -1442,7 +1444,7 @@ export class DispatchService {
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
-          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ?? policyChoice?.account ? { account: data.account ?? policyChoice!.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), ...(worktree ? { worktree: { branch: worktree } } : {}), startingToken, ...(data.idempotencyKey ? { idempotencyKey: data.idempotencyKey, dispatchId: receipt.id, ...(keyed?.paths ? { phrenPaths: keyed.paths } : {}) } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt, ...(data.task ? { task: data.task } : {}) } });
+          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ?? policyChoice?.account ? { account: data.account ?? policyChoice!.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), ...(worktree ? { worktree: { branch: worktree } } : {}), startingToken, ...(data.idempotencyKey ? { idempotencyKey: data.idempotencyKey, dispatchId: receipt.id, ...(keyed?.paths ? { phrenPaths: keyed.paths } : {}) } : {}), label: peer.local ? data.label : redactPeerHandoff(data.label), brief: { id: receipt.id, text: prompt }, ...(issue ? { issue } : {}) });
         const parsedLaunched = remoteTarget.safeParse(launched.target);
         if (typeof launched.cloneDir === "string") receipt.cloneDir = launched.cloneDir;
         if (typeof launched.gitConfigFile === "string") receipt.gitConfigFile = launched.gitConfigFile;

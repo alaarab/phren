@@ -3169,21 +3169,31 @@ schedules:
       expect((await api("/v1/dispatch?id=unknown")).data.dispatches).toEqual([]);
     });
 
-    it("dispatches through a fake SSH pipe to a second Hook and its registered project", async () => {
+    it("dispatches an issue through a fake SSH pipe and binds the receiving Hook's brief", async () => {
       await dispatchFixture();
-      const sending = api("/v1/dispatch", { computer: "Devbox", project: "phren", harness: "codex", model: "test-model", label: "Worker", prompt: "Run the assigned checks" });
+      const issue = { repo: "github.com/example/widgets", number: 42 };
+      const task = { storeId: "12345678", project: "phren", stableId: "12345678" };
+      const sending = api("/v1/dispatch", { computer: "Devbox", project: "phren", harness: "codex", model: "test-model",
+        label: "Worker", prompt: "Run the assigned checks", issue: "github.com/example/widgets#42", task });
       // The receiving Hook writes the brief and starts Codex with it as the first prompt.
       const briefs = path.join(root, "remote/briefs");
       await waitFor(async () => (await readdir(briefs).catch(() => [])).length > 0, 10_000);
       const [id] = await readdir(briefs);
       const file = path.join(briefs, id, "brief.md");
-      expect(await readFile(file, "utf8")).toBe("Run the assigned checks\n");
+      expect(await readFile(file, "utf8")).toBe([
+        "Run the assigned checks", "", "Issue: github.com/example/widgets#42 (https://github.com/example/widgets/issues/42)",
+        "Post ONE summary comment on github.com/example/widgets#42 when you finish (comment_issue or phren issue comment).",
+        "PRs say Closes example/widgets#42.", "",
+      ].join("\n"));
       // What the worker's UserPromptSubmit hook records when Codex submits it.
       const worker = { server: "default", workspace: "w9", tab: "w9:t1", pane: "w9:p1", source: "codex", session: "00000009-1111-4111-8111-111111111111" };
       await writeFile(path.join(briefs, id, "arrival.json"), JSON.stringify({ accepted: { at: new Date().toISOString(), target: worker } }));
       const sent = await sending;
       expect(sent.status, JSON.stringify(sent.data)).toBe(200);
       expect(sent.data).toMatchObject({ ok: true, id, computer: "Devbox", state: "accepted", brief: "launch", target: worker });
+      for (const folder of ["bridge", "remote"])
+        expect(JSON.parse(await readFile(path.join(root, folder, "dispatch-issues", `${id}.json`), "utf8"))).toEqual(issue);
+      expect(await readdir(path.dirname(file))).not.toContain("task.json");
       // The remote Hook resolves the checkout through realpath; on macOS /tmp is a symlink.
       expect(commands.find(c => c.method === "workspace.create")?.params).toMatchObject({ cwd: await realpathAsync(path.join(root, "checkout")), env: { PHREN_DISPATCH_ID: id } });
       expect(commands.find(c => c.method === "agent.start")?.params.args).toEqual(["--model", "test-model", `Read and follow the brief in ${file}`, "-c", "check_for_update_on_startup=false"]);
