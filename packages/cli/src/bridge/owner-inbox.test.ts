@@ -71,7 +71,7 @@ describe("owner inbox", () => {
       project: z.string().max(200).optional(), computer: z.string().max(253).optional(),
       target: inboxTargetSchema.optional(), dispatch: z.string().uuid().optional(), actionId: z.string().max(200).optional(),
       source: z.string().max(500).optional(), live: z.boolean().optional(),
-      command: z.string().min(1).max(4000).optional(), task: z.string().max(40).optional(),
+      command: z.string().min(1).max(4000).optional(),
       pr: z.string().max(1000).optional(), key: z.string().min(1).max(200).optional(),
     }).strict();
     const box = inbox();

@@ -17,6 +17,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Phren's local Tasks feature across the CLI, Hook, editor extension, desktop, and plugins. Existing `tasks.md` files stay on disk and are unused. The Tasks screen in older phone apps stops working when connected to a 0.4.0 Hook.
 
+## [0.3.101] - 2026-11-27
+
+### Added
+
+- The owner Inbox on the phone. `GET /v1/owner-inbox?compact=1` returns a compact cross-computer read, with peers read compact under a 6 s deadline. The new owner-signed `POST /v1/owner-inbox/close` resolves or dismisses an item, checked against its revision. The new capabilities are `ownerInboxClose` and `ownerInboxPush`. A paired phone is alerted (push kind `ownerInbox`, category `PHREN_OWNER_INBOX`) when an open item it owns first appears on a computer, once per phone, with a send ledger in `<bridge>/owner-inbox-push.json`. Items from the shared store, such as stale tasks, and mirrored remote asks are listed but never pushed. After the upgrade, the first sweep alerts at most three open items updated in the last 24 h; `PHREN_OWNER_INBOX_BACKFILL_ID` names one more regardless of age. (#956)
+- An owner Inbox item can link the forge issue it is about (`domain/owner/name#N`): `phren owner-inbox add --issue`, `phren_admin owner_inbox` and the Hook's add route. The link is stored as a title suffix so an older Hook still reads the store, and clients that send `?issues=1` get a structured `issue` field. (#959)
+
+### Fixed
+
+- Two tests that failed on Windows under load: the pane-probe deadline in search and the five-claim sync test. (#945, #946)
+
 ## [0.3.100] - 2026-11-27
 
 ### Added

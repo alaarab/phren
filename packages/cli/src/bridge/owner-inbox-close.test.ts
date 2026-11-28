@@ -240,10 +240,10 @@ describe("existing owner inbox routes", () => {
   });
 
   it("keeps the aggregation keys for a peer read that asks and strips them when it does not", async () => {
-    inbox = new OwnerInbox(async () => [{ source: "housekeeping:phren:bid:c2cc33d0", kind: "blocked", title: "Claim the stale task" }], path.join(root, "owner-inbox.json"));
+    inbox = new OwnerInbox(async () => [{ source: "housekeeping:free-disk", kind: "blocked", title: "Review disk usage" }], path.join(root, "owner-inbox.json"));
     await inbox.run({ action: "list" });
     const peer = await call("/v1/owner-inbox?local=1&compact=1&reconcile=1", "GET");
-    expect(peer.data.items).toEqual([expect.objectContaining({ kind: "blocked", live: true, source: "housekeeping:phren:bid:c2cc33d0" })]);
+    expect(peer.data.items).toEqual([expect.objectContaining({ kind: "blocked", live: true, source: "housekeeping:free-disk" })]);
     const plain = await call("/v1/owner-inbox?local=1&compact=1", "GET");
     expect(plain.data.items[0]).not.toHaveProperty("live");
     expect(plain.data.items[0]).not.toHaveProperty("source");

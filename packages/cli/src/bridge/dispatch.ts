@@ -853,8 +853,7 @@ export function recentDispatches(receipts: Receipt[], limit = DISPATCH_LIST_DEFA
 
 /** One word for clients that do not fold the receipt's states themselves
  * (the phone's dispatch rows, `dispatch_returns` rows). The latest return
- * decides unless the worker is back at work after it — the same test as the
- * task work link (task-work.ts `dispatchWorkerState`). A stalled return is
+ * decides unless the worker is back at work after it. A stalled return is
  * still work in progress; a worker whose finished turn waits on background
  * work is waiting, not working. */
 export function dispatchPhase(receipt: Receipt): "working" | "waiting" | "needs-owner" | "done" {

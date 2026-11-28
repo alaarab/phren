@@ -76,7 +76,7 @@ describe("owner inbox compact reads", () => {
     // What crosses the peer exchange is stripped before the phone sees it.
     for (const item of items) expect(Object.keys(item).every(key => COMPACT.includes(key))).toBe(true);
     for (const key of RECONCILE) expect(items.some(item => key in item)).toBe(false);
-    for (const key of ["command", "paste", "task", "pr", "key", "dispatch", "resolvedAt", "resolution"]) expect(items.some(item => key in item)).toBe(false);
+    for (const key of ["command", "paste", "pr", "key", "dispatch", "resolvedAt", "resolution"]) expect(items.some(item => key in item)).toBe(false);
     // Every peer read asked for the compact form, the aggregation keys, and the phone's six-second deadline.
     expect(state.reads.every(read => read.route.includes("compact=1") && read.route.includes("reconcile=1"))).toBe(true);
     expect(state.reads.every(read => read.timeout === COMPACT_PEER_TIMEOUT_MS)).toBe(true);

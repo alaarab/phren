@@ -23,11 +23,10 @@ describe("dispatch entry points", () => {
     vi.mocked(hookRequest).mockResolvedValue({ ok: true, computer: "Desk", state: "accepted" });
     const tool = exposed.get(profile === "full" ? "dispatch" : "phren_admin")!;
     const issue = { repo: "github.com/example/widgets", number: 42 };
-    const task = { storeId: "12345678", project: "phren", stableId: "12345678" };
-    const input = { ...brief, issue: "github.com/example/widgets#42", task, ...(profile === "core" ? { action: "dispatch" } : {}) };
+    const input = { ...brief, issue: "github.com/example/widgets#42", ...(profile === "core" ? { action: "dispatch" } : {}) };
     const result = await tool.handler((tool.config.inputSchema as z.ZodObject).parse(input));
     expect(JSON.parse((result as { content: { text: string }[] }).content[0].text).ok).toBe(true);
-    expect(hookRequest).toHaveBeenCalledWith("/v1/dispatch", { ...brief, issue, task }, undefined, 180_000);
+    expect(hookRequest).toHaveBeenCalledWith("/v1/dispatch", { ...brief, issue }, undefined, 180_000);
   });
 
   it.each(["core", "full"] as const)("always identifies move_session as an agent call in the %s profile", async profile => {
