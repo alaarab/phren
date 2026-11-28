@@ -20,7 +20,7 @@ the user's agents, deletes their tasks or stops an agent they launched.
 | Surface | Previous behavior | Runtime boundary |
 | --- | --- | --- |
 | `packages/cli/src/index.ts` | Imports all 15 `tools/*` registrars and calls `gate.finish()` | Resolve modules before importing optional registrars |
-| `packages/cli/src/mcp/profile.ts` | `core` exposes ten tools; the catalog keeps all tools, composites dispatch into it | Filter catalog membership by module first, then apply the MCP presentation profile |
+| `packages/cli/src/mcp/profile.ts` | `core` exposes twelve tools; the catalog keeps all tools, composites dispatch into it | Filter catalog membership by module first, then apply the MCP presentation profile |
 | `packages/cli/src/cli-registry.ts` | One unconditional catalog drives dispatch and help | Filter commands, aliases and nested subcommands together |
 | `packages/cli/src/init/config.ts`, `hooks.ts` | Install memory lifecycle callbacks and wrappers | Reconcile only enabled contributions, respecting management presets |
 | `packages/cli/src/bridge/install.ts` | Installs phone callbacks, usage status line and the OpenCode transcript plugin | Split Hook lifecycle callbacks from Git change capture; reconcile by owner |
