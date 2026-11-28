@@ -45,3 +45,14 @@ export async function claudeHeadlessThread(transcriptPath: unknown): Promise<boo
 export function headlessEntrypoint(head: string): boolean {
   return /"entrypoint"\s*:\s*"sdk-[a-z]+"/.test(head);
 }
+
+/** The same question asked of the callback's own environment, which answers it
+ * before the transcript exists (SessionStart): Claude Code sets
+ * CLAUDE_CODE_ENTRYPOINT to `sdk-cli`/`sdk-ts`/`sdk-py` for a headless run, and
+ * a Phren fan-out launcher marks its worker. A helper or fan-out worker started
+ * from a lead's pane rebound that pane to its own session (#909): the phone
+ * then read the worker's empty child tree in place of the lead's workers.
+ * Dependency-free: the fast forwarder (hook-fast.ts) embeds it. */
+export function headlessClaudeEnv(env: Record<string, string | undefined>): boolean {
+  return /^sdk-[a-z]+$/.test(env.CLAUDE_CODE_ENTRYPOINT ?? "") || !!env.PHREN_FANOUT_JOB || !!env.PHREN_FANOUT_DIR;
+}

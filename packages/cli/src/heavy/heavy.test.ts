@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeTempDir } from "../test-helpers.js";
 import { defaultBudget, readBudget, type Pressure } from "./budget.js";
-import { acquire, PRIORITIES, poolStatus, QueueTimeout } from "./slots.js";
+import { acquire, PRIORITIES, poolStatus, QueueTimeout, workerTag } from "./slots.js";
 import { elsewhereHint, runHeavy } from "./command.js";
 import type { ComputerReport } from "../computers/read.js";
 
@@ -94,4 +94,40 @@ it("names the least pressed other computer that is not stressed for a job held b
   const hint = elsewhereHint([computer("omarchy", true, 0.1), computer("Jets", false, 0.95, "stressed"), computer("MacBook", false, 0.4), computer("Mini", false, 0.5)], "pnpm test");
   expect(hint).toMatch(/^MacBook has room \(60% memory available, load 3 on 10 cores\)\..*phren dispatch MacBook <project> --worktree --prompt "Check out <branch>, run pnpm test, /);
   expect(elsewhereHint([computer("omarchy", true, 0.1), computer("Jets", false, 0.95, "stressed")], "pnpm test")).toBeUndefined();
+});
+
+// #909: a fan-out wrapper waiting in the `workers` queue has no manifest yet;
+// its ticket names the lead so the phone can show it queued under that lead.
+describe("a workers ticket names the fan-out worker it waits for", () => {
+  const lead = "18688F28-520A-42B7-B33B-3B5D7D754191", thread = "cccccccc-3333-4333-8333-333333333333";
+  const wrapper = ["/store/global/skills/fanout/scripts/codex.sh", "--label", "review", "--worktree", "/wt", "--model", "gpt-6.2-sol"];
+
+  it("takes the parent the manifest would, and the harness and model from the command", () => {
+    expect(workerTag(wrapper, { CLAUDE_CODE_SESSION_ID: lead }, () => undefined))
+      .toEqual({ parent: { provider: "claude", session: lead.toLowerCase() }, provider: "codex", model: "gpt-6.2-sol" });
+    // Codex wins unless the nearest agent above is Claude, as in parent.sh.
+    expect(workerTag(["opencode.sh"], { CLAUDE_CODE_SESSION_ID: lead, CODEX_THREAD_ID: thread }, () => "codex"))
+      .toEqual({ parent: { provider: "codex", session: thread }, provider: "opencode" });
+    expect(workerTag(["opencode.sh"], { CLAUDE_CODE_SESSION_ID: lead, CODEX_THREAD_ID: thread }, () => "claude")?.parent)
+      .toEqual({ provider: "claude", session: lead.toLowerCase() });
+    // `phren fanout run` knows its flags; the picker may not have chosen yet.
+    expect(workerTag([], { CLAUDE_CODE_SESSION_ID: lead }, () => undefined, { provider: "claude", model: "opus" }))
+      .toEqual({ parent: { provider: "claude", session: lead.toLowerCase() }, provider: "claude", model: "opus" });
+    expect(workerTag([], { CLAUDE_CODE_SESSION_ID: lead }, () => undefined, {})).toEqual({ parent: { provider: "claude", session: lead.toLowerCase() } });
+  });
+
+  it("names nothing without a launching agent, and no harness it does not know", () => {
+    expect(workerTag(wrapper, {}, () => undefined)).toBeUndefined();
+    expect(workerTag(wrapper, { CLAUDE_CODE_SESSION_ID: "not-a-session" }, () => undefined)).toBeUndefined();
+    expect(workerTag(["pnpm", "--provider", "gemini", "test"], { CLAUDE_CODE_SESSION_ID: lead }, () => undefined)?.provider).toBeUndefined();
+  });
+
+  it("is written into the waiting ticket", async () => {
+    temp ??= makeTempDir("heavy-slots-");
+    const worker = workerTag(wrapper, { CLAUDE_CODE_SESSION_ID: lead }, () => undefined)!;
+    const held = await acquire({ pool: "workers", slots: 1, priority: PRIORITIES.normal, label: "review", budget,
+      pressure: async () => calm, report: () => {}, pollMs: 5, root: temp.path, worker });
+    expect(poolStatus("workers", temp.path)[0].worker).toEqual(worker);
+    held.release();
+  });
 });

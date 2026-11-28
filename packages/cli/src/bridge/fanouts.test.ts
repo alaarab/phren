@@ -5,7 +5,7 @@ import { tmpdir, homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, fanoutChildren, parseFanoutArchiveFlags, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
+import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, fanoutChildren, parseFanoutArchiveFlags, queuedFanouts, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
 import type { ChangedFile } from "./changes.js";
 import { visibleClaudeEvent } from "./transcript-claude.js";
 import { publicChildAgents } from "./transcripts.js";
@@ -116,7 +116,12 @@ describe("fan-out manifests", () => {
     expect((await fanoutChildren("codex", parent, running.env))[0].startedAt).toBe("2026-09-19T19:00:01.000Z");
 
     const queued = await fixture("job-queued-time", { status: "queued" });
-    expect((await fanoutChildren("codex", parent, queued.env))[0].startedAt).toBeUndefined();
+    const [child] = await fanoutChildren("codex", parent, queued.env);
+    expect(child.startedAt).toBeUndefined();
+    // Running on the wire for older phones, marked queued for newer ones.
+    expect(child).toMatchObject({ state: "running", queued: true, queuedAt: "2026-09-19T19:00:00.000Z" });
+    expect(publicChildAgents([{ ...child, children: [] }])[0]).toMatchObject({ state: "running", queued: true, queuedAt: "2026-09-19T19:00:00.000Z" });
+    expect(publicChildAgents([{ ...(await fanoutChildren("codex", parent, running.env))[0], children: [] }])[0]).not.toHaveProperty("queued");
   });
 
   it.each(["completed", "failed", "cancelled"])("counts a %s manifest as finished even without an exit stamp", async status => {
@@ -450,6 +455,57 @@ describe("fan-out manifests", () => {
     expect(visibleCodexExecEvent({ type: "made.up" })).toBeUndefined();
     expect(visibleCodexExecEvent({ type: "item.completed", item: { id: "item_2", type: "command_execution", exit_code: null } }))
       .toMatchObject({ type: "response_item", payload: { type: "function_call_output", call_id: "item_2", output: "\n[finished]" } });
+  });
+});
+
+// #909: a worker `phren heavy` holds in the `workers` queue has no manifest
+// yet; its ticket names the parent, so the lead's tree shows it queued.
+describe("fan-out workers waiting in the queue", () => {
+  const lead = "dddddddd-4444-4444-8444-444444444444";
+  async function queue(tickets: Array<Record<string, unknown>>) {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-slots-")); roots.push(root);
+    await mkdir(path.join(root, "workers"));
+    for (const ticket of tickets) await writeFile(path.join(root, "workers", `${ticket.id}.json`), JSON.stringify(ticket));
+    return { PHREN_SLOTS_DIR: root };
+  }
+  const ticket = (id: string, overrides: Record<string, unknown> = {}) => ({ id, pid: process.pid, priority: 1, createdAt: 1_795_000_000_000,
+    label: "phren 0.4.0 review (sol)", state: "waiting", worker: { parent: { provider: "claude", session: lead }, provider: "codex", model: "gpt-6.2-sol" }, ...overrides });
+
+  it("lists only waiting tickets of a live launcher that name this parent, oldest first", async () => {
+    const env = await queue([
+      ticket("1795000000002-bbbbbbbbbbbb", { label: "android remove tasks", worker: { parent: { provider: "claude", session: lead }, provider: "opencode", model: "opencode-go/deepseek-v4.1-flash" } }),
+      ticket("1795000000001-aaaaaaaaaaaa"),
+      ticket("1795000000003-cccccccccccc", { state: "running" }),
+      ticket("1795000000004-dddddddddddd", { worker: { parent: { provider: "codex", session: lead } } }),
+      ticket("1795000000005-eeeeeeeeeeee", { worker: { parent: { provider: "claude", session: parent } } }),
+      ticket("1795000000006-ffffffffffff", { pid: await deadPid() }),
+      // A plain `phren heavy -- pnpm test` names no worker.
+      { id: "1795000000007-000000000000", pid: process.pid, priority: 1, createdAt: 1, label: "pnpm test", state: "waiting" },
+      // Picked at start: no harness yet.
+      ticket("1795000000008-111111111111", { label: "picker job", worker: { parent: { provider: "claude", session: lead } } }),
+    ]);
+    const queued = await queuedFanouts("claude", lead, env);
+    expect(queued.map(job => [job.label, job.provider, job.model])).toEqual([
+      ["phren 0.4.0 review (sol)", "codex", "gpt-6.2-sol"],
+      ["android remove tasks", "opencode", "opencode-go/deepseek-v4.1-flash"],
+      ["picker job", undefined, undefined],
+    ]);
+    expect(queued[0].queuedAt).toBe(new Date(1_795_000_000_000).toISOString());
+    expect(new Set(queued.map(job => job.id)).size).toBe(3);
+    for (const job of queued) expect(job.id).toMatch(/^[a-f0-9]{32}$/);
+    expect(await queuedFanouts("codex", lead, env)).toHaveLength(1);
+    expect(await queuedFanouts("claude", "not-a-session", env)).toEqual([]);
+    // Reading never removes a ticket, a dead launcher's included.
+    expect(await readdir(path.join(env.PHREN_SLOTS_DIR, "workers"))).toHaveLength(8);
+  });
+
+  it("is empty without a queue and skips torn or oversized tickets", async () => {
+    expect(await queuedFanouts("claude", lead, { PHREN_SLOTS_DIR: path.join(tmpdir(), "phren-no-such-queue") })).toEqual([]);
+    const env = await queue([]);
+    await writeFile(path.join(env.PHREN_SLOTS_DIR, "workers", "1795000000001-aaaaaaaaaaaa.json"), "{");
+    await writeFile(path.join(env.PHREN_SLOTS_DIR, "workers", "1795000000002-bbbbbbbbbbbb.json"),
+      JSON.stringify(ticket("1795000000002-bbbbbbbbbbbb", { label: "x".repeat(5000) })));
+    expect(await queuedFanouts("claude", lead, env)).toEqual([]);
   });
 });
 

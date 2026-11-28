@@ -6,9 +6,9 @@ import { withFileLock } from "../governance/locks.js";
 import { archiveFinishedFanouts } from "../bridge/fanouts.js";
 import { defaultPolicy, policySchema, pick, type Candidate, type Tier } from "./picker.js";
 import { readUsage, recentProviderErrors } from "./usage.js";
-import { createJob, jobsRoot, launch, listJobs, readJob, swiftBuildCount } from "./launcher.js";
+import { createJob, jobsRoot, launch, listJobs, nearestAgent, readJob, swiftBuildCount } from "./launcher.js";
 import { readBudget, readPressure } from "../heavy/budget.js";
-import { acquire, PRIORITIES, QueueTimeout, type Held, type PriorityName } from "../heavy/slots.js";
+import { acquire, PRIORITIES, QueueTimeout, workerTag, type Held, type PriorityName } from "../heavy/slots.js";
 
 export async function runFanout(args: string[], ctx: CliContext): Promise<number | void> {
   const [action, ...rest] = args, store = ctx.phrenPath();
@@ -50,8 +50,10 @@ export async function runFanout(args: string[], ctx: CliContext): Promise<number
   const budget = readBudget((await readPressure()).totalBytes), slots = Math.min(budget.workers, policy.computerCap);
   let held: Held;
   try {
+    const worker = workerTag([], process.env, () => nearestAgent(), { provider: flags.provider ?? previous?.provider, model: flags.model ?? previous?.model });
     held = await acquire({ pool: "workers", slots, priority: PRIORITIES[(flags.priority ?? "normal") as PriorityName], label, budget,
-      pressure: () => readPressure(), timeoutMs: waitMinutes * 60_000, report: message => console.error(`phren fanout: ${message} (worker budget ${slots} on this computer)`) });
+      pressure: () => readPressure(), timeoutMs: waitMinutes * 60_000, report: message => console.error(`phren fanout: ${message} (worker budget ${slots} on this computer)`),
+      ...(worker ? { worker } : {}) });
   } catch (error) {
     if (error instanceof QueueTimeout) { console.error(`phren fanout: not started, ${error.message}`); return 75; }
     throw error;

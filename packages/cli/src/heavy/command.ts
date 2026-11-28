@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { budgetFile, describePressure, readBudget, readPressure } from "./budget.js";
 import type { ComputerReport } from "../computers/read.js";
-import { acquire, minutes, poolStatus, pools, PRIORITIES, priorityName, QueueTimeout, type PriorityName } from "./slots.js";
+import { acquire, minutes, poolStatus, pools, PRIORITIES, priorityName, QueueTimeout, workerTag, type PriorityName } from "./slots.js";
 
 const USAGE = `Usage: phren heavy [--priority release|normal|low] [--slots N] [--pool NAME] [--label TEXT] [--timeout MINUTES] -- <command...>
        phren heavy status [--json]`;
@@ -44,9 +44,13 @@ export async function runHeavy(args: string[]): Promise<number> {
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("slow")), 4_000).unref())]))
       .then(({ computers }) => { const hint = elsewhereHint(computers, label); if (hint) say(hint); }).catch(() => undefined);
   };
+  // A fan-out wrapper waiting here has no manifest yet: the ticket names its
+  // parent, so the phone shows it queued under the agent that launched it.
+  const nearest = pool === "workers" ? (await import("../fanout/launcher.js")).nearestAgent : undefined;
+  const worker = nearest ? workerTag(command, process.env, () => nearest()) : undefined;
   try {
     held = await acquire({ pool, slots, priority: PRIORITIES[priority], label, budget, pressure: () => readPressure(), report,
-      ...(timeout !== undefined ? { timeoutMs: timeout * 60_000 } : {}) });
+      ...(timeout !== undefined ? { timeoutMs: timeout * 60_000 } : {}), ...(worker ? { worker } : {}) });
   } catch (error) {
     if (error instanceof QueueTimeout) { say(`not started, ${error.message}`); return 75; }
     throw error;

@@ -9,6 +9,7 @@ import { type Json, object, type Provider, sessionId } from "./protocol.js";
 import { countGit } from "./metrics.js";
 import { claudeHomes } from "./claude-accounts.js";
 import { readOpencodeRequest } from "./opencode-approvals.js";
+import { slotsRoot } from "../heavy/slots.js";
 
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_EVENT_LOG_BYTES = 64 * 1024 * 1024;
@@ -99,6 +100,9 @@ export interface FanoutChild {
   reason?: string;
   /** Actual launch time from a validated manifest; queued jobs omit it. */
   startedAt?: string;
+  /** The manifest says queued: the worker has not started. */
+  queued?: true;
+  queuedAt?: string;
   finishedAt?: string;
   transcript: string;
   fanout: { resumable: boolean };
@@ -346,11 +350,62 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
         path: manifest.taskLabel, callId: `fanout:${id}`,
         state: blocked || manifest.status === "failed" || manifest.status === "cancelled" ? "failed" : gone ? "gone" : ["queued", "running"].includes(manifest.status) ? "running" : "completed",
         ...(blocked ? { reason: blockedReason(blocked) } : gone ? { reason: "gone: worker process exited" } : asking ? { reason: `needs-you: ${String(asking.message ?? asking.type)}`.slice(0, 500) } : {}),
+        ...(manifest.status === "queued" && !gone && !blocked ? { queued: true, queuedAt: manifest.createdAt } : {}),
         ...(manifest.status === "queued" ? {} : { startedAt: manifest.startedAt }), ...(finishedAt ? { finishedAt } : {}), transcript,
         fanout: { resumable: manifest.session !== undefined }, children: [] });
     } catch { /* Torn, old, or untrusted manifests do not become child agents. */ }
   }
   return children.sort((a, b) => a.path.localeCompare(b.path) || a.id.localeCompare(b.id));
+}
+
+const MAX_QUEUED = 32;
+const MAX_TICKET_BYTES = 4 * 1024;
+const ticketSchema = z.object({
+  id: z.string().regex(/^[0-9]{1,16}-[0-9a-f]{12}$/),
+  pid: z.number().int().positive(),
+  createdAt: z.number().int().nonnegative(),
+  label: z.string().min(1).max(200),
+  state: z.enum(["waiting", "running"]),
+  worker: z.object({
+    parent: z.object({ provider: z.enum(["codex", "claude"]), session: sessionId }),
+    provider: z.enum(["codex", "opencode", "claude"]).optional(),
+    model: z.string().min(1).max(200).optional(),
+  }),
+}).passthrough();
+
+/** A fan-out worker still waiting in this computer's `workers` queue (`phren
+ * heavy`, `phren fanout run`): it has no manifest, job folder or transcript
+ * yet, only the ticket its launcher wrote, which names the parent. */
+export interface QueuedFanout {
+  id: string;
+  /** Absent while the picker has not chosen a harness. */
+  provider?: "codex" | "opencode" | "claude";
+  model?: string;
+  label: string;
+  queuedAt: string;
+}
+
+/** Queued tickets whose launcher named this parent, oldest first. Read only:
+ * the queue's own readers drop a dead waiter's ticket, this skips it. */
+export async function queuedFanouts(parentProvider: Provider, parentSession: string, env: NodeJS.ProcessEnv = process.env): Promise<QueuedFanout[]> {
+  if (!sessionId.safeParse(parentSession).success) return [];
+  const dir = path.join(slotsRoot(env), "workers");
+  const names = (await readdir(dir).catch(() => [])).filter(name => /^[0-9]{1,16}-[0-9a-f]{12}\.json$/.test(name)).sort();
+  const queued: QueuedFanout[] = [];
+  for (const name of names) {
+    if (queued.length >= MAX_QUEUED) break;
+    try {
+      const file = path.join(dir, name), metadata = await lstat(file);
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > MAX_TICKET_BYTES) continue;
+      const ticket = ticketSchema.parse(JSON.parse(await readFile(file, "utf8")));
+      const { parent, provider, model } = ticket.worker;
+      if (ticket.state !== "waiting" || `${ticket.id}.json` !== name || parent.provider !== parentProvider
+        || parent.session.toLowerCase() !== parentSession.toLowerCase() || pidGone(ticket.pid)) continue;
+      queued.push({ id: createHash("sha256").update(`${dir}\0${parent.provider}\0${parent.session}\0${ticket.id}`).digest("hex").slice(0, 32),
+        ...(provider ? { provider } : {}), ...(model ? { model } : {}), label: ticket.label, queuedAt: new Date(ticket.createdAt).toISOString() });
+    } catch { /* Torn, foreign or untagged tickets name no worker. */ }
+  }
+  return queued;
 }
 
 /** Every fan-out job's worktree with its task label and harness, whatever

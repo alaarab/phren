@@ -126,6 +126,23 @@ describe.skipIf(process.platform === "win32")("claude-hook.mjs", () => {
     }
   });
 
+  // #909: a helper's or fan-out worker's `claude -p`, started from a lead's
+  // pane, inherited HERDR_*; its callbacks rebound the pane to the worker's
+  // session and the phone showed none of the lead's workers.
+  it("never speaks for the pane from a headless run or a fan-out worker", async () => {
+    const headless = path.join(root, "headless.jsonl"), own = path.join(root, "own.jsonl");
+    await writeFile(headless, '{"type":"user","entrypoint":"sdk-cli","sessionId":"x"}\n');
+    await writeFile(own, '{"type":"user","entrypoint":"cli","sessionId":"x"}\n');
+    const permission = { hook_event_name: "PermissionRequest", session_id: session, tool_name: "Bash", tool_input: { command: "ls" } };
+    await run({ hook_event_name: "SessionStart", session_id: session }, { ...herdr(), CLAUDE_CODE_ENTRYPOINT: "sdk-cli" });
+    await run(permission, { ...herdr(), CLAUDE_CODE_ENTRYPOINT: "sdk-ts" });
+    await run(permission, { ...herdr(), PHREN_FANOUT_JOB: "claude-0123456789abcdef01234567" });
+    await run({ ...permission, transcript_path: headless }, herdr());
+    expect(bodies).toEqual([]);
+    await run({ ...permission, transcript_path: own }, { ...herdr(), CLAUDE_CODE_ENTRYPOINT: "cli" });
+    expect(bodies).toMatchObject([{ event: "PermissionRequest", target: { pane: "w1:p2", session } }]);
+  });
+
   it("stays silent for subagents, other Herdr sockets, no pane and an unreachable Hook", async () => {
     await run({ hook_event_name: "Stop", session_id: session, agent_id: "a1" }, herdr());
     await run({ hook_event_name: "Stop", session_id: session }, { ...herdr(), HERDR_SOCKET_PATH: "/elsewhere/herdr.sock" });
