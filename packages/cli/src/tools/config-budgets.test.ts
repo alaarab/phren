@@ -33,24 +33,24 @@ function admin() {
 
 describe("set_config retention budgets", () => {
   it.each([
-    [{ budgets: { openTasks: "0" } }, "budgets.openTasks"],
-    [{ budgets: { openTasks: -3 } }, "budgets.openTasks"],
+    [{ budgets: { reviewEntries: "0" } }, "budgets.reviewEntries"],
+    [{ budgets: { reviewEntries: -3 } }, "budgets.reviewEntries"],
     [{ budgets: { runtimeAgeOut: "yes" } }, "budgets.runtimeAgeOut"],
     [{ budgets: { runtimeAgeOutDays: 1 } }, "budgets.runtimeAgeOutDays"],
     [{ budgets: "lots" }, "budgets"],
   ])("refuses %j and leaves the policy unchanged", async (settings, named) => {
     const call = admin();
-    expect(await call({ settings: { budgets: { openTasks: 90 } } })).toMatchObject({ ok: true });
+    expect(await call({ settings: { budgets: { reviewEntries: 90 } } })).toMatchObject({ ok: true });
     const refused = await call({ settings });
     expect(refused.ok).toBe(false);
     expect(refused.error).toContain(named);
-    expect(getRetentionPolicy(store.path).budgets.openTasks).toBe(90);
+    expect(getRetentionPolicy(store.path).budgets.reviewEntries).toBe(90);
   });
 
-  it("refuses a computer-wide budget for one project and stores a project's task budget", async () => {
+  it("refuses a computer-wide budget for one project and stores a project's review budget", async () => {
     const call = admin();
     expect((await call({ project: "demo", settings: { budgets: { runtimeMB: 10 } } })).ok).toBe(false);
-    expect(await call({ project: "demo", settings: { budgets: { openTasks: 0 } } })).toMatchObject({ ok: true });
-    expect(readProjectConfig(store.path, "demo").config?.retentionPolicy?.budgets).toEqual({ openTasks: 0 });
+    expect(await call({ project: "demo", settings: { budgets: { reviewEntries: 0 } } })).toMatchObject({ ok: true });
+    expect(readProjectConfig(store.path, "demo").config?.retentionPolicy?.budgets).toEqual({ reviewEntries: 0 });
   });
 });

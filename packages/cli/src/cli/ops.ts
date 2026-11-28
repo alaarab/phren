@@ -1,4 +1,4 @@
-import { taskReadiness, filterTaskDoc, taskCounts, type TaskFilter } from "../data/task-contract.js";
+import { listAllSessions } from "../tools/session.js";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
@@ -9,73 +9,10 @@ import {
   normalizeProjectNameForCreate,
 } from "../shared.js";
 import { isValidProjectName, errorMessage } from "../utils.js";
-import { readTasksAcrossProjects, TASKS_FILENAME, FINDINGS_FILENAME } from "../data/access.js";
-import { applyGravity } from "../data/tasks.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
 import { buildIndex, queryRows } from "../shared/index.js";
 import { resolveSubprocessArgs } from "./hooks.js";
-import { listAllSessions, getSessionArtifacts } from "../tools/session.js";
 
-export function handleTaskView(profile: string, filter: TaskFilter = {}, project?: string) {
-  const docs = readTasksAcrossProjects(getPhrenPath(), profile).filter(doc => !project || doc.project.toLowerCase() === project.toLowerCase());
-  if (!docs.length) {
-    console.log("No tasks found.");
-    return;
-  }
-
-  let totalActive = 0;
-  let totalQueue = 0;
-
-  for (const original of docs) {
-    const doc = filterTaskDoc(getPhrenPath(), original, filter);
-    const activeCount = doc.items.Active.length;
-    const queueCount = doc.items.Queue.length;
-    if (activeCount === 0 && queueCount === 0) continue;
-
-    totalActive += activeCount;
-    totalQueue += queueCount;
-
-    console.log(`\n## ${doc.project}`);
-    const counts = taskCounts(getPhrenPath(), original);
-    console.log(`  Human: ${counts.human}; Agent ready: ${counts.agentReady}; waiting on human: ${counts.agentWaitingOnHuman}; waiting on task: ${counts.agentWaitingOnTask}.`);
-    if (activeCount > 0) {
-      console.log("  Active:");
-      const activeWithGravity = applyGravity(doc.items.Active).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
-      for (const item of activeWithGravity) {
-        const rankTag = item.rank !== undefined ? ` [#${item.rank}]` : "";
-        const github = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
-        const ready = taskReadiness(getPhrenPath(), original, item);
-        console.log(`    - ${item.line}${rankTag}${github} [${ready.responsibility} · ${ready.readiness}]`);
-        for (const prerequisite of ready.prerequisites) {
-          const responsibility = prerequisite.missing ? "Unknown responsibility" : prerequisite.responsibility === "human" ? "Human" : "Agent";
-          console.log(`      ${prerequisite.missing ? "Unavailable" : prerequisite.completed ? "✓" : "Waiting on"} [${responsibility}] ${prerequisite.title}`);
-          console.log(`        ${prerequisite.storeId}/${prerequisite.project}/${prerequisite.stableId}`);
-        }
-      }
-    }
-    if (queueCount > 0) {
-      console.log("  Queue:");
-      const queueWithGravity = applyGravity(doc.items.Queue).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
-      for (const item of queueWithGravity) {
-        const rankTag = item.rank !== undefined ? ` [#${item.rank}]` : "";
-        const github = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
-        const ready = taskReadiness(getPhrenPath(), original, item);
-        console.log(`    - ${item.line}${rankTag}${github} [${ready.responsibility} · ${ready.readiness}]`);
-        for (const prerequisite of ready.prerequisites) {
-          const responsibility = prerequisite.missing ? "Unknown responsibility" : prerequisite.responsibility === "human" ? "Human" : "Agent";
-          console.log(`      ${prerequisite.missing ? "Unavailable" : prerequisite.completed ? "✓" : "Waiting on"} [${responsibility}] ${prerequisite.title}`);
-          console.log(`        ${prerequisite.storeId}/${prerequisite.project}/${prerequisite.stableId}`);
-        }
-      }
-    }
-  }
-
-  if (totalActive === 0 && totalQueue === 0) {
-    console.log("All tasks are empty.");
-    return;
-  }
-
-  console.log(`\n${totalActive} active, ${totalQueue} queued across ${docs.length} project(s).`);
-}
 
 export async function handleSessionsView(args: string[]) {
   const phrenPath = getPhrenPath();
@@ -89,21 +26,12 @@ export async function handleSessionsView(args: string[]) {
       console.error(`Session "${sessionId}" not found.`);
       process.exit(1);
     }
-    const artifacts = await getSessionArtifacts(phrenPath, session.sessionId);
     console.log(`Session: ${session.sessionId.slice(0, 8)}`);
     console.log(`Project: ${session.project ?? "—"}`);
     console.log(`Started: ${session.startedAt.slice(0, 16).replace("T", " ")}`);
     console.log(`Duration: ${session.durationMins ?? 0} min`);
     console.log(`Status: ${session.status}`);
     if (session.summary) console.log(`Summary: ${session.summary}`);
-    if (artifacts.findings.length > 0) {
-      console.log(`\nFindings (${artifacts.findings.length}):`);
-      for (const f of artifacts.findings) console.log(`  - [${f.project}] ${f.text}`);
-    }
-    if (artifacts.tasks.length > 0) {
-      console.log(`\nTasks (${artifacts.tasks.length}):`);
-      for (const t of artifacts.tasks) console.log(`  - [${t.project}/${t.section}] ${t.text}`);
-    }
     return;
   }
 
@@ -166,7 +94,6 @@ export async function handleQuickstart() {
   if (!fs.existsSync(projectDir)) {
     fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(path.join(projectDir, FINDINGS_FILENAME), `# ${normalizedProjectName} Findings\n`);
-    fs.writeFileSync(path.join(projectDir, TASKS_FILENAME), `# ${normalizedProjectName} Tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
   }
 
   console.log(`\n\u2713 phren ready. Project: ${normalizedProjectName}. Try: phren search 'your query'`);

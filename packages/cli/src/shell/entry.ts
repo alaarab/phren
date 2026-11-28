@@ -23,7 +23,6 @@ import type { ShellStartup } from "./startup.js";
 const LIVE_STATE_POLL_MS = 2000;
 
 interface LiveStateHost {
-  invalidateSubsectionsCache(): void;
   setMessage(message: string): void;
 }
 
@@ -118,7 +117,6 @@ export function startLiveStatePoller({
       const nextToken = computeToken(phrenPath);
       if (nextToken === liveStateToken) return;
       liveStateToken = nextToken;
-      shell.invalidateSubsectionsCache();
       shell.setMessage(`  ${style.boldCyan("Live")} ${style.dim("store updated")}`);
       await repaint();
     } finally {

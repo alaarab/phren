@@ -6,7 +6,6 @@ import { resolveRuntimeProfile } from "@phren/cli/runtime-profile";
 import { buildIndex, detectProject } from "@phren/cli/shared";
 import { searchKnowledgeRows, rankResults, isInjectableDocType } from "@phren/cli/shared/retrieval";
 import { storeAwareProjectPath } from "@phren/cli/store-routing";
-import { readTasks } from "@phren/cli/data/tasks";
 import { readFindings } from "@phren/cli/data/access";
 
 export interface PhrenContext {
@@ -137,25 +136,7 @@ export async function buildContextSnippet(ctx: PhrenContext, taskKeywords: strin
     } catch { /* silent */ }
   }
 
-  // Section 2: Active tasks
-  if (ctx.project) {
-    try {
-      const result = readTasks(ctx.phrenPath, ctx.project);
-      if (result.ok && result.data) {
-        const items = result.data.items;
-        const lines: string[] = [];
-        const active = items.Active?.slice(0, 5) ?? [];
-        const queue = items.Queue?.slice(0, 3) ?? [];
-        for (const t of active) lines.push(`- [Active] ${t.line}`);
-        for (const t of queue) lines.push(`- [Queue] ${t.line}`);
-        if (lines.length > 0) {
-          sections.push(`## Tasks (${label})\n\n${lines.join("\n")}`);
-        }
-      }
-    } catch { /* silent */ }
-  }
-
-  // Section 3: Recent findings
+  // Section 2: Recent findings
   if (ctx.project) {
     try {
       const result = readFindings(ctx.phrenPath, ctx.project);
@@ -171,11 +152,11 @@ export async function buildContextSnippet(ctx: PhrenContext, taskKeywords: strin
     } catch { /* silent */ }
   }
 
-  // Section 4: project rule files (AGENTS.md / legacy CLAUDE.md), cwd → parents → ~/.claude/CLAUDE.md
+  // Section 3: project rule files (AGENTS.md / legacy CLAUDE.md), cwd → parents → ~/.claude/CLAUDE.md
   const instructions = buildProjectInstructions();
   if (instructions) sections.push(instructions);
 
-  // Section 5: Available skills catalog — the model should know what skills
+  // Section 4: Available skills catalog — the model should know what skills
   // exist (name + description) instead of guessing names for run_skill.
   try {
     const { getScopedSkills } = await import("@phren/cli/skill/registry");

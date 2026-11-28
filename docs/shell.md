@@ -12,14 +12,14 @@ An outside launcher — a keybinding, a Herdr plugin pane, an editor task — ca
 deep link into the shell instead of dropping the user on the landing screen:
 
 ```bash
-phren shell --view tasks --here            # this directory's project, task list
+phren shell --view findings --here            # this directory's project, findings
 phren shell --view "review queue" --project harbor
 phren shell --project harbor                  # project context, landing screen
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--view <view>` | Open on a view. Case-insensitive, and accepts what you'd type: `tasks`, `findings`, `review`, `review-queue`, `skills`, `hooks`, `health`, `profiles`, `graph` (also `map`, `network`). |
+| `--view <view>` | Open on a view. Case-insensitive, and accepts what you'd type: `findings`, `review`, `review-queue`, `skills`, `hooks`, `health`, `profiles`, `graph` (also `map`, `network`). |
 | `--live` / `--no-live` | Force the Graph view's watch mode on or off. Default is on. |
 | `--project <name>` | Set the active project context for this session. |
 | `--here` | Resolve the project from the current directory using the same detection phren's hooks use — a git worktree resolves to the repository it came from. Ignored when `--project` is given. |
@@ -40,15 +40,9 @@ The shell has eight views. Switch between them with single-key shortcuts or pale
 
 Projects is the shell landing screen. It opens as a dashboard first, then lists all indexed projects in the active profile underneath.
 
-The dashboard shows profile-wide counts for projects, active task, queued task, findings, review queue, sync state, and intro mode. The project list below that includes per-project workload counts so you can stay global until you actually want to open a project.
+The dashboard shows profile-wide counts for projects, findings, review queue, sync state, and intro mode. The project list below that includes per-project workload counts so you can stay global until you actually want to open a project.
 
 The currently selected project is marked with a green dot. Use `↵` or `:open <project>` to change the active project context, which persists across all views.
-
-### Task (`b`)
-
-Shows the selected project's `tasks.md` file parsed into three sections: Active, Queue, and Done. Each item has an auto-generated ID for easy reference in commands.
-
-Cross-session checkpoint context is reflected through task metadata and lifecycle actions (`:work next`, `:complete`, `:tidy`), so unfinished work can resume cleanly across sessions.
 
 ### Findings (`l`)
 
@@ -97,7 +91,7 @@ Health data also reflects RBAC identity context (`PHREN_ACTOR` and local/shared 
 
 ### Graph (`g`)
 
-The knowledge graph — the same picture the 3D memory viewer draws (`phren web-ui`, the VS Code panel) — rendered in the terminal. Projects, findings, tasks, fragments and reference docs are laid out with a force simulation and drawn on a braille canvas, coloured by topic and kind. A details pane sits to the right (or a strip below it on terminals narrower than 100 columns). The layout is deterministic: the same store draws the same map every time.
+The knowledge graph — the same picture the 3D memory viewer draws (`phren web-ui`, the VS Code panel) — rendered in the terminal. Projects, findings, fragments and reference docs are laid out with a force simulation and drawn on a braille canvas, coloured by topic and kind. A details pane sits to the right (or a strip below it on terminals narrower than 100 columns). The layout is deterministic: the same store draws the same map every time.
 
 ```bash
 phren shell --view graph          # straight into the graph
@@ -111,7 +105,7 @@ phren shell --view graph --project harbor
 | `1`–`9` | Jump to the selected node's n-th neighbour (numbered on the canvas and in the pane) |
 | `/` | Search. Matches light up, everything else dims, and the camera flies to the best hit |
 | `n` / `N` | Next / previous search hit |
-| `f` / `F` | Cycle the filter preset: all → findings → tasks → fragments → aging |
+| `f` / `F` | Cycle the filter preset: all → findings → fragments → aging |
 | `[` / `]` | Cycle project focus (all → each project → all) |
 | `+` / `-` / `0` | Zoom in / out / fit everything |
 | `⇧` + arrows, `H J K L` | Pan |
@@ -122,7 +116,7 @@ phren shell --view graph --project harbor
 | `o` | Where to open the 3D viewer |
 | `esc` | Clear search, then selection, then project focus, then leave the view |
 
-The graph draws the star everyone knows (project → its findings, tasks, fragments, references) plus two edge kinds the web viewer does not show: fragments that are mentioned by the same documents (cyan), and findings linked by `supersedes` (grey) or `contradicts` (dotted red) lifecycle annotations. The selected node's edges turn amber.
+The graph draws the star everyone knows (project → its findings, fragments, references) plus two edge kinds the web viewer does not show: fragments that are mentioned by the same documents (cyan), and findings linked by `supersedes` (grey) or `contradicts` (dotted red) lifecycle annotations. The selected node's edges turn amber.
 
 ### Editing skills and project instructions
 
@@ -161,7 +155,7 @@ Mouse reporting is switched on only while the Graph view is showing, so in every
 
 #### What phren knows about a project
 
-Select a project and the pane shows, under its counts, the first lines of the project's `What phren knows` block: how much is active and archived, how many tasks are open, and what each topic archive amounts to. `space` opens the whole block in the bubble. The block is written by `phren maintain summarize` and refreshed by background maintenance; a project without one shows nothing extra.
+Select a project and the pane shows, under its counts, the first lines of the project's `What phren knows` block: how much is active and archived and what each topic archive amounts to. `space` opens the whole block in the bubble. The block is written by `phren maintain summarize` and refreshed by background maintenance; a project without one shows nothing extra.
 
 #### Reading a node
 
@@ -201,7 +195,6 @@ The view rebuilds when the store changes (the shell's 2-second live poll), keepi
 | Key | Action |
 |-----|--------|
 | `p` | Switch to Projects view |
-| `b` | Switch to Task view |
 | `l` | Switch to Findings view |
 | `m` | Switch to Review Queue view |
 | `s` | Switch to Skills view |
@@ -225,18 +218,6 @@ All palette commands start with `:`. You can also type them without the colon pr
 |---------|-------------|
 | `:open <project>` | Set the active project context across all views |
 | `:intro always\|once-per-version\|off` | Tune the startup intro behavior |
-
-### Task
-
-| Command | Description |
-|---------|-------------|
-| `:add <task>` | Add a new item to the task Queue section |
-| `:complete <id\|match>` | Mark a task item as done |
-| `:move <id\|match> <active\|queue\|done>` | Move a task item between sections |
-| `:reprioritize <id\|match> <high\|medium\|low>` | Set an item's priority |
-| `:context <id\|match> <text>` | Append or update context on a task item |
-| `:work next` | Move the top Queue item to Active |
-| `:tidy [keep]` | Archive old Done items (default: keep last 30) |
 
 ### Findings
 

@@ -3,6 +3,8 @@
 
 Open-source knowledge layer for AI agents. Published as `@phren/cli` on npm.
 
+Work lives in forge issues. Claim an issue with `phren issue claim` or `claim_issue` and reference it in the PR. Use the owner Inbox for actions that need the owner. See `docs/issues.md`.
+
 ## Project Location
 
 Source lives at `~phren`. Published to npm. Starter templates are bundled in the package.
@@ -33,12 +35,13 @@ Outside the pnpm workspace:
 
 | File | Purpose |
 |------|---------|
-| `packages/cli/src/index.ts` | Entry point: top-level invocation routing + MCP server (83 tools registered; the `core` profile exposes 10, see `src/mcp/profile.ts`) |
+| `packages/cli/src/index.ts` | Entry point: top-level invocation routing + MCP server (82 tools registered; the `core` profile exposes 9, see `src/mcp/profile.ts`) |
+| `packages/cli/src/tools/issues.ts` | MCP tools `list_issues`, `get_issue`, `create_issue`, `update_issue`, `claim_issue`, `comment_issue` and `close_issue`, backed by `src/forge/`; the `phren issue` command in `src/cli/issues.ts` parses refs and prints tables |
 | `packages/cli/src/tools/summaries.ts` | MCP tools `get_topic_summaries` / `set_topic_summary`: the agent reads a topic's bullets and stores its own paragraph, under the invented-identifier check; driven by the `/phren-summarize` skill |
 | `packages/cli/src/content/summarize.ts` | The archive's shape: `## Now` blocks at the top of `reference/topics/*.md` (structural, or LLM prose with `--llm`), the `What phren knows` block in `summary.md` the hook injects once per session, and the split of oversized topic files into `<topic>.older.md`. Run by `phren maintain summarize` and by background maintenance. |
 | `packages/cli/src/store-weight.ts` | Words per kind across the store and the median hook injection size; behind `phren status`'s weight line and doctor's `context-cost` check |
 | `packages/cli/src/recall/eval/` | Synthetic recall fixture, labeled cases, cached relevance judgments, scoring and pipeline adapter; run `scripts/recall-eval.ts` to measure prompt-time injections. |
-| `packages/cli/src/mcp/profile.ts` | MCP tool profiles: the gate between tool modules and the server, the `core` tool list, the `revise_finding` / `manage_task` / `session` / `phren_admin` composites that dispatch into the catalog with the target's own schema |
+| `packages/cli/src/mcp/profile.ts` | MCP tool profiles: the gate between tool modules and the server, the `core` tool list, the `revise_finding` / `session` / `phren_admin` composites that dispatch into the catalog with the target's own schema |
 | `packages/cli/src/entrypoint.ts` | Top-level dispatcher: resolves `--help`/`--version`/`--health`/MCP/manage invocations and routes via the command registry |
 | `packages/cli/src/cli-registry.ts` | Command catalog. Single source of truth for help generation and dispatch (Command type, REGISTRY, lookupCommand, DOC_TOPICS). |
 | `packages/cli/src/cli-help.ts` | Help formatters over the registry: formatCheatSheet, formatTopic, formatCommand, formatFullHelp |
@@ -51,7 +54,7 @@ Outside the pnpm workspace:
 | `packages/cli/src/utils.ts` | Utilities: FTS5 sanitization, synonym expansion, keyword extraction |
 | `packages/cli/src/init/init.ts` | `phren init`: configures MCP + hooks for all detected agents |
 | `packages/cli/src/link/` | Reconciles an existing install's machine/profile wiring, hooks, and local context |
-| `packages/cli/src/data/access.ts` | Data layer: task CRUD, machine/profile listing, finding management |
+| `packages/cli/src/data/access.ts` | Data layer: machine/profile listing, finding management |
 | `packages/cli/src/telemetry.ts` | Opt-in usage telemetry: tool call and CLI command tracking |
 | `packages/cli/browser/graph/` | Shared 3D memory-viewer renderer (bundled for the web UI and the VS Code webview): scene, project navigator, contents/review pane, labels |
 | `packages/cli/src/graph-core/` | Host-agnostic graph model shared by the browser viewer and the terminal graph view: payload types, palette, kind/health derivation, filters, ranking, search. Must not import node builtins or anything outside itself (it is bundled for the browser). |
@@ -61,7 +64,7 @@ Outside the pnpm workspace:
 | `packages/cli/src/bridge/code-routes.ts` | Registered-store Code routes: tree, symbol and filename search, outlines and batched counts, a file's resolved references, definitions with findings, references, paged usage, what changed, per-file change counts and reindex; debounced refresh after recorded file changes. |
 | `packages/cli/src/bridge/code-note.ts` | Validates a dossier line, saves a finding linked to that function, type or variable, then optionally hands off to the chosen session or dispatches a worker; delivery failure is separate from save success. |
 | `packages/cli/src/bridge/files.ts` | Read-only `/v1/projects/files` browser for discovered checkouts: relative paths, no symlinks or `.git`, 2 MiB files and at most 500 directory entries. |
-| `packages/cli/src/bridge/project-memory.ts` | gitboy's Hook routes: `GET /v1/projects/:project/memory` (findings, truths, tasks, `remote:`), `/memory/files` (findings by cited file or code-index symbol), `/memory/search` (findings and truths ranked with the retrieval tokenizer and chunk matcher), `/tasks?branch=` and `POST /findings` (through `handleAddFinding`). Capped, credential-bearing text withheld. |
+| `packages/cli/src/bridge/project-memory.ts` | gitboy's Hook routes: `GET /v1/projects/:project/memory` (findings, truths, `remote:`), `/memory/files` (findings by cited file or code-index symbol), `/memory/search` (findings and truths ranked with the retrieval tokenizer and chunk matcher), and `POST /findings` (through `handleAddFinding`). Capped, credential-bearing text withheld. |
 | `packages/cli/src/bridge/scoped-gateway.ts` | The scoped SSH gateway (`dispatch-scoped`, `ssh-scoped`) for keys paired with `phren pair --scope gitboy-read|gitboy-write`: admits only the scope's routes, validates path, query and body against `gitboy-contract.ts`, rebuilds the Hook request itself, answers everything else with a refusal. |
 | `packages/cli/src/bridge/file-resolve.ts` | `GET /v1/files/resolve`: resolve chat references against the selected pane or worker cwd, then its Git root; return a safe repository-relative path and metadata using the file-range reader. Outside the repository (or with none) only media in a media root resolves (home as `~/<path>`; WSL drives `/mnt/<letter>` and folders in `<bridge>/media-roots` as `~root/<absolute path>`; `home-media.ts`, read back by `/v1/files/range`). A literal `~/` names home; a bare media name from a folder outside any repository is searched for beneath it, bounded. |
 | `packages/cli/src/bridge/transcript-preview.ts` | Ephemeral live reply previews from Claude pane text and Codex/OpenCode deltas, capped at two updates per second and cleared by completed entries. |
@@ -74,12 +77,6 @@ Outside the pnpm workspace:
 | `packages/cli/src/bridge/prompt-deliveries.ts` | Phone messages typed into a pane, by `deliveryId`: bound to the pane (not the conversation), settled by any conversation there through UserPromptSubmit, failed with a reason when the pane closes, the agent restarts or a turn ends without it, kept 24 h in `deliveries.json` as hashes. Backs `/v1/prompt` state, retries and `/v1/prompt/status`. |
 | `packages/cli/src/bridge/codex-thread-origin.ts` | Drops Codex hook callbacks from a nested `codex exec` or a subagent thread (rollout `originator`/`source`), so they never rebind the pane they run in. |
 | `packages/cli/src/bridge/agent-hook-callback.ts` | The agent side of `hook <source>`: reads the agent's payload, applies the tool-call time budget (`withinToolBudget`) and posts it to the daemon's local socket; `agent-hook-asks.ts` holds the pure ask/answer translations (Codex app-server approvals, OpenCode decisions, conductor `dispatch`/`hand_off` asks). Both are re-exported by `agent-hooks.ts`. |
-| `packages/cli/src/task/session-tasks.ts` | Tasks get closed (#934): the per-session task ledger (`.runtime/session-tasks/<session>.json`, written by the MCP task tools), the done / queue / parked / open rule the Stop hook (`cli/session-stop-tasks.ts`) and dispatch returns judge by, the WIP limit (3), the 80-character title advice and the 24 h staleness rule. |
-| `packages/cli/src/bridge/task-stale.ts` | Stale Active tasks as owner-inbox sources (`task-stale:<project>:<bid>`, cached 5 min, at most 20); `dream/stale-tasks.ts` is the scheduled dream's requeue of the same tasks. |
-| `packages/cli/src/task/audit.ts` | `phren task audit`: the bounded weekly audit of a project's open tasks by its helper model (40 per run, rotated by last audit), closing done-with-evidence tasks and noting the rest; `bridge/task-audit-schedule.ts` runs it weekly on the Hook in the dreaming window. |
-| `packages/cli/src/task/work.ts` | Task work links format: the `Work:` record (worker, branch/worktree, PR, issue), forge URL and `bid:` reference parsing (gitboy's closes/mentions rule), the one-line status and the auto-close rule. Pure. |
-| `packages/cli/src/bridge/task-work.ts` | Fills task work links: binds a dispatch to the task its brief names, records and follows its worker from the receipt, links a `dispatch_report`'s pull request. `PHREN_TASK_WORK=off`. |
-| `packages/cli/src/bridge/task-work-live.ts` | Live task work state for `GET /v1/tasks` and `/v1/tasks/detail` (worker from receipts, PR CI/mergeability and issue state through the git host providers' `item`, cached a minute) and the five-minute sweep that links PRs naming a task and closes tasks whose linked PR merged or issue closed. |
 | `packages/cli/src/bridge/hand-off.ts` | Delivers one prompt to an existing local or verified-peer session, with live target validation. |
 | `packages/cli/src/bridge/schedules.ts` | Scheduled prompts: the `schedules.yaml` store format and its five timing forms evaluated in the assigned computer's local time, plus the Hook's `Scheduler` that records a run before launching through Herdr or a headless wrapper. Backs `phren schedule` and the `/v1/schedules` routes. The store format lives in `schedule-format.ts`, the launchers in `schedule-launch.ts` and the run watcher in `schedule-watch.ts`; `schedules.ts` re-exports them. |
 | `packages/cli/src/bridge/dream-schedule.ts` | The Hook's dreaming ticker (every 10 min): per-project eligibility from the `dreaming` config (`config/dreaming.ts`: cadence, window, idle minutes), `dreams/last-run.json` and live sessions (never beside a working agent), then one low-priority `phren dream run --scheduled` child at a time. Its own module because a dream is no pane or prompt, so `schedules.ts`'s model does not fit. Also backs `phren dream status` / `dream_status`. |
@@ -110,7 +107,7 @@ Outside the pnpm workspace:
 | `packages/cli/src/computers/` | The memory-free surface over the Hook: `phren computers`, `phren usage` and the `phren computers mcp` stdio server (`list_computers`, `get_resources`, `pick_computer`, `get_usage`). Commands are `standalone` in the registry, so dispatch never finds or activates a store. |
 | `packages/cli/src/bridge/models.ts` | Harness model catalogues: Codex app-server, Claude Code's cached `/model` catalogue with client-version filtering and a built-in fallback, and `opencode models`, cached by `ModelCatalog`. |
 | `.claude-plugin/` | Claude Code plugin manifest + marketplace entry. Skills come straight from `packages/cli/starter/global/skills/` (minus `conductor`/`fanout`), the MCP server is inline (`npx -y @phren/cli@<version> mcp`, which serves setup mode with no store and stands down when `phren init` registered its own server, `src/mcp/plugin-mode.ts`), hooks are `hooks/hooks.json` → `hooks/phren-hook.sh` (stands down per event when settings.json already runs phren). Versions and pins must equal `packages/cli/package.json` (validate-docs, `claude-plugin.test.ts`). Guide: `docs/claude-code-plugin.md`. |
-| `evals/` | `claude plugin eval` suite for the plugin (recall, save a finding, add a task) against fixed MCP mocks; real model calls, about $0.60 for one run of each. |
+| `evals/` | `claude plugin eval` suite for the plugin (recall and save a finding) against fixed MCP mocks; real model calls, about $0.60 for one run of each. |
 | `scripts/graph-survey.ts` | Renders the Graph view against synthetic stores from 3 to 40 projects at several terminal sizes. Run it before and after any graph change; three defects were invisible on small fixtures. |
 | `packages/cli/src/status.ts` | `phren status`: health, project, stats overview |
 | `packages/cli/starter/global/skills/` | The `phren-*` slash commands `phren init` provisions into `~/.phren/global/skills` (and symlinks into `~/.claude/skills` under the managed preset). **This is the source `init` actually reads**; `setup.ts` copies from here. |
@@ -131,7 +128,7 @@ pnpm lint          # lint all packages
 
 ## Current Version
 
-`@phren/cli` 0.3.101 (see `packages/cli/package.json`).
+`@phren/cli` 0.4.0 (see `packages/cli/package.json`).
 
 ## Reference Documentation
 

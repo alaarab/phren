@@ -12,8 +12,6 @@ import { createWebSearchTool } from "../tools/web-search.js";
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "../tools/git.js";
 import { createPhrenSearchTool } from "../tools/phren-search.js";
 import { createPhrenFindingTool } from "../tools/phren-finding.js";
-import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "../tools/phren-tasks.js";
-import { createPhrenAddTaskTool } from "../tools/phren-add-task.js";
 import { buildPhrenContext } from "../memory/context.js";
 import { buildSystemPrompt } from "../system-prompt.js";
 import { resolveProvider } from "../providers/resolve.js";
@@ -57,9 +55,6 @@ async function buildTestConfig(overrides?: Partial<AgentConfig>): Promise<AgentC
   if (phrenCtx) {
     registry.register(createPhrenSearchTool(phrenCtx));
     registry.register(createPhrenFindingTool(phrenCtx, null));
-    registry.register(createPhrenGetTasksTool(phrenCtx));
-    registry.register(createPhrenCompleteTaskTool(phrenCtx, null));
-    registry.register(createPhrenAddTaskTool(phrenCtx, null));
   }
 
   return {

@@ -16,7 +16,6 @@ import {
   updateRuntimeHealth,
   withFileLock,
   getWorkflowPolicy,
-  getProactivityLevelForTask,
   getProactivityLevelForFindings,
   hasExplicitFindingSignal,
   shouldAutoCaptureFindingsForLevel,
@@ -27,7 +26,6 @@ import {
   isProjectHookEnabled,
   ensureLocalGitRepo,
   bootstrapPhrenDotEnv,
-  finalizeTaskSession,
   appendFindingJournal,
 } from "./hooks-context.js";
 import { logger } from "../logger.js";
@@ -55,7 +53,6 @@ import { storeAutoCommitBlocker } from "../sync/git-state.js";
 import { STAGED_DIFF } from "../sync/store-merge.js";
 import { storeCommitMessage } from "../machine-identity.js";
 import { finishUnmanagedClaude } from "./claude-unmanaged.js";
-import { taskStopDecision, writeTaskStopDecision } from "./session-stop-tasks.js";
 
 // ── Utility ─────────────────────────────────────────────────────────────────
 
@@ -185,11 +182,9 @@ export function nextSyncStatus(
  * two-month outage go unnoticed. Rate-limited via a marker file.
  */
 /** Set once this Stop printed its block decision: stdout must then stay that one JSON object. */
-let stdoutIsDecision = false;
 
 function warnIfSyncDegraded(phrenPath: string): void {
   // The notice waits for a Stop that prints nothing else; its marker is untouched, so it comes then.
-  if (stdoutIsDecision) return;
   try {
     const assessment = assessSyncOutage(getRuntimeHealth(phrenPath).lastSync);
     if (!assessment.degraded) return;
@@ -205,7 +200,7 @@ function warnIfSyncDegraded(phrenPath: string): void {
     process.stdout.write([
       "<phren-notice>",
       assessment.summary,
-      `Your findings and tasks are safe on disk in ${phrenPath}, but they are not reaching the remote.`,
+      `Your findings are safe on disk in ${phrenPath}, but they are not reaching the remote.`,
       `Diagnose with: phren status  (then: phren store sync)`,
       "<phren-notice>",
       "",
@@ -266,23 +261,9 @@ export async function handleHookStop() {
     return;
   }
 
-  // Settle the tasks this session took on before it stops. The guard paths
-  // above stay silent and this block must emit only the JSON decision.
-  const taskStop = taskStopDecision({ phrenPath: ctx.phrenPath, payload: stdinPayload, tool: ctx.hookTool });
-  if (taskStop) {
-    writeTaskStopDecision(taskStop);
-    stdoutIsDecision = true;
-    appendAuditLog(phrenPath, "hook_stop", `task_resolution open=${taskStop.open.length}`);
-  }
-
   // Read stdin early — it's a stream and can only be consumed once.
   // Needed for auto-capture transcript_path parsing.
-  const taskSessionId = typeof stdinPayload?.session_id === "string" ? stdinPayload.session_id : undefined;
-  const taskLevel = getProactivityLevelForTask(phrenPath);
-  if (taskSessionId && taskLevel !== "high") {
-    debugLog(`hook-stop task proactivity=${taskLevel}`);
-  }
-
+  const sessionId = typeof stdinPayload?.session_id === "string" ? stdinPayload.session_id : undefined;
   // Auto-capture BEFORE git operations so captured insights get committed and pushed.
   // Gated behind PHREN_FEATURE_AUTO_CAPTURE=1.
   const findingsLevel = getProactivityLevelForFindings(phrenPath);
@@ -320,9 +301,9 @@ export async function handleHookStop() {
         if (activeProject) {
           // Check session cap before extracting — same guard as PostToolUse hook
           let capReached = false;
-          if (taskSessionId) {
+          if (sessionId) {
             try {
-              const capFile = sessionMarker(phrenPath, `tool-findings-${taskSessionId}`);
+              const capFile = sessionMarker(phrenPath, `tool-findings-${sessionId}`);
               let count = 0;
               if (fs.existsSync(capFile)) {
                 count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0;
@@ -391,12 +372,6 @@ export async function handleHookStop() {
 
   const gitRepo = ensureLocalGitRepo(phrenPath);
   if (!gitRepo.ok) {
-    finalizeTaskSession({
-      phrenPath,
-      sessionId: taskSessionId,
-      status: "error",
-      detail: gitRepo.detail,
-    });
     updateRuntimeHealth(phrenPath, {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "error", detail: gitRepo.detail },
@@ -412,12 +387,6 @@ export async function handleHookStop() {
 
   const status = await runBestEffortGit(["status", "--porcelain"], phrenPath);
   if (!status.ok) {
-    finalizeTaskSession({
-      phrenPath,
-      sessionId: taskSessionId,
-      status: "error",
-      detail: status.error || "git status failed",
-    });
     updateRuntimeHealth(phrenPath, {
       lastStopAt: now,
       lastAutoSave: { at: now, status: "error", detail: status.error || "git status failed" },
@@ -492,7 +461,6 @@ export async function handleHookStop() {
         const file = m[2].trim();
         if (!changes.has(proj)) changes.set(proj, new Set());
         if (/findings/i.test(file)) changes.get(proj)!.add("findings");
-        else if (/tasks/i.test(file)) changes.get(proj)!.add("task");
         else if (/CLAUDE/i.test(file)) changes.get(proj)!.add("config");
         else if (/summary/i.test(file)) changes.get(proj)!.add("summary");
         else if (/skill/i.test(file)) changes.get(proj)!.add("skills");
@@ -507,12 +475,6 @@ export async function handleHookStop() {
   }
   const commit = add.ok ? await runBestEffortGit(["commit", "-m", storeCommitMessage(commitMsg)], phrenPath) : { ok: false, error: add.error };
   if (!add.ok || !commit.ok) {
-    finalizeTaskSession({
-      phrenPath,
-      sessionId: taskSessionId,
-      status: "error",
-      detail: add.error || commit.error || "git add/commit failed",
-    });
     updateRuntimeHealth(phrenPath, {
       lastStopAt: now,
       lastAutoSave: {
@@ -532,12 +494,6 @@ export async function handleHookStop() {
 
   const remotes = await runBestEffortGit(["remote"], phrenPath);
   if (!remotes.ok || !remotes.output) {
-    finalizeTaskSession({
-      phrenPath,
-      sessionId: taskSessionId,
-      status: "saved-local",
-      detail: "commit created; no remote configured",
-    });
     const unsyncedCommits = await countUnsyncedCommits(phrenPath);
     updateRuntimeHealth(phrenPath, {
       lastStopAt: now,
@@ -557,12 +513,6 @@ export async function handleHookStop() {
   const syncDetail = scheduled
     ? "commit saved; background sync scheduled"
     : "commit saved; background sync already running";
-  finalizeTaskSession({
-    phrenPath,
-    sessionId: taskSessionId,
-    status: "saved-local",
-    detail: syncDetail,
-  });
   // The push has been handed to the background sync and has not happened yet,
   // so only the push *detail* is updated here — the status, failure streak and
   // last-success timestamp are left for whoever actually talks to the remote.

@@ -39,7 +39,6 @@ let KIND_GLYPH = graphGlyphs();
 const KIND_LABEL: Record<NodeKind, string> = {
   project: "project",
   finding: "finding",
-  task: "task",
   entity: "fragment",
   reference: "reference",
   topic: "topic",
@@ -113,7 +112,7 @@ export function renderGraphView(controller: GraphController, width: number, heig
   KIND_GLYPH = graphGlyphs();
   if (controller.status === "loading" || controller.status === "idle") return centered(width, height, [
     colored(ACCENT_CYAN, "⠿ building your knowledge graph…"),
-    style.dim("scanning findings, tasks, fragments and references"),
+    style.dim("scanning findings, fragments and references"),
   ]);
   if (controller.status === "error") return centered(width, height, [
     style.boldRed("graph build failed"),
@@ -455,7 +454,7 @@ function edgeColor(controller: GraphController, link: RawLink, touchesSelected: 
 
 /** How much of the store a project holds; decides which get named when space is short. */
 function projectWeight(node: RuntimeNode): number {
-  return (node.findingCount ?? 0) + (node.taskCount ?? 0) + (node.refCount ?? 0);
+  return (node.findingCount ?? 0) + (node.refCount ?? 0);
 }
 
 function labelPriority(controller: GraphController, node: RuntimeNode, selected: RuntimeNode | null, neighborIndex: Map<string, number>): number {
@@ -498,7 +497,7 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
 
   if (selected) {
     const detail = controller.detail(selected.id);
-    push(`${colored(selected.kind === "project" ? KIND_COLORS.project : selected.baseColor, KIND_GLYPH[selected.kind])} ${style.bold(KIND_LABEL[selected.kind])}${selected.kind === "task" && selected.section ? style.dim(`  ${selected.section.toLowerCase()}`) : ""}`);
+    push(`${colored(selected.kind === "project" ? KIND_COLORS.project : selected.baseColor, KIND_GLYPH[selected.kind])} ${style.bold(KIND_LABEL[selected.kind])}`);
     const text = selected.fullLabel || selected.label;
     const textBudget = Math.max(4, Math.floor(height * (watching ? 0.3 : 0.4)));
     const wrapped = wrapText(text, inner, textBudget);
@@ -508,7 +507,6 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
     if (selected.kind !== "project" && selected.project) row("project", style.cyan(selected.project));
     if (selected.kind === "project") {
       row("findings", String(selected.findingCount ?? 0));
-      row("tasks", String(selected.taskCount ?? 0));
       const knows = selected.project ? controller.knowsFor(selected.project) : null;
       if (knows) {
         push();
@@ -538,14 +536,13 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
       const bits = [
         c.projects ? `${c.projects} proj` : "",
         c.findings ? `${c.findings} find` : "",
-        c.tasks ? `${c.tasks} task` : "",
         c.entities ? `${c.entities} frag` : "",
         c.references ? `${c.references} ref` : "",
       ].filter(Boolean);
       row("links", `${c.total}${bits.length ? style.dim(`  ${bits.join(" ")}`) : ""}`);
     }
     const docs = (selected.refDocs ?? []).map((ref) => ref.doc);
-    if (docs.length && selected.kind !== "finding" && selected.kind !== "task") {
+    if (docs.length && selected.kind !== "finding") {
       row("docs", sliceWidth(docs[0], inner - 9));
       for (const doc of docs.slice(1, 3)) push(`${" ".repeat(9)}${sliceWidth(doc, inner - 9)}`);
       if (docs.length > 3) push(`${" ".repeat(9)}${style.dim(`+${docs.length - 3} more`)}`);
@@ -585,7 +582,7 @@ function renderPane(controller: GraphController, selected: RuntimeNode | null, w
       for (const project of projects.slice(0, budget)) {
         const name = project.project || project.id;
         const isFocus = controller.focusedProject === name;
-        push(`${colored(project.baseColor, KIND_GLYPH.project)} ${isFocus ? style.boldCyan(sliceWidth(name, inner - 12)) : sliceWidth(name, inner - 12)} ${style.dim(`${project.findingCount ?? 0}✦ ${project.taskCount ?? 0}▤`)}`);
+        push(`${colored(project.baseColor, KIND_GLYPH.project)} ${isFocus ? style.boldCyan(sliceWidth(name, inner - 12)) : sliceWidth(name, inner - 12)} ${style.dim(`${project.findingCount ?? 0}✦`)}`);
       }
       if (projects.length > budget) push(style.dim(`  +${projects.length - budget} more`));
       push();

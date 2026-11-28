@@ -87,7 +87,7 @@ Daily store health (`.runtime/store-health.jsonl`) reports citation coverage: pe
 
 Three roles, enforced on mutating operations:
 
-| Role | Add / edit findings, tasks, notes | Delete findings, tasks, notes | Change config |
+| Role | Add / edit findings and notes | Delete findings and notes | Change config |
 |------|-----------------------------------|-------------------------------|---------------|
 | `admin` | ✓ | ✓ | ✓ |
 | `contributor` | ✓ | ✓ | — |
@@ -97,7 +97,7 @@ Configure with `phren config access set --admins=… --contributors=… --reader
 When every list is empty (the default), the store is in open mode and every
 action is permitted.
 
-Contributors can delete: `remove_finding`, `remove_task` and `remove_note` are
+Contributors can delete: `remove_finding` and `remove_note` are
 contributor actions, so granting contributor on a shared store also grants
 permanent deletion. Only config changes are admin-only.
 
@@ -168,7 +168,6 @@ Budgets bound what phren adds on its own. Nothing a person or agent wrote is eve
 
 | Budget | Default | Past it |
 |---|---|---|
-| `openTasks` (per project) | 150 | The prompt hook files no new task for the project, and its trace line ends `tasks=paused open <n>/<budget>`. A prompt that asks for a task ("add this to the task list"), `add_task`, `phren tasks add` and the apps still add tasks, and a prompt that matches an Active task still moves it. |
 | `reviewEntries` (per project) | 150 | Governance (stale, broken-citation and low-value findings), TTL review, extraction, the tool hook, the coding agent's compaction and dreams queue nothing more in the project's `review.md`. An entry a person or agent queues still goes in. Extraction leaves a held-back candidate unprocessed so a later run queues it; a dream keeps the addition `deferred` in its run record until `phren dream apply` queues it; TTL review, the tool hook and the coding agent's compaction do not retry, and TTL review says how many it held back. |
 | `runtimeMB` | 1024 | Reported only: this computer's `.runtime` folder is flagged. |
 | `fanoutArchiveMB` | 512 | Reported only until runtime age-out is on and past its week; then the fan-out archive sweep deletes the oldest finished folders until the archive fits, beside its 500-folder cap. |
@@ -211,9 +210,9 @@ phren config policy set --ttlDays=90 --retentionDays=365 --minInjectConfidence=0
 phren config policy set --project my-app --retentionDays=3650   # per-project override
 phren config policy set --decay.d30=1 --decay.d60=0.85 --decay.d90=0.65
 
-# Budgets (0 turns one off); a project can override openTasks and reviewEntries
-phren config policy set --budgets.openTasks=150 --budgets.reviewEntries=150
-phren config policy set --project my-app --budgets.openTasks=300
+# Budgets (0 turns one off); a project can override reviewEntries
+phren config policy set --budgets.reviewEntries=150
+phren config policy set --project my-app --budgets.reviewEntries=300
 phren config policy set --budgets.runtimeMB=1024 --budgets.fanoutArchiveMB=512
 phren config policy set --budgets.runtimeAgeOut=true --budgets.runtimeAgeOutDays=30
 

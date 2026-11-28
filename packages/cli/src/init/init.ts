@@ -1,5 +1,5 @@
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
-import { migrateInstalledModules, moduleEnabled } from "../modules/runtime.js";
+import { migrateInstalledModules, } from "../modules/runtime.js";
 import { initializeModules } from "../modules/config.js";
 import { skillEnabled } from "../modules/provision.js";
 import { reconcileModuleHooks } from "../bridge/install.js";
@@ -56,7 +56,6 @@ export {
   type ProactivityLevel,
   getProactivityLevel,
   getProactivityLevelForFindings,
-  getProactivityLevelForTask,
 } from "../proactivity.js";
 
 export type { PostInitCheck, InitProjectDomain, InferredInitScaffold } from "./setup.js";
@@ -91,7 +90,6 @@ import {
   applyProjectStorageBindings,
   warmSemanticSearch,
   runProjectLocalInit,
-  enableTaskMetadataForNewStore,
 } from "./init-configure.js";
 import { runWalkthrough, createWalkthroughPrompts, createWalkthroughStyle } from "./init-walkthrough.js";
 import { assertNoGlobalWiringConflict } from "./guard-globals.js";
@@ -130,7 +128,6 @@ import {
   getProjectOwnershipDefault,
 } from "../project-config.js";
 import { type ProactivityLevel } from "../proactivity.js";
-import { getWorkflowPolicy } from "../shared/governance.js";
 import { addProjectToProfile } from "../profile-store.js";
 import {
   DEFAULT_MANAGEMENT_PRESET,
@@ -187,10 +184,8 @@ export interface InitOptions {
   /** Management preset controlling phren's machine footprint (managed | assisted | manual). */
   managementPreset?: ManagementPreset;
   findingsProactivity?: ProactivityLevel;
-  taskProactivity?: ProactivityLevel;
   lowConfidenceThreshold?: number;
   riskySections?: ("Review" | "Stale" | "Conflicts")[];
-  taskMode?: "off" | "manual" | "suggest" | "auto";
   findingSensitivity?: "minimal" | "conservative" | "balanced" | "aggressive";
   skillsScope?: SkillsScope;
   applyStarterUpdate?: boolean;
@@ -373,10 +368,8 @@ export async function runInit(opts: InitOptions = {}) {
     opts.projectOwnershipDefault = opts.projectOwnershipDefault || answers.projectOwnershipDefault;
     opts.managementPreset = opts.managementPreset || answers.managementPreset;
     opts.findingsProactivity = opts.findingsProactivity || answers.findingsProactivity;
-    opts.taskProactivity = opts.taskProactivity || answers.taskProactivity;
     if (typeof opts.lowConfidenceThreshold !== "number") opts.lowConfidenceThreshold = answers.lowConfidenceThreshold;
     if (!Array.isArray(opts.riskySections)) opts.riskySections = answers.riskySections;
-    opts.taskMode = opts.taskMode || answers.taskMode;
     if (answers.cloneUrl) {
       opts._walkthroughCloneUrl = answers.cloneUrl;
     }
@@ -603,7 +596,6 @@ export async function runInit(opts: InitOptions = {}) {
       log(`  Hooks mode: ${hooksLabel}`);
       log(`  Clanker mode: ${clanker ? "on" : "off"} (phren config clanker on|off)`);
       log(`  Default project ownership: ${ownershipDefault}`);
-      if (moduleEnabled(phrenPath, "tasks")) log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
       log(`  Git repo: ${existingGitRepo.detail}`);
 
       // Always reconfigure MCP and hooks (picks up new features on upgrade)
@@ -668,7 +660,7 @@ export async function runInit(opts: InitOptions = {}) {
       log(`\nNext steps:`);
       log(`  1. Start a new Claude session in your project directory — phren injects context automatically`);
       log(`  2. Run \`phren doctor\` to verify everything is wired correctly`);
-      log(`  3. Change defaults anytime: \`phren config project-ownership\`, \`phren config workflow\`, \`phren config proactivity.findings\`, \`phren config proactivity.tasks\``);
+      log(`  3. Change defaults anytime: \`phren config project-ownership\`, \`phren config workflow\`, \`phren config proactivity.findings\``);
       log(`  4. After your first week, run phren-discover to surface gaps in your project knowledge`);
       log(`  5. After working across projects, run phren-consolidate to find cross-project patterns`);
       log(``);
@@ -711,7 +703,6 @@ export async function runInit(opts: InitOptions = {}) {
   function copyDir(src: string, dest: string) {
     fs.mkdirSync(dest, { recursive: true });
     for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-      if (entry.name === "tasks.md" && !moduleEnabled(phrenPath, "tasks")) continue;
       if (path.basename(src) === "skills" && !skillEnabled(phrenPath, entry.name)) continue;
       const srcPath = path.join(src, entry.name);
       const destPath = path.join(dest, entry.name);
@@ -803,7 +794,6 @@ export async function runInit(opts: InitOptions = {}) {
   persistMachineName(effectiveMachine);
   updateMachinesYaml(phrenPath, effectiveMachine, opts.profile);
   ensureGovernanceFiles(phrenPath);
-  enableTaskMetadataForNewStore(phrenPath);
   setManagementPresetPreference(phrenPath, managementPreset);
   const repaired = repairPreexistingInstall(phrenPath, { caps: managementCaps, preset: managementPreset });
   ensureStoreGitignore(phrenPath);
@@ -815,7 +805,6 @@ export async function runInit(opts: InitOptions = {}) {
   log(`  Hooks mode: ${hooksLabel}`);
   log(`  Clanker mode: ${clanker ? "on" : "off"} (phren config clanker on|off)`);
   log(`  Default project ownership: ${ownershipDefault}`);
-  if (moduleEnabled(phrenPath, "tasks")) log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
   log(`  Git repo: ${localGitRepo.detail}`);
   if (repaired.removedLegacyProjects > 0) {
     log(`  Removed ${repaired.removedLegacyProjects} legacy starter project entr${repaired.removedLegacyProjects === 1 ? "y" : "ies"} from profiles.`);

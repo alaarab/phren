@@ -15,9 +15,8 @@ import {
   readRootManifest,
 } from "../phren-paths.js";
 import { resolveWorktreeParent } from "../git-worktree.js";
-import { moduleEnabled } from "../modules/runtime.js";
 import { STOP_WORDS, errorMessage } from "../utils.js";
-import { FINDINGS_FILENAME, TASKS_FILENAME } from "../filenames.js";
+import { FINDINGS_FILENAME } from "../filenames.js";
 import {
   getProjectOwnershipDefault,
   getProjectSourcePath,
@@ -445,7 +444,7 @@ function getDomainClaudeTemplate(projectName: string, domain: InitProjectDomain,
     );
   }
   return appendInferredSections(
-    `# ${projectName}\n\nThis project is not software-first. Keep practical notes, references, and task decisions so future sessions can resume quickly.\n\n## Workflow\n\n- Capture non-obvious lessons and reusable patterns\n- Keep references curated and current\n- Track active tasks and follow-ups\n`,
+    `# ${projectName}\n\nThis project is not software-first. Keep practical notes, references, and project decisions so future sessions can resume quickly.\n\n## Workflow\n\n- Capture non-obvious lessons and reusable patterns\n- Keep references curated and current\n- Track active tasks and follow-ups\n`,
     inference
   );
 }
@@ -490,12 +489,6 @@ export function ensureProjectScaffold(
     );
   }
 
-  if (moduleEnabled(path.dirname(projectDir), "tasks") && !fs.existsSync(path.join(projectDir, TASKS_FILENAME))) {
-    atomicWriteText(
-      path.join(projectDir, TASKS_FILENAME),
-      `# ${projectName} tasks\n\n## Active\n\n## Queue\n\n## Done\n`
-    );
-  }
 }
 
 /** Bootstrap a phren project from an existing project directory with AGENTS.md.
@@ -674,12 +667,6 @@ export function bootstrapFromExisting(
     atomicWriteText(
       path.join(projDir, FINDINGS_FILENAME),
       `# ${projectName} FINDINGS\n\n<!-- Bootstrapped from ${sourceRoot} -->\n`
-    );
-  }
-  if (moduleEnabled(phrenPath, "tasks") && !fs.existsSync(path.join(projDir, TASKS_FILENAME))) {
-    atomicWriteText(
-      path.join(projDir, TASKS_FILENAME),
-      `# ${projectName} tasks\n\n## Active\n\n## Queue\n\n## Done\n`
     );
   }
   if (!fs.existsSync(path.join(projDir, "topic-config.json"))) {

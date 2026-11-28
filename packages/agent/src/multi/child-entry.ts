@@ -30,8 +30,6 @@ import { updatePlanTool } from "../tools/update-plan.js";
 import { listMcpResourcesTool, readMcpResourceTool } from "../tools/mcp-resources.js";
 import { createPhrenSearchTool } from "../tools/phren-search.js";
 import { createPhrenFindingTool } from "../tools/phren-finding.js";
-import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "../tools/phren-tasks.js";
-import { createPhrenAddTaskTool } from "../tools/phren-add-task.js";
 import { createSkillTool } from "../tools/skill.js";
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "../tools/git.js";
 import { buildPhrenContext, } from "../memory/context.js";
@@ -152,9 +150,6 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
   if (phrenCtx) {
     registry.register(createPhrenSearchTool(phrenCtx));
     registry.register(createPhrenFindingTool(phrenCtx, sessionId));
-    registry.register(createPhrenGetTasksTool(phrenCtx));
-    registry.register(createPhrenCompleteTaskTool(phrenCtx, sessionId));
-    registry.register(createPhrenAddTaskTool(phrenCtx, sessionId));
     registry.register(createSkillTool(phrenCtx));
   }
 

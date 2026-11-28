@@ -9,7 +9,7 @@
  *
  * Role hierarchy:
  *   admins       → all actions
- *   contributors → add/edit/remove findings, complete/add/remove tasks
+ *   contributors → add/edit/remove findings
  *   readers      → read-only (search, get)
  *
  * When no access-control.json exists, all actors are permitted (open mode).
@@ -27,12 +27,6 @@ type RbacAction =
   | "add_finding"
   | "remove_finding"
   | "edit_finding"
-  | "complete_task"
-  | "add_task"
-  | "remove_task"
-  | "update_task"
-  | "pin_task"
-  | "claim_task"
   | "add_note"
   | "edit_note"
   | "remove_note"
@@ -173,12 +167,6 @@ const CONTRIBUTOR_ACTIONS = new Set<RbacAction>([
   "add_finding",
   "remove_finding",
   "edit_finding",
-  "complete_task",
-  "add_task",
-  "remove_task",
-  "update_task",
-  "pin_task",
-  "claim_task",
   "add_note",
   "edit_note",
   "remove_note",

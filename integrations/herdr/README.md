@@ -4,13 +4,12 @@ Phren's dashboard, one keypress from whatever pane you're in — scoped to that
 pane's project.
 
 [Herdr](https://herdr.dev) is a terminal workspace manager for coding agents.
-This plugin adds a button that pops phren's shell over the current pane: tasks,
-findings, the review queue, skills and hooks for the project that pane is
+This plugin adds a button that pops phren's shell over the current pane: findings, the review queue, skills and hooks for the project that pane is
 sitting in, without leaving the terminal or losing your layout.
 
 ```
   prefix+m        phren dashboard, over the current pane
-  prefix+shift+m  phren tasks, docked beside the current pane
+  prefix+shift+m  phren findings, docked beside the current pane
 ```
 
 ## Install
@@ -33,7 +32,7 @@ description = "Phren dashboard"
 key = "prefix+shift+m"
 type = "plugin_action"
 command = "phren.dock"
-description = "Dock phren tasks"
+description = "Dock phren findings"
 ```
 
 The plugin needs phren itself — `npx @phren/cli init` if you haven't already.
@@ -47,8 +46,8 @@ checkout in place, and the plugin will prefer that checkout's build
 | Action | Id | What it opens |
 |---|---|---|
 | Phren dashboard | `phren.dashboard` | The full shell in a popup over the current pane |
-| Phren tasks | `phren.tasks` | A popup on the project's task list |
-| Dock phren | `phren.dock` | The task list split in beside the current pane, kept open |
+| Phren findings | `phren.findings` | A popup on the project's findings |
+| Dock phren | `phren.dock` | Findings split in beside the current pane, kept open |
 | Phren web UI | `phren.web` | `phren web-ui` (the 3D graph) in a strip along the bottom; close the pane to stop the server |
 | Phren plugin check | `phren.check` | Diagnostics — read with `herdr plugin log list --plugin phren` |
 
@@ -56,7 +55,7 @@ Every entry can also be opened without a keybinding:
 
 ```bash
 herdr plugin action invoke dashboard --plugin phren
-herdr plugin pane open --plugin phren --entrypoint tasks --focus
+herdr plugin pane open --plugin phren --entrypoint findings --focus
 ```
 
 ## How the project gets picked

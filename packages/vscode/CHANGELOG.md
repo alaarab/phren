@@ -3,6 +3,10 @@
 The VS Code extension versions separately from `@phren/cli`; the CLI's own
 changelog is at the repository root. The Marketplace listing shows this file.
 
+## [0.8.0] - 2026-11-28
+
+- Removed the Tasks tree, task commands and task actions from the Phren graph.
+
 ## [0.7.2] - 2026-10-14
 
 - A healthy third MCP replacement can initialize and restore the reconnect budget; retries are exhausted only after the final attempt fails.

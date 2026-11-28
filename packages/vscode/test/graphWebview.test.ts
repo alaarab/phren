@@ -35,7 +35,6 @@ import {
   fetchFindings,
   fetchProjectSummary,
   fetchProjects,
-  fetchTasks,
   fetchTopicConfig,
   isValidProjectName,
   loadGraphData,
@@ -185,7 +184,7 @@ describe("buildScoreKey", () => {
   it("changes when the project, filename, or snippet changes", () => {
     const base = buildScoreKey("app", "FINDINGS.md", "text");
     expect(buildScoreKey("other", "FINDINGS.md", "text")).not.toBe(base);
-    expect(buildScoreKey("app", "tasks.md", "text")).not.toBe(base);
+    expect(buildScoreKey("app", "summary.md", "text")).not.toBe(base);
     expect(buildScoreKey("app", "FINDINGS.md", "different")).not.toBe(base);
   });
 
@@ -274,24 +273,7 @@ describe("fetchTopicConfig", () => {
   });
 });
 
-describe("fetchTasks", () => {
-  it("includes all Active/Queue items but caps Done at 10, always marking Done as checked", async () => {
-    const client = fakeClient({
-      getTasks: vi.fn(async () => ok({
-        items: {
-          Active: [{ id: "a1", line: "active one" }],
-          Queue: [],
-          Done: Array.from({ length: 15 }, (_, i) => ({ id: `d${i}`, line: `done ${i}`, checked: false })),
-        },
-      })),
-    });
-    const tasks = await fetchTasks(client, "app");
-    const done = tasks.filter((t) => t.section === "Done");
-    expect(tasks.filter((t) => t.section === "Active")).toHaveLength(1);
-    expect(done).toHaveLength(10);
-    expect(done.every((t) => t.checked)).toBe(true);
-  });
-});
+
 
 describe("fetchEntities", () => {
   it("defaults refCount to 0, filters docs to strings, and swallows failures", async () => {
@@ -312,17 +294,15 @@ describe("loadGraphData: orchestration", () => {
       listProjects: vi.fn(async () => ok({ projects: [{ name: "app" }, { name: "empty-project" }] })),
       getProjectSummary: vi.fn(async () => ok({ name: "app", summary: "the app" })),
       getFindings: vi.fn(async () => ok({ findings: [{ id: "f1", text: "a finding", date: "2026-01-01" }] })),
-      getTasks: vi.fn(async () => ok({ items: { Active: [{ id: "t1", line: "a task" }] } })),
       getTopicConfig: vi.fn(async () => ok({ topics: [] })),
       readGraph: vi.fn(async () => ok({ fragments: [] })),
       ...overrides,
     });
   }
 
-  it("skips a project with zero findings and zero tasks entirely (no orphan node)", async () => {
+  it("skips a project with zero findings entirely (no orphan node)", async () => {
     const client = clientWith({
       getFindings: vi.fn(async (project: string) => ok({ findings: project === "app" ? [{ id: "f1", text: "a finding", date: "2026-01-01" }] : [] })),
-      getTasks: vi.fn(async (project: string) => ok({ items: project === "app" ? { Active: [{ id: "t1", line: "a task" }] } : {} })),
     });
     const data = await loadGraphData(client);
     expect(data.nodes.some((n) => n.projectName === "empty-project")).toBe(false);
@@ -330,17 +310,14 @@ describe("loadGraphData: orchestration", () => {
     expect(data.summaries.app).toBeDefined();
   });
 
-  it("builds project/finding/task nodes with edges from the project to each, and records findingCount/taskCount", async () => {
+  it("builds project and finding nodes with edges and counts", async () => {
     const client = clientWith({});
     const data = await loadGraphData(client);
 
     const project = data.nodes.find((n) => n.kind === "project" && n.projectName === "app")!;
     const finding = data.nodes.find((n) => n.kind === "finding")!;
-    const task = data.nodes.find((n) => n.kind === "task")!;
     expect(project.findingCount).toBe(1);
-    expect(project.taskCount).toBe(1);
     expect(data.edges).toContainEqual({ source: project.id, target: finding.id });
-    expect(data.edges).toContainEqual({ source: project.id, target: task.id });
   });
 
   it("only connects an entity to projects whose docs are prefixed with projectName + '/' (not merely a string-prefix match)", async () => {
@@ -360,7 +337,6 @@ describe("loadGraphData: orchestration", () => {
     const client = clientWith({
       listProjects: vi.fn(async () => ok({ projects: [{ name: "app" }, { name: "other" }] })),
       getFindings: vi.fn(async () => ok({ findings: [{ id: "f1", text: "x", date: "2026-01-01" }] })),
-      getTasks: vi.fn(async () => ok({ items: {} })),
       readGraph: vi.fn(async () => ok({
         fragments: [
           { name: "Shared", docs: ["app/reference/x.md", "other/reference/x.md"] },
@@ -431,7 +407,6 @@ describe("loadGraphData: empty and partial states", () => {
         if (project === "broken") throw new Error("boom");
         return ok({ findings: [{ id: "f1", text: "a finding", date: "2026-01-01" }] });
       }),
-      getTasks: vi.fn(async () => ok({ items: {} })),
       getTopicConfig: vi.fn(async () => ok({ topics: [] })),
       readGraph: vi.fn(async () => ok({ fragments: [] })),
     });
@@ -467,14 +442,13 @@ describe("loadGraphData: empty and partial states", () => {
         if (project === "broken") throw new Error("boom");
         return ok({ findings: [] });
       }),
-      getTasks: vi.fn(async () => ok({ items: {} })),
       getTopicConfig: vi.fn(async () => ok({ topics: [] })),
       readGraph: vi.fn(async () => ok({ fragments: [] })),
     });
     const data = await loadGraphData(client);
     expect(data.nodes).toEqual([]);
     expect(data.emptyReason).toContain("Could not load memory for 1 of 2 projects");
-    expect(data.emptyReason).toContain("the rest have no findings or tasks");
+    expect(data.emptyReason).toContain("the rest have no findings");
     expect(data.emptyReason).toContain("Phren: Show Log");
   });
 
@@ -482,7 +456,7 @@ describe("loadGraphData: empty and partial states", () => {
     const client = fakeClient({ listProjects: vi.fn(async () => ok({ projects: [{ name: "app" }] })) });
     const data = await loadGraphData(client);
     expect(data.nodes).toEqual([]);
-    expect(data.emptyReason).toBe(`No findings or tasks yet for the 1 project in ${path.join("/nonexistent/phren-graphwebview-test-home", ".phren")}.`);
+    expect(data.emptyReason).toBe(`No findings yet for the 1 project in ${path.join("/nonexistent/phren-graphwebview-test-home", ".phren")}.`);
   });
 });
 
@@ -728,7 +702,6 @@ describe("loadGraphData: large and Windows-pathed stores", () => {
       getTopicConfig: vi.fn(tracked(ok({ topics: [] }))),
       getProjectSummary: vi.fn(tracked(ok({ summary: "s" }))),
       getFindings: vi.fn(tracked(ok({ findings: [{ id: "f1", text: "a finding", date: "2026-01-01" }] }))),
-      getTasks: vi.fn(tracked(ok({ items: {} }))),
     });
 
     const data = await loadGraphData(client);

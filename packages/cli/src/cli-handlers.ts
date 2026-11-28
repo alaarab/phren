@@ -27,15 +27,7 @@ import {
   parseProjectOwnershipMode,
   type ProjectOwnershipMode,
 } from "./project-config.js";
-import { VALID_TASK_MODES, type TaskMode } from "./governance/policy.js";
 
-function parseTaskModeFlag(raw: string | undefined): TaskMode | undefined {
-  if (!raw) return undefined;
-  const normalized = raw.trim().toLowerCase();
-  return VALID_TASK_MODES.includes(normalized as TaskMode)
-    ? (normalized as TaskMode)
-    : undefined;
-}
 
 function parseInstallModeFlag(raw: string | undefined): InstallMode | undefined {
   if (!raw) return undefined;
@@ -109,7 +101,6 @@ export async function runAddCommand(args: string[]): Promise<number> {
     console.log(`Added project "${added.data.project}" (${added.data.ownership})`);
     if (added.data.files.claude) console.log(`  ${added.data.files.claude}`);
     console.log(`  ${added.data.files.findings}`);
-    console.log(`  ${added.data.files.task}`);
     console.log(`  ${added.data.files.summary}`);
   } catch (e) {
     console.error(`Could not add project: ${e instanceof Error ? e.message : String(e)}`);
@@ -155,9 +146,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
     return 1;
   }
   const ownershipMode = parseProjectOwnershipMode(getOptionValue(args, "--project-ownership"));
-  const taskMode = parseTaskModeFlag(getOptionValue(args, "--task-mode"));
   const findingsProactivity = parseProactivityLevel(getOptionValue(args, "--findings-proactivity"));
-  const taskProactivity = parseProactivityLevel(getOptionValue(args, "--task-proactivity"));
   const mcpMode = mcpIdx !== -1 ? parseMcpMode(args[mcpIdx + 1]) : undefined;
   if (mcpIdx !== -1 && !mcpMode) {
     console.error(`Invalid --mcp value "${args[mcpIdx + 1] || ""}". Use "on" or "off".`);
@@ -168,19 +157,9 @@ export async function runInitCommand(args: string[]): Promise<number> {
     console.error(`Invalid --project-ownership value "${ownershipArg}". Use one of: ${PROJECT_OWNERSHIP_MODES.join(", ")}`);
     return 1;
   }
-  const taskModeArg = getOptionValue(args, "--task-mode");
-  if (taskModeArg && !taskMode) {
-    console.error(`Invalid --task-mode value "${taskModeArg}". Use one of: off, manual, suggest, auto.`);
-    return 1;
-  }
   const findingsArg = getOptionValue(args, "--findings-proactivity");
   if (findingsArg && !findingsProactivity) {
     console.error(`Invalid --findings-proactivity value "${findingsArg}". Use one of: high, medium, low.`);
-    return 1;
-  }
-  const taskArg = getOptionValue(args, "--task-proactivity");
-  if (taskArg && !taskProactivity) {
-    console.error(`Invalid --task-proactivity value "${taskArg}". Use one of: high, medium, low.`);
     return 1;
   }
   const presetArg = getOptionValue(args, "--preset") ?? getOptionValue(args, "--management");
@@ -212,9 +191,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
       clanker: clankerMode,
       projectOwnershipDefault: ownershipMode,
       managementPreset,
-      taskMode,
       findingsProactivity,
-      taskProactivity,
       template: templateIdx !== -1 ? args[templateIdx + 1] : undefined,
       applyStarterUpdate: args.includes("--apply-starter-update"),
       dryRun: args.includes("--dry-run"),
@@ -251,11 +228,9 @@ export async function runStatusCommand(_args: string[]): Promise<number> {
 
 export async function runVerifyCommand(_args: string[]): Promise<number> {
   const { runPostInitVerify, getVerifyOutcomeNote } = await import("./init/init.js");
-  const { getWorkflowPolicy } = await import("./shared/governance.js");
   const phrenPath = findPhrenPath() || defaultPhrenPath();
   const result = runPostInitVerify(phrenPath);
   console.log(`phren verify: ${result.ok ? "ok" : "issues found"}`);
-  console.log(`  tasks: ${getWorkflowPolicy(phrenPath).taskMode} mode`);
   for (const check of result.checks) {
     console.log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
     if (!check.ok && check.fix) {

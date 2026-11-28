@@ -114,7 +114,7 @@ export function pullItems(pulls, openPulls) {
 }
 
 /** Palette rows for the projects the Projects section has loaded; Enter opens
- * that project's page (its Code block, tasks and memory). */
+ * that project's page (its Code block and memory). */
 export function projectItems(projects, openProject) {
   return (projects ?? []).map((p) => ({
     id: `project:${p.computer}:${p.name}`,

@@ -10,7 +10,7 @@ MCP Tools (78 across 17 catalog modules):
 
   Search and browse:
     search_knowledge(query, type?, limit?, project?, tag?, since?, status?, include_history?, synthesize?) - FTS5 search with synonym expansion, filterable by tag/date/lifecycle
-    get_memory_detail(id, offset?) - fetch full content by id: fid:/bid: returns one finding or task, mem:project/filename the document
+    get_memory_detail(id, offset?) - fetch full content by id: fid: returns one finding, mem:project/filename the document
     get_project_summary(name) - project summary card and file list
     list_projects(page?, page_size?) - all projects in active profile with pagination
     get_findings(project, limit?, include_superseded?, include_history?, status?) - read recent findings without a search query
@@ -22,13 +22,7 @@ MCP Tools (78 across 17 catalog modules):
     remove_note(project, note) - remove one note
     promote_note(project, note, findingType?) - copy a note into findings and retain its promoted source
 
-  Task management:
-    get_tasks(project?, id?, item?, status?, limit?, done_limit?, offset?, summary?) - read tasks with pagination, summary mode, and section filtering
-    add_task(project, item: string | string[]) - add one or more tasks to Queue section
-    complete_task(project, item: string | string[]) - match by text, move to Done
-    remove_task(project, item: string | string[]) - remove one or more tasks by matching text
-    update_task(project, item?, updates) - change text, priority, context, section, pin, promote, work_next, or linked GitHub issue. Item optional when work_next is true.
-    tidy_done_tasks(project, keep?, dry_run?) - archive completed tasks to keep the list clean
+  Forge issues are managed with the issue tools and the phren issue command. See issues.md.
 
   Finding capture:
     add_finding(project, finding: string | string[], citation?, findingType?, sessionId?) - append one or more findings; citation/type apply to single-string mode
@@ -50,7 +44,7 @@ MCP Tools (78 across 17 catalog modules):
 
   Session management (for agents without hooks):
     session_start(project?, connectionId?) - mark session start, retrieve prior session context + checkpoints, return sessionId
-    session_end(summary?, sessionId?, connectionId?) - end a session, save summary, write task checkpoint/impact outcomes
+    session_end(summary?, sessionId?, connectionId?) - end a session, save summary
     session_context(sessionId?, connectionId?) - get current session state by explicit identity
     session_history(limit?, sessionId?, project?) - list past sessions or drill into a specific session
 
@@ -94,8 +88,8 @@ MCP Tools (78 across 17 catalog modules):
     auto_extract_findings(project, text, model?, dryRun?) - extract findings from text (max 10000 chars)
 
   Configuration:
-    get_config(domain?, project?) - read governance and policy config (proactivity, taskMode, findingSensitivity, retention, workflow, access, index, topic, or all)
-    set_config(domain, settings, project?) - update config for a domain (proactivity, taskMode, findingSensitivity, retention, workflow, index, topic)
+    get_config(domain?, project?) - read governance and policy config (proactivity, findingSensitivity, retention, workflow, access, index, topic, or all)
+    set_config(domain, settings, project?) - update config for a domain (proactivity, findingSensitivity, retention, workflow, index, topic)
 
 CLI Commands:
 
@@ -126,19 +120,7 @@ CLI Commands:
     phren finding contradictions [project]       - list contradicted findings
     phren finding resolve <project> "<a>" "<b>" <keep_a|keep_b|keep_both|retract_both> - resolve contradiction
 
-  Task management:
-    phren tasks                         - cross-project task view
-    phren task add <project> "<text>"   - add task
-    phren task complete <project> "<text>" - move task to done
-    phren task remove <project> "<text>"  - remove task
-    phren task next <project>           - pick highest-priority task
-    phren task promote <project> "<text>" [--active] - promote priority
-    phren task tidy <project> [--keep=<n>] [--dry-run] - archive completed
-    phren task link <project> "<text>" --issue <number> - link to GitHub issue
-    phren task link <project> "<text>" --unlink  - remove GitHub link
-    phren task create-issue <project> "<text>" [--repo <owner/name>] [--done] - create GitHub issue from task
-    phren task update <project> "<text>" [--priority=high|medium|low] [--section=Active|Queue|Done] - update metadata
-    phren task pin <project> "<text>"   - pin task to stay visible
+  Forge issues are managed with the issue tools and the phren issue command. See issues.md.
 
   Skills management:
     phren skills list [--project <name>]  - list installed skills
@@ -249,7 +231,6 @@ Environment Variables:
   PHREN_FEATURE_PROGRESSIVE_DISCLOSURE - old name for PHREN_CLANKER, read when it is unset
   PHREN_FEATURE_GIT_CONTEXT_FILTER - git-context file relevance boost (set 'true' to enable)
   PHREN_MAX_INJECT_TOKENS       - hard cap on total injected tokens (default: 2000)
-  PHREN_TASK_PRIORITY            - priorities to inject: high,medium,low (default: high,medium)
   PHREN_MEMORY_TTL_DAYS          - override memory TTL for trust filtering
   PHREN_OLLAMA_URL               - Ollama base URL (default: http://localhost:11434, set 'off' to disable)
   PHREN_EMBEDDING_MODEL          - embedding model (default: nomic-embed-text)
@@ -275,12 +256,10 @@ Key File Locations:
   ~/.phren/<project>/reference/      - deep reference docs and archived topic buckets
   ~/.phren/<project>/reference/topics/ - machine-managed topic docs for archived findings
   ~/.phren/<project>/FINDINGS.md     - bugs, patterns, decisions, things to avoid
-  ~/.phren/<project>/tasks.md        - task queue across sessions
   ~/.phren/<project>/review.md               - items pending human review
   ~/.phren/.runtime/                 - audit.log, search history, caches
   ~/.phren/.runtime/access-control.local.json - local RBAC role augmentation
   ~/.phren/.runtime/telemetry.json   - opt-in local telemetry counters
-  ~/.phren/.sessions/                - task checkpoint files for cross-session resume
   ~/.phren/.config/                  - governance policy JSON: retention/workflow/index policy, access-control.json
   ~/.phren/global/skills/            - personal workflow slash commands
   ~/.phren/global/AGENTS.md          - user-level agent instructions

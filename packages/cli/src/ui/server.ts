@@ -1,7 +1,4 @@
-import { taskView } from "../data/task-contract.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
-import { moduleSnapshot } from "../modules/runtime.js";
-import { disabledHint } from "../modules/registry.js";
 import * as http from "http";
 import * as crypto from "crypto";
 import { timingSafeEqual } from "crypto";
@@ -23,12 +20,6 @@ import {
   removeFinding,
   readFindings,
   addFinding as addFindingStore,
-  readTasksAcrossProjects,
-  addTask as addTaskStore,
-  completeTask as completeTaskStore,
-  removeTask as removeTaskStore,
-  updateTask as updateTaskStore,
-  TASKS_FILENAME,
   FINDINGS_FILENAME,
 } from "../data/access.js";
 import { entryScoreKey } from "../governance/scores.js";
@@ -59,7 +50,7 @@ import {
   unpinProjectTopicSuggestion,
   writeProjectTopics,
 } from "../project-topics.js";
-import { getWorkflowPolicy, updateWorkflowPolicy, updateRetentionPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, getIndexPolicy, updateIndexPolicy, VALID_TASK_MODES } from "../governance/policy.js";
+import { getWorkflowPolicy, updateWorkflowPolicy, updateRetentionPolicy, mergeConfig, getRetentionPolicy, getProjectConfigOverrides, getIndexPolicy, updateIndexPolicy } from "../governance/policy.js";
 import { listProfiles, setMachineProfile, getDefaultMachineAlias } from "../profile-store.js";
 import { setAccessRoles, ACCESS_ROLE_KEYS, permissionDeniedError, type AccessRolePatch } from "../governance/rbac.js";
 import { readProjectConfig, updateProjectConfigOverrides } from "../project-config.js";
@@ -539,7 +530,7 @@ function handleGetProjectContent(res: Res, url: string, ctx: RouteCtx): void {
   const project = String(qs.project || "");
   const file = String(qs.file || "");
   if (!project || !isValidProjectName(project) || !file) return jsonErr(res, "Invalid project or file", 400);
-  const allowedFiles = [FINDINGS_FILENAME, TASKS_FILENAME, "AGENTS.md", "summary.md"];
+  const allowedFiles = [FINDINGS_FILENAME, "AGENTS.md", "summary.md"];
   if (!allowedFiles.includes(file)) return jsonErr(res, `File not allowed: ${file}`, 400);
   const basePath = resolveProjectBasePath(ctx.phrenPath, project);
   const filePath = safeProjectPath(basePath, project, file);
@@ -637,28 +628,6 @@ function handleGetScores(res: Res, ctx: RouteCtx): void {
   jsonOk(res, scores);
 }
 
-function handleGetTasks(res: Res, ctx: RouteCtx): void {
-  try {
-    const docs = readTasksAcrossProjects(ctx.phrenPath, ctx.profile);
-    const tasks: Array<ReturnType<typeof taskView> & { project: string }> = [];
-    for (const doc of docs) {
-      for (const section of ["Active", "Queue", "Done"] as const) {
-        for (const item of doc.items[section]) {
-          tasks.push({
-            ...taskView(ctx.phrenPath, doc, item),
-            project: doc.project, section: item.section, line: item.line, priority: item.priority,
-            pinned: item.pinned, githubIssue: item.githubIssue, githubUrl: item.githubUrl,
-            context: item.context, checked: item.checked, sessionId: item.sessionId,
-          });
-        }
-      }
-    }
-    jsonOk(res, { ok: true, tasks });
-  } catch (err: unknown) {
-    jsonOk(res, { ok: false, error: errorMessage(err), tasks: [] });
-  }
-}
-
 function handleGetSettings(res: Res, url: string, ctx: RouteCtx): void {
   try {
     const prefs = readInstallPreferences(ctx.phrenPath);
@@ -669,25 +638,19 @@ function handleGetSettings(res: Res, url: string, ctx: RouteCtx): void {
     const settingsProject = String(parseQs(url).project || "");
     const merged = settingsProject && isValidProjectName(settingsProject) ? mergeConfig(ctx.phrenPath, settingsProject) : null;
     const overrides = settingsProject && isValidProjectName(settingsProject) ? getProjectConfigOverrides(ctx.phrenPath, settingsProject) : null;
-    let projectInfo: { diskPath: string; ownership: string; configFile: string; configExists: boolean; hasFindings: boolean; hasTasks: boolean; hasSummary: boolean; hasClaudeMd: boolean; findingCount: number; taskCount: number } | null = null;
+    let projectInfo: { diskPath: string; ownership: string; configFile: string; configExists: boolean; hasFindings: boolean; hasSummary: boolean; hasClaudeMd: boolean; findingCount: number } | null = null;
     if (settingsProject && isValidProjectName(settingsProject)) {
       const projectDir = path.join(ctx.phrenPath, settingsProject);
       const configFile = path.join(projectDir, "phren.project.yaml");
       const projConfig = readProjectConfig(ctx.phrenPath, settingsProject);
       const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
-      const taskPath = path.join(projectDir, "tasks.md");
       let findingCount = 0;
       if (fs.existsSync(findingsPath)) findingCount = (fs.readFileSync(findingsPath, "utf8").match(/^- /gm) || []).length;
-      let taskCount = 0;
-      if (fs.existsSync(taskPath)) {
-        const queueMatch = fs.readFileSync(taskPath, "utf8").match(/## Queue[\s\S]*?(?=## |$)/);
-        if (queueMatch) taskCount = (queueMatch[0].match(/^- /gm) || []).length;
-      }
       projectInfo = {
         diskPath: projConfig.sourcePath || projectDir, ownership: projConfig.ownership || "default",
         configFile, configExists: fs.existsSync(configFile), hasFindings: fs.existsSync(findingsPath),
-        hasTasks: fs.existsSync(taskPath), hasSummary: fs.existsSync(path.join(projectDir, "summary.md")),
-        hasClaudeMd: fs.existsSync(path.join(projectDir, "AGENTS.md")), findingCount, taskCount,
+        hasSummary: fs.existsSync(path.join(projectDir, "summary.md")),
+        hasClaudeMd: fs.existsSync(path.join(projectDir, "AGENTS.md")), findingCount,
       };
     }
     const indexPolicy = getIndexPolicy(ctx.phrenPath);
@@ -697,7 +660,6 @@ function handleGetSettings(res: Res, url: string, ctx: RouteCtx): void {
     );
     jsonOk(res, {
       ok: true, proactivity: prefs.proactivity || "high", proactivityFindings,
-      proactivityTask: prefs.proactivityTask || prefs.proactivity || "high", taskMode: workflowPolicy.taskMode,
       findingSensitivity: workflowPolicy.findingSensitivity || "balanced", autoCaptureEnabled: proactivityFindings !== "low",
       consolidationEntryThreshold: CONSOLIDATION_ENTRY_THRESHOLD, hooksEnabled: hooksData.globalEnabled,
       mcpEnabled: prefs.mcpEnabled !== false, hookTools: hooksData.tools,
@@ -937,47 +899,6 @@ function handlePostTopicsUnpin(req: Req, res: Res, url: string, ctx: RouteCtx): 
   });
 }
 
-function handlePostTaskAction(req: Req, res: Res, url: string, ctx: RouteCtx, action: "complete" | "add" | "remove"): void {
-  withPostBody(req, res, url, ctx, (parsed) => {
-    const project = String(parsed.project || "");
-    const item = String(parsed.item || "");
-    if (!project || !item || !isValidProjectName(project)) return jsonErr(res, "Missing or invalid project/item", 400);
-    if (action === "complete") {
-      const result = completeTaskStore(ctx.phrenPath, project, item);
-      jsonOk(res, { ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error });
-    } else if (action === "add") {
-      const result = addTaskStore(ctx.phrenPath, project, item);
-      jsonOk(res, { ok: result.ok, message: result.ok ? `Task added: ${result.data.line}` : undefined, error: result.ok ? undefined : result.error });
-    } else {
-      const result = removeTaskStore(ctx.phrenPath, project, item);
-      jsonOk(res, { ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error });
-    }
-  });
-}
-
-function handlePostTaskUpdate(req: Req, res: Res, url: string, ctx: RouteCtx): void {
-  withPostBody(req, res, url, ctx, (parsed) => {
-    const project = String(parsed.project || "");
-    const item = String(parsed.item || "");
-    if (!project || !item || !isValidProjectName(project)) return jsonErr(res, "Missing or invalid project/item", 400);
-    const denied = permissionDeniedError(ctx.phrenPath, "update_task", project);
-    if (denied) return jsonErr(res, denied, 403);
-    const updates: Parameters<typeof updateTaskStore>[3] = {};
-    if (parsed.responsibility !== undefined) {
-      if (parsed.responsibility !== "human" && parsed.responsibility !== "agent") return jsonErr(res, "Responsibility must be human or agent", 400);
-      updates.responsibility = parsed.responsibility;
-    }
-    if (parsed.dependencies !== undefined) {
-      try { updates.dependencies = JSON.parse(String(parsed.dependencies)); } catch { return jsonErr(res, "Dependencies must be a JSON array", 400); }
-    }
-    if (Object.prototype.hasOwnProperty.call(parsed, "text")) updates.text = String(parsed.text || "");
-    if (Object.prototype.hasOwnProperty.call(parsed, "priority")) updates.priority = String(parsed.priority || "");
-    if (Object.prototype.hasOwnProperty.call(parsed, "section")) updates.section = String(parsed.section || "");
-    const result = updateTaskStore(ctx.phrenPath, project, item, updates);
-    jsonOk(res, { ok: result.ok, message: result.ok ? result.data : undefined, error: result.ok ? undefined : result.error });
-  });
-}
-
 function handlePostSettingsFindingSensitivity(req: Req, res: Res, url: string, ctx: RouteCtx): void {
   withPostBody(req, res, url, ctx, (parsed) => {
     const value = String(parsed.value || "");
@@ -985,16 +906,6 @@ function handlePostSettingsFindingSensitivity(req: Req, res: Res, url: string, c
     if (!valid.includes(value)) return jsonErr(res, `Invalid finding sensitivity: "${value}". Must be one of: ${valid.join(", ")}`);
     const result = updateWorkflowPolicy(ctx.phrenPath, { findingSensitivity: value as "minimal" | "conservative" | "balanced" | "aggressive" });
     jsonOk(res, result.ok ? { ok: true, findingSensitivity: result.data.findingSensitivity } : { ok: false, error: result.error });
-  });
-}
-
-function handlePostSettingsTaskMode(req: Req, res: Res, url: string, ctx: RouteCtx): void {
-  withPostBody(req, res, url, ctx, (parsed) => {
-    const value = String(parsed.value || "").trim().toLowerCase();
-    const valid: readonly string[] = VALID_TASK_MODES;
-    if (!valid.includes(value)) return jsonErr(res, `Invalid task mode: "${value}". Must be one of: ${valid.join(", ")}`);
-    const result = updateWorkflowPolicy(ctx.phrenPath, { taskMode: value as typeof VALID_TASK_MODES[number] });
-    jsonOk(res, result.ok ? { ok: true, taskMode: result.data.taskMode } : { ok: false, error: result.error });
   });
 }
 
@@ -1189,7 +1100,6 @@ function handlePostSettingsProjectOverrides(req: Req, res: Res, url: string, ctx
     const VALID_FIELDS: Record<string, string[]> = {
       findingSensitivity: ["minimal", "conservative", "balanced", "aggressive"],
       proactivity: ["high", "medium", "low"], proactivityFindings: ["high", "medium", "low"],
-      proactivityTask: ["high", "medium", "low"], taskMode: ["off", "manual", "suggest", "auto"],
     };
     try {
       updateProjectConfigOverrides(ctx.phrenPath, project, (current) => {
@@ -1355,7 +1265,6 @@ export function createWebUiHttpServer(
     logger.debug("web-ui", `web-ui repair: ${errorMessage(err)}`);
   }
 
-  const modules = moduleSnapshot(phrenPath, profile);
   const ctx: RouteCtx = {
     phrenPath, profile, authToken: opts?.authToken, csrfTokens: opts?.csrfTokens, renderPage,
   };
@@ -1377,9 +1286,6 @@ export function createWebUiHttpServer(
     // Auth gate for all GET /api/* routes
     if (pathname.startsWith("/api/") && req.method === "GET" && !requireGetAuth(req, res, url, ctx.authToken)) return;
 
-    if (!modules.has("tasks") && (pathname === "/api/tasks" || pathname.startsWith("/api/tasks/") || pathname === "/api/settings/task-mode")) {
-      return jsonErr(res, disabledHint("tasks"), 404);
-    }
 
     // ── GET routes ──
     if (req.method === "GET") {
@@ -1398,7 +1304,6 @@ export function createWebUiHttpServer(
         case "/api/skills": return handleGetSkills(res, ctx);
         case "/api/hooks": return handleGetHooks(res, ctx);
         case "/api/scores": return handleGetScores(res, ctx);
-        case "/api/tasks": return handleGetTasks(res, ctx);
         case "/api/settings": return handleGetSettings(res, url, ctx);
         case "/api/config": return handleGetConfig(res, url, ctx);
         case "/api/config/view": return handleGetConfigView(res, url, ctx);
@@ -1431,12 +1336,7 @@ export function createWebUiHttpServer(
         case "/api/project-topics/reclassify": return handlePostTopicsReclassify(req, res, url, ctx);
         case "/api/project-topics/pin": return handlePostTopicsPin(req, res, url, ctx);
         case "/api/project-topics/unpin": return handlePostTopicsUnpin(req, res, url, ctx);
-        case "/api/tasks/complete": return handlePostTaskAction(req, res, url, ctx, "complete");
-        case "/api/tasks/add": return handlePostTaskAction(req, res, url, ctx, "add");
-        case "/api/tasks/remove": return handlePostTaskAction(req, res, url, ctx, "remove");
-        case "/api/tasks/update": return handlePostTaskUpdate(req, res, url, ctx);
         case "/api/settings/finding-sensitivity": return handlePostSettingsFindingSensitivity(req, res, url, ctx);
-        case "/api/settings/task-mode": return handlePostSettingsTaskMode(req, res, url, ctx);
         case "/api/settings/proactivity": return handlePostSettingsProactivity(req, res, url, ctx);
         case "/api/settings/auto-capture": return handlePostSettingsAutoCapture(req, res, url, ctx);
         case "/api/settings/mcp-enabled": return handlePostSettingsMcpEnabled(req, res, url, ctx);

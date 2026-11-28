@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { parseForgeUrl } from "../task/work.js";
+import { parseForgeUrl } from "../forge/links.js";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, type Json, targetSchema, startingTargetSchema, computerName } from "./protocol.js";
 import { tryFileLock } from "../governance/locks.js";
 const title = z.string().trim().min(1).max(500).refine(s => !/[\x00-\x1f\x7f]/.test(s));
@@ -10,7 +10,6 @@ const title = z.string().trim().min(1).max(500).refine(s => !/[\x00-\x1f\x7f]/.t
  * survive a terminal paste, other control characters do not, and twenty
  * lines is the most one paste should carry. */
 const command = z.string().min(1).max(4000).refine(s => !/[\x00-\x08\x0b-\x1f\x7f]/.test(s)).refine(s => s.split("\n").length <= 20);
-const taskRef = z.string().regex(/^bid:[a-f0-9]{8}$/);
 const prRef = z.string().max(1000).refine(s => parseForgeUrl(s)?.kind === "pull");
 const dedupeKey = z.string().min(1).max(200).regex(/^[A-Za-z0-9:_./#@-]+$/);
 /** The issues layer's repo reference: lowercase dotted labels, then an owner and
@@ -43,16 +42,16 @@ const itemSchema = z.object({
   project: z.string().max(200).optional(), computer: z.string().max(253).optional(),
   target: inboxTargetSchema.optional(), dispatch: z.string().uuid().optional(), actionId: z.string().max(200).optional(),
   source: z.string().max(500).optional(), live: z.boolean().optional(),
-  // Manual extras: what the owner should run, and the task and pull request it
+  // Manual extras: what the owner should run, and the pull request it
   // links. An issue link never gets a key of its own: it rides in the title, so
   // a Hook from before it existed still reads every stored row (see
   // `inboxIssueTitle`).
-  command: command.optional(), task: taskRef.optional(), pr: prRef.optional(), key: dedupeKey.optional(),
+  command: command.optional(), pr: prRef.optional(), key: dedupeKey.optional(),
 }).strict();
 export type InboxItem = z.infer<typeof itemSchema>;
 /** Rows a previous build wrote, read once and migrated: its inline reopen
  * marker, and an `issue` key that must become part of the title. */
-const legacyMarkedItemSchema = itemSchema.extend({ reopened: z.boolean().optional(), issue: issueRef.optional() });
+const legacyMarkedItemSchema = itemSchema.extend({ reopened: z.boolean().optional(), issue: issueRef.optional() }).strip();
 const MAX_ITEMS = 10_000;
 const reopenedSchema = z.array(z.string().uuid()).max(MAX_ITEMS);
 /** The internal tick snapshot: the public open row plus whether this is the
@@ -64,14 +63,14 @@ export const ownerInboxSchema = z.object({
   id: z.string().uuid().optional(), resolution: z.string().max(2000).optional(),
   ifUpdatedAt: z.string().datetime().optional(),
   includeResolved: z.boolean().optional(), computer: computerName.optional(),
-  command: command.optional(), task: taskRef.optional(), pr: prRef.optional(), issue: issueRef.optional(), key: dedupeKey.optional(),
+  command: command.optional(), pr: prRef.optional(), issue: issueRef.optional(), key: dedupeKey.optional(),
   /** The reader asks for the structured `issue` field. Without it, the row is
    * sent as stored: the link stays in the title, where every older strict Hook
    * and phone schema accepts it. Set from the route's `issues=1`, never by a
    * client body in this build. */
   issues: z.boolean().optional(),
 }).strict();
-export interface InboxSource { source: string; kind: "needs-you" | "blocked"; title: string; project?: string; computer?: string; target?: z.infer<typeof inboxTargetSchema>; dispatch?: string; actionId?: string; task?: string }
+export interface InboxSource { source: string; kind: "needs-you" | "blocked"; title: string; project?: string; computer?: string; target?: z.infer<typeof inboxTargetSchema>; dispatch?: string; actionId?: string }
 export interface InboxSnapshot { sources: InboxSource[]; unavailableDispatches?: string[] }
 
 /** Use a separate shell for multiline commands so `&&` cannot suppress their errexit. */
@@ -298,13 +297,13 @@ export class OwnerInbox {
           throw new BridgeError(400, `Title too long with an issue link: shorten it to ${titleBudget(data.issue)} characters.`);
         }
         // Unset fields are left out, not stored as undefined.
-        const fields = { project: data.project, command: data.command, task: data.task, pr: pr?.url, key: data.key };
-        const next = { title: nextTitle, ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) } as Pick<InboxItem, "title" | "project" | "command" | "task" | "pr" | "key">;
+        const fields = { project: data.project, command: data.command, pr: pr?.url, key: data.key };
+        const next = { title: nextTitle, ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) } as Pick<InboxItem, "title" | "project" | "command" | "pr" | "key">;
         const differs = (row: InboxItem) => row.title !== next.title || row.project !== next.project || row.command !== next.command
-          || row.task !== next.task || row.pr !== next.pr || row.key !== next.key;
+          || row.pr !== next.pr || row.key !== next.key;
         const apply = (row: InboxItem): void => {
           row.title = next.title; row.updatedAt = nextUpdate(row);
-          for (const name of ["project", "command", "task", "pr", "key"] as const) {
+          for (const name of ["project", "command", "pr", "key"] as const) {
             if (next[name] === undefined) delete row[name]; else row[name] = next[name];
           }
         };

@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { getProjectSourcePath, readProjectConfig } from "@phren/cli/code-host/project-config";
+import * as projectConfig from "@phren/cli/code-host/project-config";
 import { projectSlugFromPath } from "@phren/cli/code-host/phren-paths";
 import { errorMessage, nonInteractiveGitEnv } from "@phren/cli/code-host/utils";
 import { tryFileLock } from "@phren/cli/code-host/governance/locks";
@@ -94,13 +94,7 @@ function runGit(repoRoot: string, args: string[], encoding: "utf8" | "buffer" = 
   }) as string | Buffer;
 }
 
-export function isGitRepository(dir: string): boolean {
-  try {
-    return fs.statSync(path.join(dir, ".git")).isDirectory() || fs.existsSync(path.join(dir, ".git"));
-  } catch {
-    return false;
-  }
-}
+export const isGitRepository = projectConfig.isGitRepository ?? ((dir: string) => fs.existsSync(path.join(dir, ".git")));
 
 export function gitSourceFiles(repoRoot: string): string[] {
   const output = runGit(repoRoot, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], "buffer") as Buffer;
@@ -190,30 +184,12 @@ function normalizeNameOnlyPath(line: string): string {
   return trimmed;
 }
 
-// The roots locateProject offers for a project's checkout on this computer
-// (bridge/locate.ts), minus its Hook-only activity journal and Herdr session.
-const SEARCH_ROOTS = ["", "Sites", "Projects", "projects", "Code", "code", "dev", "src", "repos", "workspace"];
-
-/**
- * This machine's candidates for a project's checkout, in locateProject's
- * order: the store's registered source path when it points at a folder that
- * exists here, then a folder named for the project under $PROJECTS_DIR and
- * the usual project roots. A sourcePath written on another computer (the
- * Linux box a shared store was registered on) fails the existence check and
- * the machine's own checkout is offered instead.
- */
-function machineCheckoutCandidates(project: string, sourcePath: string | undefined, env: NodeJS.ProcessEnv): string[] {
-  const candidates: string[] = [];
-  const offer = (directory: string) => {
-    const resolved = path.resolve(directory);
-    if (!candidates.includes(resolved) && fs.existsSync(resolved)) candidates.push(resolved);
-  };
-  if (sourcePath) offer(sourcePath);
-  const home = homedir();
-  for (const root of [...(env.PROJECTS_DIR ? [env.PROJECTS_DIR] : []), ...SEARCH_ROOTS.map(entry => path.join(home, entry))]) {
-    offer(path.join(root, project));
-  }
-  return candidates;
+// Published versions of @phren/cli before the forge layer lack the shared lookup.
+function legacyCheckoutCandidates(project: string, sourcePath: string | undefined, env: NodeJS.ProcessEnv): string[] {
+  const roots = ["", "Sites", "Projects", "projects", "Code", "code", "dev", "src", "repos", "workspace"];
+  const paths = [...(sourcePath ? [sourcePath] : []), ...(env.PROJECTS_DIR ? [path.join(env.PROJECTS_DIR, project)] : []),
+    ...roots.map(root => path.join(homedir(), root, project))];
+  return [...new Set(paths.map(directory => path.resolve(directory)))].filter(directory => fs.existsSync(directory));
 }
 
 /**
@@ -229,8 +205,8 @@ export function resolveRepoRoot(store: string, project: string, override?: strin
   if (override) {
     repoRoot = path.resolve(override);
   } else {
-    const sourcePath = getProjectSourcePath(store, project, readProjectConfig(store, project));
-    const candidates = machineCheckoutCandidates(project, sourcePath, env);
+    const sourcePath = projectConfig.getProjectSourcePath(store, project);
+    const candidates = (projectConfig.projectCheckoutCandidates ?? legacyCheckoutCandidates)(project, sourcePath, env);
     repoRoot = candidates.find(candidate => isGitRepository(candidate))
       ?? candidates[0]
       ?? sourcePath

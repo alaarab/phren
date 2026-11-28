@@ -5,8 +5,7 @@
 # byte — that shared corpus is the whole proof that both implementations agree
 # on the store format. Git's default autocrlf rewrites those bytes on a Windows
 # checkout, so the fixtures stopped matching what either implementation writes:
-# findings dates parsed as "unknown", and a rendered tasks.md compared LF against
-# a CRLF fixture. Store files phren itself writes are LF everywhere as well.
+# finding dates parsed as "unknown". Phren also writes store files with LF.
 * text=auto eol=lf
 
 *.png binary

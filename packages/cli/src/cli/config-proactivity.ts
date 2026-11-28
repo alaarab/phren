@@ -11,7 +11,6 @@ import {
 import {
   PROACTIVITY_LEVELS,
   getProactivityLevel,
-  getProactivityLevelForTask,
   getProactivityLevelForFindings,
   type ProactivityLevel,
 } from "../proactivity.js";
@@ -31,12 +30,10 @@ export function buildProactivitySnapshot(phrenPath: string) {
     configured: {
       proactivity: prefs.proactivity ?? null,
       proactivityFindings: prefs.proactivityFindings ?? null,
-      proactivityTask: prefs.proactivityTask ?? null,
     },
     effective: {
       proactivity: getProactivityLevel(phrenPath),
       proactivityFindings: getProactivityLevelForFindings(phrenPath),
-      proactivityTask: getProactivityLevelForTask(phrenPath),
     },
   };
 }
@@ -51,16 +48,15 @@ function normalizeProactivityLevel(raw: string | undefined): ProactivityLevel | 
 
 function printProactivityUsage(subcommand: string): void {
   console.error(subcommand === "proactivity"
-    ? "Usage: phren config proactivity [high|medium|low] [--scope base|findings|tasks] [--project <name>]"
+    ? "Usage: phren config proactivity [high|medium|low] [--scope base|findings] [--project <name>]"
     : `Usage: phren config ${subcommand} [high|medium|low] [--project <name>]`);
 }
 
-type ProactivitySubcommand = "proactivity" | "proactivity.findings" | "proactivity.tasks";
+type ProactivitySubcommand = "proactivity" | "proactivity.findings";
 const SCOPE_SUBCOMMANDS: Record<string, ProactivitySubcommand> = {
-  base: "proactivity", findings: "proactivity.findings", tasks: "proactivity.tasks", task: "proactivity.tasks",
+  base: "proactivity", findings: "proactivity.findings",
 };
 
-/** `--scope tasks` on the base command is the same as `proactivity.tasks`. */
 function parseScopeArg(args: string[]): { scope?: ProactivitySubcommand; rest: string[]; invalid?: string } {
   const rest: string[] = [];
   let scope: ProactivitySubcommand | undefined, invalid: string | undefined;
@@ -102,7 +98,6 @@ export function handleConfigProactivity(requested: ProactivitySubcommand, args: 
         _project: projectArg,
         base: resolved.proactivity.base ?? null,
         findings: resolved.proactivity.findings ?? null,
-        tasks: resolved.proactivity.tasks ?? null,
       }, null, 2));
       return;
     }
@@ -131,15 +126,13 @@ export function handleConfigProactivity(requested: ProactivitySubcommand, args: 
     }
     warnIfUnregistered(phrenPath, projectArg);
     const key = subcommand === "proactivity" ? "proactivity"
-      : subcommand === "proactivity.findings" ? "proactivityFindings"
-      : "proactivityTask";
+      : "proactivityFindings";
     updateProjectConfigOverrides(phrenPath, projectArg, (current) => ({ ...current, [key]: level }));
     const resolved = mergeConfig(phrenPath, projectArg);
     console.log(JSON.stringify({
       _project: projectArg,
       base: resolved.proactivity.base ?? null,
       findings: resolved.proactivity.findings ?? null,
-      tasks: resolved.proactivity.tasks ?? null,
     }, null, 2));
     return;
   }
@@ -150,9 +143,6 @@ export function handleConfigProactivity(requested: ProactivitySubcommand, args: 
       break;
     case "proactivity.findings":
       writeGovernanceInstallPreferences(phrenPath, { proactivityFindings: level });
-      break;
-    case "proactivity.tasks":
-      writeGovernanceInstallPreferences(phrenPath, { proactivityTask: level });
       break;
   }
 

@@ -8,17 +8,14 @@ import {
   asSessionStatus,
   asString,
   asStringArray,
-  asTaskSection,
   categoryIconId,
   formatDateLabel,
   formatRelativeTime,
   formatSessionTimeLabel,
   responseData,
-  taskIconId,
   themeIcon,
   truncate,
 } from "../src/providers/tree-utils";
-import type { TaskNode } from "../src/providers/tree-types";
 
 describe("tree-utils: type coercion helpers", () => {
   it("asRecord accepts plain objects and rejects primitives, arrays-are-objects, and null", () => {
@@ -67,13 +64,7 @@ describe("tree-utils: type coercion helpers", () => {
     expect(asNumber(NaN)).toBe(NaN); // typeof NaN === "number"; callers must guard separately.
   });
 
-  it("asTaskSection and asSessionStatus only accept their exact literal unions", () => {
-    expect(asTaskSection("Active")).toBe("Active");
-    expect(asTaskSection("Queue")).toBe("Queue");
-    expect(asTaskSection("Done")).toBe("Done");
-    expect(asTaskSection("active")).toBeUndefined();
-    expect(asTaskSection("Bogus")).toBeUndefined();
-    expect(asTaskSection(undefined)).toBeUndefined();
+  it("asSessionStatus only accepts its literal union", () => {
 
     expect(asSessionStatus("active")).toBe("active");
     expect(asSessionStatus("ended")).toBe("ended");
@@ -103,37 +94,19 @@ describe("tree-utils: truncate", () => {
   });
 });
 
-describe("tree-utils: categoryIconId / taskIconId", () => {
+describe("tree-utils: categoryIconId", () => {
   it("maps every known category to its icon and falls back to book for unknowns", () => {
     expect(categoryIconId("findings")).toBe("list-flat");
     expect(categoryIconId("notes")).toBe("note");
     expect(categoryIconId("truths")).toBe("pin");
     expect(categoryIconId("sessions")).toBe("history");
-    expect(categoryIconId("task")).toBe("checklist");
     expect(categoryIconId("queue")).toBe("inbox");
     expect(categoryIconId("hooks")).toBe("plug");
     expect(categoryIconId("reference")).toBe("book");
   });
 
-  function task(overrides: Partial<TaskNode>): TaskNode {
-    return {
-      kind: "task",
-      projectName: "p",
-      id: "1",
-      line: "do a thing",
-      section: "Active",
-      checked: false,
-      ...overrides,
-    };
-  }
 
-  it("prefers check (checked or Done) over pinned, then falls back to play/clock by section", () => {
-    expect(taskIconId(task({ checked: true, section: "Active", pinned: true }))).toBe("check");
-    expect(taskIconId(task({ section: "Done", checked: false }))).toBe("check");
-    expect(taskIconId(task({ pinned: true, section: "Queue" }))).toBe("pinned");
-    expect(taskIconId(task({ section: "Active" }))).toBe("play");
-    expect(taskIconId(task({ section: "Queue" }))).toBe("clock");
-  });
+
 });
 
 describe("tree-utils: date/time formatting", () => {

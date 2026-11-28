@@ -154,16 +154,8 @@ async function handleHealthCheck(
 
   const projectCount = getProjectDirs(phrenPath, activeProfile).length;
 
-  // Proactivity and taskMode
+  // Proactivity
   let proactivity: string = "high";
-  let taskMode: string = "auto";
-  try {
-    const { getWorkflowPolicy } = await import("../governance/policy.js");
-    const workflowPolicy = getWorkflowPolicy(phrenPath);
-    taskMode = workflowPolicy.taskMode;
-  } catch (err: unknown) {
-    logger.debug("healthCheck taskMode", errorMessage(err));
-  }
   let syncIntent: string | undefined;
   try {
     const { readInstallPreferences } = await import("../init/preferences.js");
@@ -328,7 +320,6 @@ async function handleHealthCheck(
     `MCP: ${mcpEnabled ? "enabled" : "disabled"}`,
     `Hooks: ${hooksEnabled ? "enabled" : "disabled"}`,
     `Proactivity: ${proactivity}`,
-    `Task mode: ${taskMode}`,
     `Sync: ${syncStatus}${syncStatus !== "synced" ? ` (${syncDetail})` : ""}`,
     consolSummary,
     warningsSummary,
@@ -347,7 +338,6 @@ async function handleHealthCheck(
       mcpEnabled,
       hooksEnabled,
       proactivity,
-      taskMode,
       syncStatus,
       syncDetail,
       consolidation,
@@ -513,7 +503,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ phren · add project",
       description:
         "Bootstrap a project into phren from a repo or working directory. " +
-        "Copies or creates AGENTS.md/summary/tasks/findings under ~/.phren/<project> and adds the project to the active profile.",
+        "Copies or creates AGENTS.md/summary/findings under ~/.phren/<project> and adds the project to the active profile.",
       inputSchema: z.object({
         path: z.string().describe("Project path to import. Pass the current repo path explicitly."),
         profile: z.string().optional().describe("Profile to update. Defaults to the active profile."),
@@ -549,7 +539,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         "Returns the list of checks and repair actions taken.",
       inputSchema: z.object({
         check_data: z.boolean().optional()
-          .describe("Also validate data files (tasks, findings, governance). Default false."),
+          .describe("Also validate data files (findings and governance). Default false."),
       }),
     },
     (params) => handleDoctorFix(ctx, params),

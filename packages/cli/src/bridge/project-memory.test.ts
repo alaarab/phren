@@ -5,8 +5,9 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 import { clearProjectConfigCache, getProjectRemote } from "../project-config.js";
+import { registerStoreIdentity } from "../store-registry.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { MEMORY_LIMITS, memoryForFiles, memorySearch, projectMemory, saveFinding, completeProjectTask, tasksForBranch } from "./project-memory.js";
+import { MEMORY_LIMITS, memoryForFiles, memorySearch, projectMemory, saveFinding } from "./project-memory.js";
 
 vi.mock("node:fs", async original => {
   const actual = await original<typeof import("node:fs")>();
@@ -51,8 +52,25 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
+it("lets older phones verify the store before reading finding freshness", async () => {
+  write("app/FINDINGS.md", "# app Findings\n");
+  const storeId = registerStoreIdentity(store);
+  const legacy = await hookGet("/v1/tasks/stores");
+  expect(legacy.status).toBe(200);
+  expect(legacy.body).toMatchObject({
+    ok: true, version: 1,
+    stores: [expect.objectContaining({
+      id: storeId, name: expect.any(String), role: "primary", projects: ["app"],
+      primary: true, available: true, identityReady: true, ambiguous: false, metadataWritable: false,
+    })],
+  });
+  expect(await hookGet("/v1/store/directory")).toEqual(legacy);
+  expect((await hookGet("/v1/projects/app/memory")).body).toMatchObject({ store_id: storeId });
+  expect((await hookGet("/v1/tasks/stores", "POST")).status).toBe(405);
+});
+
 describe("GET /v1/projects/:project/memory", () => {
-  it("returns findings, truths, tasks and remote in the gitboy contract", () => {
+  it("returns the gitboy contract with empty task groups even for a legacy store", () => {
     write("app/FINDINGS.md", `# app Findings
 
 ## 2026-07-20
@@ -66,12 +84,12 @@ describe("GET /v1/projects/:project/memory", () => {
 - Leaked AKIAABCDEFGHIJKLMNOP in a log <!-- fid:33333333 -->
 `);
     write("app/truths.md", "# app truths\n\n- Ship from main only\n");
-    write("app/tasks.md", "# app tasks\n\n## Active\n\n- [ ] Fix login <!-- bid:aaaaaaaa -->\n  Context: token expiry\n\n## Queue\n\n- [ ] Add search\n\n## Done\n\n- [x] Set up CI\n");
     write("app/phren.project.yaml", "remote: https://alice:hunter2@git.example.com/alice/app.git\n");
 
+    write("app/tasks.md", "# app tasks\n\n## Active\n\n- Legacy task\n");
     const memory = projectMemory(store, "app");
     expect(memory).toMatchObject({ project: "app", remote: "https://git.example.com/alice/app.git", truncated: false, truths: [{ text: "Ship from main only" }] });
-    expect(Object.keys(memory).sort()).toEqual(["findings", "project", "remote", "store_id", "tasks", "truncated", "truths"]);
+    expect(memory.tasks).toEqual({ active: [], queue: [], done: [] });
     // Newest first; the tag becomes the type; the local repo path never leaves.
     expect(memory.findings.map(f => f.id)).toEqual(["fid:22222222", "fid:33333333", "fid:11111111"]);
     expect(memory.findings[2]).toEqual({ id: "fid:11111111", text: "Old cache key collides", type: "pitfall", status: "superseded", created: "2026-07-20",
@@ -79,16 +97,13 @@ describe("GET /v1/projects/:project/memory", () => {
     expect(memory.findings[0]).toMatchObject({ type: null, status: "active", citation: null });
     expect(memory.findings[1].text).toMatch(/^\[redacted: withheld/);
     expect(JSON.stringify(memory)).not.toContain("/home/me/app");
-    expect(memory.tasks.active[0]).toEqual({ id: "bid:aaaaaaaa", text: "Fix login", created: null, context: "token expiry" });
-    expect(memory.tasks.queue.map(t => t.text)).toEqual(["Add search"]);
-    expect(memory.tasks.done.map(t => t.text)).toEqual(["Set up CI"]);
   });
 
   it("is served by the Hook's route handler, GET only, with the memory module on", async () => {
     write("app/FINDINGS.md", "# app Findings\n\n## 2026-07-26\n\n- Served <!-- fid:44444444 -->\n");
     const served = await hookGet("/v1/projects/app/memory");
     expect(served.status).toBe(200);
-    expect(served.body).toMatchObject({ project: "app", findings: [{ id: "fid:44444444", text: "Served" }], tasks: { active: [], queue: [], done: [] } });
+    expect(served.body).toMatchObject({ project: "app", tasks: { active: [], queue: [], done: [] }, findings: [{ id: "fid:44444444", text: "Served" }] });
     expect((await hookGet("/v1/projects/app/memory", "POST")).status).toBe(405);
     expect((await hookGet("/v1/projects/app/memory", "GET", false)).status).toBe(404);
     expect((await hookGet("/v1/projects/missing/memory")).status).toBe(404);
@@ -96,12 +111,9 @@ describe("GET /v1/projects/:project/memory", () => {
 
   it("caps each list and says so", () => {
     write("app/FINDINGS.md", `# app Findings\n\n## 2026-07-26\n\n${Array.from({ length: MEMORY_LIMITS.findings + 5 }, (_, i) => `- Finding ${i}`).join("\n")}\n`);
-    write("app/tasks.md", `# app tasks\n\n## Active\n\n## Queue\n\n## Done\n\n${Array.from({ length: 60 }, (_, i) => `- [x] Done ${i}`).join("\n")}\n`);
     const memory = projectMemory(store, "app");
     expect(memory.truncated).toBe(true);
     expect(memory.findings).toHaveLength(MEMORY_LIMITS.findings);
-    expect(memory.tasks.done).toHaveLength(MEMORY_LIMITS.done);
-    expect(memory.tasks.done[0].text).toBe("Done 0");
   });
 
   it("refuses invalid and unknown projects", () => {
@@ -140,7 +152,7 @@ describe("GET /v1/projects/:project/memory/files", () => {
   beforeEach(() => { codeIndex.files = {}; codeIndex.calls = 0; write("app/FINDINGS.md", FINDINGS); });
 
   it("matches cited files, and cited names the code index places in those files", async () => {
-    write(".config/modules.yaml", "version: 1\nenabled:\n  tasks: true\n  code: true\n");
+    write(".config/modules.yaml", "version: 1\nenabled:\n  code: true\n");
     codeIndex.files = { "cacheKey()": "src/cache.ts" };
     const result = await memoryForFiles(store, "app", ["src/pay.ts", "src/cache.ts"]);
     expect(result).toMatchObject({ project: "app", symbols: "indexed", truncated: false });
@@ -188,50 +200,9 @@ describe("GET /v1/projects/:project/memory/search", () => {
   });
 });
 
-describe("GET /v1/projects/:project/tasks?branch=", () => {
-  beforeEach(() => write("app/tasks.md", `# app tasks
 
-## Active
 
-- [ ] Fix login redirect on feature/login-fix <!-- bid:bbbb0001 -->
-- [ ] Track issue https://git.example.com/me/app/issues/123 <!-- bid:bbbb0002 -->
 
-## Queue
-
-- [ ] Something else entirely <!-- bid:bbbb0003 -->
-  Context: see #77
-
-## Done
-
-- [x] Done work on feature/login-fix <!-- bid:bbbb0004 -->
-`));
-
-  it("returns open tasks naming the branch or its issue number", async () => {
-    expect(tasksForBranch(store, "app", "feature/login-fix").tasks.map(t => [t.id, t.section, t.match])).toEqual([["bid:bbbb0001", "active", "branch"]]);
-    expect(tasksForBranch(store, "app", "fix/123-oauth").tasks.map(t => [t.id, t.match])).toEqual([["bid:bbbb0002", "issue"]]);
-    expect(tasksForBranch(store, "app", "issue-77").tasks.map(t => [t.id, t.section])).toEqual([["bid:bbbb0003", "queue"]]);
-    expect(tasksForBranch(store, "app", "main").tasks).toEqual([]);
-    expect((await hookGet("/v1/projects/app/tasks?branch=feature%2Flogin-fix")).body.tasks).toHaveLength(1);
-    expect((await hookGet("/v1/projects/app/tasks?branch=a..b")).status).toBe(400);
-  });
-});
-
-describe("POST /v1/projects/:project/tasks/complete", () => {
-  beforeEach(() => { write("app/tasks.md", "# app tasks\n\n## Active\n\n- [ ] Fix login <!-- bid:cccc0001 -->\n\n## Queue\n\n- [ ] other-work task <!-- bid:cccc0002 -->\n\n## Done\n\n- [x] Old <!-- bid:cccc0003 -->\n"); });
-
-  it("completes one task by exact id, reports repeats, and refuses unknown ids and loose text", async () => {
-    expect(completeProjectTask(store, "app", { id: "bid:cccc0001" })).toEqual({ project: "app", id: "bid:cccc0001", status: "completed" });
-    expect(completeProjectTask(store, "app", { id: "bid:cccc0001" }).status).toBe("already-done");
-    expect(completeProjectTask(store, "app", { id: "bid:cccc0003" }).status).toBe("already-done");
-    expect(tasksForBranch(store, "app", "fix/login").tasks).toEqual([]);
-    expect(() => completeProjectTask(store, "app", { id: "bid:ffff0000" })).toThrowError(expect.objectContaining({ status: 404 }));
-    expect(() => completeProjectTask(store, "app", { id: "Other work" })).toThrow();
-    expect(() => completeProjectTask(store, "app", { id: "bid:cccc0002", extra: 1 })).toThrow();
-    expect(tasksForBranch(store, "app", "other-work").tasks.map(t => t.id)).toEqual(["bid:cccc0002"]);
-    expect((await hookGet("/v1/projects/app/tasks/complete", "GET")).status).toBe(405);
-    expect((await hookGet("/v1/projects/app/tasks/complete", "POST", true, { id: "bid:cccc0002" })).body).toMatchObject({ status: "completed" });
-  });
-});
 
 describe("POST /v1/projects/:project/findings", () => {
   beforeEach(() => { codeIndex.files = {}; write("app/FINDINGS.md", "# app Findings\n"); });

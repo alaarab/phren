@@ -56,35 +56,26 @@ describe("buildConfigView", () => {
     expect(view.scope).toBe("global");
     expect(view.fields["retention.ttlDays"].value).toBe(120);
     expect(view.fields["retention.ttlDays"].source).toBe("default");
-    expect(view.fields.taskMode.value).toBe("auto");
-    expect(view.fields.taskMode.source).toBe("default");
     expect(view.fields["proactivity.base"].value).toBe("high");
     expect(view.fields["proactivity.base"].source).toBe("default");
   });
 
   it("marks fields set in a global policy file as global-sourced", () => {
-    writeGlobal(phrenPath, "workflow-policy.json", { taskMode: "suggest", findingSensitivity: "minimal" });
+    writeGlobal(phrenPath, "workflow-policy.json", { findingSensitivity: "minimal" });
     const view = buildConfigView(phrenPath);
-    expect(view.fields.taskMode.value).toBe("suggest");
-    expect(view.fields.taskMode.source).toBe("global");
-    expect(view.fields.taskMode.sourcePath).toContain("workflow-policy.json");
     expect(view.fields.findingSensitivity.value).toBe("minimal");
     expect(view.fields.findingSensitivity.source).toBe("global");
   });
 
   it("marks project overrides as project-sourced with the global inherited value", () => {
-    writeGlobal(phrenPath, "workflow-policy.json", { taskMode: "suggest" });
-    writeProjectConfig(phrenPath, "proj", { config: { taskMode: "off" } });
+    writeGlobal(phrenPath, "workflow-policy.json", { findingSensitivity: "balanced" });
+    writeProjectConfig(phrenPath, "proj", { config: { findingSensitivity: "conservative" } });
     const view = buildConfigView(phrenPath, "proj");
     expect(view.scope).toBe("project");
     expect(view.project).toBe("proj");
-    expect(view.fields.taskMode.value).toBe("off");
-    expect(view.fields.taskMode.source).toBe("project");
-    expect(view.fields.taskMode.inheritedValue).toBe("suggest");
-    expect(view.fields.taskMode.sourcePath).toContain("phren.project.yaml");
   });
 
-  it("inherits proactivity findings/tasks from the resolved base", () => {
+  it("inherits findings proactivity from the resolved base", () => {
     writeGovernanceInstallPreferences(phrenPath, { proactivity: "low" });
     const view = buildConfigView(phrenPath);
     expect(view.fields["proactivity.base"].value).toBe("low");

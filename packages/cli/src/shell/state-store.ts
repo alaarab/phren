@@ -7,10 +7,9 @@ import { logger } from "../logger.js";
 
 export interface ShellState {
   version: number;
-  view: "Projects" | "Tasks" | "Findings" | "Review Queue" | "Skills" | "Hooks" | "Machines/Profiles" | "Health" | "Graph";
+  view: "Projects" | "Findings" | "Review Queue" | "Skills" | "Hooks" | "Machines/Profiles" | "Health" | "Graph";
   project?: string;
   filter?: string;
-  taskResponsibility?: "human" | "agent";
   page?: number;
   perPage?: number;
   introMode?: "always" | "once-per-version" | "off";
@@ -18,7 +17,7 @@ export interface ShellState {
 }
 
 const SHELL_STATE_VERSION = 3;
-const VALID_VIEWS = new Set<ShellState["view"]>(["Projects", "Tasks", "Findings", "Review Queue", "Skills", "Hooks", "Machines/Profiles", "Health", "Graph"]);
+const VALID_VIEWS = new Set<ShellState["view"]>(["Projects", "Findings", "Review Queue", "Skills", "Hooks", "Machines/Profiles", "Health", "Graph"]);
 
 export function loadShellState(phrenPath: string): ShellState {
   const file = shellStateFile(phrenPath);
@@ -42,7 +41,6 @@ export function loadShellState(phrenPath: string): ShellState {
       view: persistedView,
       project: raw.project,
       filter: raw.filter,
-      taskResponsibility: raw.taskResponsibility === "human" || raw.taskResponsibility === "agent" ? raw.taskResponsibility : undefined,
       page: Number.isFinite(raw.page) ? Number(raw.page) : fallback.page,
       perPage: Number.isFinite(raw.perPage) ? Number(raw.perPage) : fallback.perPage,
       introMode: raw.introMode === "always" || raw.introMode === "off" ? raw.introMode : "once-per-version",
@@ -63,7 +61,6 @@ export function saveShellState(phrenPath: string, state: ShellState): void {
       view: state.view,
       project: state.project,
       filter: state.filter,
-      taskResponsibility: state.taskResponsibility,
       page: state.page,
       perPage: state.perPage,
       introMode: state.introMode,

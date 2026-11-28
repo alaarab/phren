@@ -107,8 +107,8 @@ describe("owner inbox push sweep", () => {
     expect(ownerInboxPushBody(body)).toBe(body);
   });
 
-  it("alerts once for each Hook's own rows and skips shared tasks on both Hooks", async () => {
-    const shared = { kind: "needs-you", source: "task-stale:phren:1234abcd", live: true } as const;
+  it("alerts once for each Hook's own rows and skips shared rows on both Hooks", async () => {
+    const shared = { kind: "needs-you", source: "shared:phren:1234abcd", live: true } as const;
     const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "claude",
       session: randomUUID() } as const;
     const hooks = ["Desk", "Studio"].map(name => {
@@ -117,18 +117,18 @@ describe("owner inbox push sweep", () => {
       const box = new OwnerInboxPushSweep(sender, {
         file: path.join(root, `${name}-push.json`), now: () => now, isOpenForPush: async () => true,
       });
-      return { sender, box, initialTask: row(shared) };
+      return { sender, box, initialSharedRow: row(shared) };
     });
 
-    for (const { sender, box, initialTask } of hooks) {
-      await box.observe([initialTask]);
+    for (const { sender, box, initialSharedRow } of hooks) {
+      await box.observe([initialSharedRow]);
       expect(sender.attempts).toEqual([]);
       advance(1000);
       const manual = row();
       const session = row({ kind: "blocked", source: `prompt:${JSON.stringify(target)}:waiting`, target, live: true });
-      const claimedTask = row({ ...shared, source: "task-stale:phren:9876abcd", computer: "Studio" });
+      const sharedWithComputer = row({ ...shared, source: "shared:phren:9876abcd", computer: "Studio" });
       const dispatch = row({ kind: "needs-you", source: `dispatch:${randomUUID()}:waiting`, target, live: true });
-      const open = [initialTask, manual, session, claimedTask, dispatch];
+      const open = [initialSharedRow, manual, session, sharedWithComputer, dispatch];
       await box.observe(open);
       await box.observe(open);
       expect(sender.attempts.sort()).toEqual([manual, session, dispatch].map(item => `${item.id}:${DEVICE_A}`).sort());

@@ -1,5 +1,5 @@
 /**
- * Deep links into the shell (`phren shell --view tasks --here`).
+ * Deep links into the shell (`phren shell --view findings --here`).
  *
  * The launcher on the other end of these flags is usually a keybinding — a
  * Herdr plugin pane, a tmux popup — so a link that misses has to degrade into
@@ -19,8 +19,8 @@ const opts = { phrenPath: "/store", profile: "default", cwd: "/repo/harbor" };
 
 describe("parseShellArgs", () => {
   it("reads the space-separated form", () => {
-    expect(parseShellArgs(["--view", "tasks", "--project", "harbor"]))
-      .toMatchObject({ view: "tasks", project: "harbor" });
+    expect(parseShellArgs(["--view", "findings", "--project", "harbor"]))
+      .toMatchObject({ view: "findings", project: "harbor" });
   });
 
   it("reads the equals form", () => {
@@ -29,7 +29,7 @@ describe("parseShellArgs", () => {
   });
 
   it("does not swallow the next flag as a value", () => {
-    expect(parseShellArgs(["--view=tasks", "--here"])).toMatchObject({ view: "tasks", here: true });
+    expect(parseShellArgs(["--view=findings", "--here"])).toMatchObject({ view: "findings", here: true });
   });
 
   it("records an unknown flag instead of guessing", () => {
@@ -43,7 +43,7 @@ describe("parseShellArgs", () => {
 
 describe("normalizeShellView", () => {
   it("accepts what a person would type", () => {
-    expect(normalizeShellView("tasks")).toBe("Tasks");
+    expect(normalizeShellView("findings")).toBe("Findings");
     expect(normalizeShellView("  REVIEW  ")).toBe("Review Queue");
     expect(normalizeShellView("review-queue")).toBe("Review Queue");
     expect(normalizeShellView("profiles")).toBe("Machines/Profiles");
@@ -59,9 +59,9 @@ describe("normalizeShellView", () => {
 describe("resolveShellStartup", () => {
   it("resolves --here through phren's own project detection", () => {
     detectProject.mockReturnValue("harbor");
-    const { startup, warnings } = resolveShellStartup({ view: "tasks", here: true }, opts);
+    const { startup, warnings } = resolveShellStartup({ view: "findings", here: true }, opts);
     expect(detectProject).toHaveBeenCalledWith("/store", "/repo/harbor", "default");
-    expect(startup).toMatchObject({ view: "Tasks", project: "harbor" });
+    expect(startup).toMatchObject({ view: "Findings", project: "harbor" });
     expect(warnings).toEqual([]);
   });
 
@@ -73,9 +73,7 @@ describe("resolveShellStartup", () => {
 
   it("falls back to the project list when the directory is not a phren project", () => {
     detectProject.mockReturnValue(null);
-    const { startup, warnings } = resolveShellStartup({ view: "tasks", here: true }, opts);
-    // Tasks without a project is an empty "pick a project" screen; Projects is
-    // the screen that lets the user fix it.
+    const { startup, warnings } = resolveShellStartup({ view: "findings", here: true }, opts);
     expect(startup.view).toBeUndefined();
     expect(startup.project).toBeUndefined();
     expect(warnings).toHaveLength(1);

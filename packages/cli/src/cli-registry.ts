@@ -144,9 +144,14 @@ const DREAM_SUBCOMMANDS: Subcommand[] = [
   { name: "eval", usage: "phren dream eval [--real] [--model <m>] [--json]", summary: "Score the dream engine on its fixture store" },
 ];
 
-// The task namespace's other subcommands document themselves through bare `phren task`.
-const TASK_SUBCOMMANDS: Subcommand[] = [
-  { name: "audit", usage: "phren task audit [--project <p>] [--scheduled] [--dry-run] [--limit <n>] [--json]", summary: "Audit open tasks against the code (weekly, bounded)" },
+const ISSUE_SUBCOMMANDS: Subcommand[] = [
+  { name: "list", usage: "phren issue list [--repo <ref>]... [--project <p>] [--state open|closed|all] [--assignee me|<user>] [--label <label>] [--search <text>] [--limit <n>] [--json]", summary: "List open issues across one or more repositories" },
+  { name: "show", usage: "phren issue show <ref> [--json]", summary: "Show one issue with its body and checklist" },
+  { name: "new", usage: "phren issue new (--repo <ref>|--project <p>) --title <title> [--body <text>] [--check <step>]... [--label <label>]... [--json]", summary: "Open an issue, optionally with a checklist" },
+  { name: "edit", usage: "phren issue edit <ref> [--title <title>] [--body <text>] [--check-done <n>]... [--check-add <step>]... [--json]", summary: "Change an issue's title, body or checklist" },
+  { name: "claim", usage: "phren issue claim <ref> [--release] [--json]", summary: "Assign an issue to you for this computer, or release it" },
+  { name: "comment", usage: "phren issue comment <ref> <text> [--json]", summary: "Post one comment on an issue" },
+  { name: "close", usage: "phren issue close <ref> [--comment <text>] [--json]", summary: "Close an issue, optionally with a comment" },
 ];
 
 const SKILLS_SUBCOMMANDS: Subcommand[] = [
@@ -174,10 +179,8 @@ const CONFIG_SUBCOMMANDS: Subcommand[] = [
   { name: "show", usage: "phren config show [--project <name>]", summary: "Show current config" },
   { name: "policy", usage: "phren config policy [get|set ...]", summary: "Retention, TTL, confidence, decay" },
   { name: "workflow", usage: "phren config workflow [get|set ...]", summary: "Risky-memory thresholds" },
-  { name: "proactivity", usage: "phren config proactivity [level] [--scope base|findings|tasks]", summary: "Auto-capture level; --scope limits it to findings or tasks" },
+  { name: "proactivity", usage: "phren config proactivity [level] [--scope base|findings]", summary: "Auto-capture level; --scope limits it to findings" },
   { name: "proactivity.findings", usage: "phren config proactivity.findings [level]", summary: "Findings-only auto-capture level" },
-  { name: "proactivity.tasks", usage: "phren config proactivity.tasks [level]", summary: "Task-only auto-capture level" },
-  { name: "task-mode", usage: "phren config task-mode [mode]", summary: "Set task automation mode" },
   { name: "finding-sensitivity", usage: "phren config finding-sensitivity [lvl]", summary: "Set finding capture sensitivity" },
   { name: "index", usage: "phren config index [get|set ...]", summary: "Indexer include/exclude globs" },
   { name: "synonyms", usage: "phren config synonyms [list|add|remove]", summary: "Manage learned synonyms" },
@@ -259,7 +262,7 @@ export const REGISTRY: Command[] = [
     },
   },
   {
-    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere|local> <project> --prompt <brief> | --prompt-file <path|-> [--harness codex|claude|opencode|copilot] [--label <label>] [--idempotency-key <key>] [--worktree [--branch <name>]] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
+    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere|local> <project> --prompt <brief> | --prompt-file <path|-> [--harness codex|claude|opencode|copilot] [--label <label>] [--issue <repo#N>] [--idempotency-key <key>] [--worktree [--branch <name>]] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
     summary: "Dispatch a worker brief through Phren Hook",
     subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List the 100 local dispatch receipts with the newest activity" },
       { name: "wait", usage: "phren dispatch wait <dispatch-id> [--timeout <seconds>] [--json] [--follow]", summary: "Follow one local dispatch to its end as NDJSON; exits 0 done, 1 failed or gone, 124 timeout" },
@@ -267,7 +270,7 @@ export const REGISTRY: Command[] = [
       { name: "returns", usage: "phren dispatch returns [--watch [--json] [--consume]]", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read; --watch prints them as they land until Ctrl-C, leaving them unread unless --consume" },
       { name: "sessions", usage: "phren dispatch sessions", summary: "List live agent sessions on this and every enrolled computer" },
       { name: "usage", usage: "phren dispatch usage [--json]", summary: "Show agent usage on this and every enrolled computer, merged by account" },
-      { name: "report", usage: "phren dispatch report --prs <JSON>", summary: "Record this worker turn's PR evidence for the integrator" },
+      { name: "report", usage: "phren dispatch report --prs <JSON> [--issue <repo#N>]", summary: "Record this worker turn's PR evidence and link it on the issue" },
       { name: "close-self", usage: "phren dispatch close-self", summary: "Close the pane this agent runs in once its work is committed and reported (the sanctioned form of herdr pane close)" }],
     run: async args => (await import("./bridge/dispatch-command.js")).runDispatch(args),
   },
@@ -318,7 +321,7 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./bridge/mac-windows-command.js")).runMacWindows(args),
   },
   {
-    name: "owner-inbox", topic: "core", usage: "phren owner-inbox [list [--all] [--computer <name>] | add <title> [--computer <name>] [--project <slug>] [--id <uuid>] [--command <text>] [--task bid:xxxxxxxx] [--pr <url>] [--issue domain/owner/name#N] [--key <key>] | resolve <id> [--computer <name>] [--resolution <text>] [--if-updated-at <timestamp>]]",
+    name: "owner-inbox", topic: "core", usage: "phren owner-inbox [list [--all] [--computer <name>] | add <title> [--computer <name>] [--project <slug>] [--id <uuid>] [--command <text>] [--pr <url>] [--issue domain/owner/name#N] [--key <key>] | resolve <id> [--computer <name>] [--resolution <text>] [--if-updated-at <timestamp>]]",
     summary: "List, add and resolve what waits on the owner",
     run: async args => (await import("./bridge/dispatch-command.js")).runOwnerInbox(args),
   },
@@ -426,7 +429,7 @@ export const REGISTRY: Command[] = [
     },
   },
 
-  // Core (featured: search, status, doctor, web-ui, tasks, graph, shell)
+  // Core (featured: search, status, doctor, web-ui, issue, graph, shell)
   {
     name: "search",
     topic: "core",
@@ -469,17 +472,6 @@ export const REGISTRY: Command[] = [
     run: async (args) => {
       const { handleMemoryUi } = await import("./cli/actions.js");
       await handleMemoryUi(args);
-    },
-  },
-  {
-    name: "tasks",
-    topic: "core",
-    usage: "phren tasks [profile|reconcile [project] [--dry-run | --apply]] [--responsibility=human|agent] [--readiness=ready|waiting-on-human|waiting-on-task]",
-    summary: "Cross-project task view",
-    featured: true,
-    run: async (args, ctx) => {
-      const { handleTaskListArgs } = await import("./cli/namespaces-tasks.js");
-      await handleTaskListArgs(args, ctx.profile());
     },
   },
   {
@@ -589,20 +581,13 @@ export const REGISTRY: Command[] = [
     },
   },
   {
-    name: "task",
+    name: "issue",
     topic: "core",
-    usage: "phren task <subcommand>",
-    summary: "Manage tasks",
-    subcommands: TASK_SUBCOMMANDS,
-    run: async (args, ctx) => {
-      if (args[0] === "audit") {
-        const { handleTaskAudit } = await import("./cli/task-audit.js");
-        await handleTaskAudit(args.slice(1), ctx.phrenPath(), ctx.profile());
-        return;
-      }
-      const { handleTaskNamespace } = await import("./cli/namespaces.js");
-      await handleTaskNamespace(args);
-    },
+    usage: "phren issue <list|show|new|edit|claim|comment|close> [options]",
+    cheatUsage: "phren issue list --project <p>",
+    summary: "Read and update GitHub and gitboy issues",
+    subcommands: ISSUE_SUBCOMMANDS,
+    run: (args, ctx) => import("./cli/issues.js").then(mod => mod.handleIssueCommand(args, ctx.phrenPath(), ctx.profile())),
   },
   {
     name: "finding",
@@ -1111,7 +1096,6 @@ export function commandTopics(): readonly Topic[] {
 }
 
 export function disabledCommand(command: string, snapshot: ModuleSnapshot): string | undefined {
-  if (!snapshot.has("tasks") && /^config proactivity .*--scope(?:=|\s+)(?:tasks|task)(?:\s|$)/.test(command)) return disabledHint("tasks");
   const owner = commandOwner(command);
   return owner && !snapshot.has(owner.name) ? disabledHint(owner.name) : undefined;
 }
@@ -1123,8 +1107,7 @@ export function commandsForModules(snapshot?: ModuleSnapshot): Command[] {
     usage: command.usage.replace(/<([^<>]*\|[^<>]*)>/g, (_match, choices: string) =>
       `<${choices.split("|").filter(choice => !disabledCommand(`${command.name} ${choice}`, snapshot)).join("|")}>`),
     aliases: command.aliases?.filter(alias => !disabledCommand(alias, snapshot)),
-    subcommands: command.subcommands?.filter(sub => !disabledCommand(`${command.name} ${sub.name}`, snapshot))
-      .map(sub => snapshot.has("tasks") ? sub : { ...sub, usage: sub.usage.replace("base|findings|tasks", "base|findings"), summary: sub.summary?.replace("findings or tasks", "findings") }),
+    subcommands: command.subcommands?.filter(sub => !disabledCommand(`${command.name} ${sub.name}`, snapshot)),
     run: async (args, ctx) => {
       const unavailable = disabledCommand([command.name, ...args].join(" "), snapshot);
       if (unavailable) { console.error(unavailable); return 1; }

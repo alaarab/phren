@@ -25,12 +25,10 @@ export function showSetupWizard(
 
     if (command === "apply") {
       const sensitivity = asString(message.sensitivity);
-      const taskMode = asString(message.taskMode);
       const proactivity = asString(message.proactivity);
 
       try {
         if (sensitivity) await client.setConfig("findingSensitivity", { level: sensitivity });
-        if (taskMode) await client.setConfig("taskMode", { mode: taskMode });
         if (proactivity) await client.setConfig("proactivity", { level: proactivity });
 
         vscode.window.showInformationMessage("Phren settings applied successfully.");
@@ -172,16 +170,6 @@ function renderWizardHtml(webview: vscode.Webview, data: { hostname: string }): 
     </div>
   </div>
   <div class="form-group">
-    <label>Task mode</label>
-    <p class="description">Controls how phren manages tasks.</p>
-    <div class="radio-group">
-      <label><input type="radio" name="taskMode" value="off"> Off</label>
-      <label><input type="radio" name="taskMode" value="manual"> Manual</label>
-      <label><input type="radio" name="taskMode" value="suggest"> Suggest</label>
-      <label><input type="radio" name="taskMode" value="auto" checked> Auto</label>
-    </div>
-  </div>
-  <div class="form-group">
     <label>Proactivity</label>
     <p class="description">Controls how proactive the agent is in surfacing information.</p>
     <div class="radio-group">
@@ -217,7 +205,6 @@ function renderWizardHtml(webview: vscode.Webview, data: { hostname: string }): 
           machineName: document.getElementById('machine-name').value.trim(),
           profileName: document.getElementById('profile-name').value.trim(),
           sensitivity: getRadioValue('sensitivity'),
-          taskMode: getRadioValue('taskMode'),
           proactivity: getRadioValue('proactivity'),
           cloneUrl: document.getElementById('clone-url').value.trim()
         });

@@ -62,9 +62,7 @@ function fixture(files: Record<string, string>) {
 
 describe("conflictStrategy", () => {
   it("classifies the store files sync can resolve", () => {
-    expect(conflictStrategy("demo/tasks.md")).toBe("tasks");
     expect(conflictStrategy("demo/FINDINGS.md")).toBe("findings");
-    expect(conflictStrategy(".config/task-archive/demo.md")).toBe("archive");
     expect(conflictStrategy("demo/reference/topics/sync.md")).toBe("topic");
     expect(conflictStrategy("demo/summary.md")).toBe("summary");
     expect(conflictStrategy("demo/review.md")).toBe("union");
@@ -75,23 +73,18 @@ describe("conflictStrategy", () => {
 });
 
 describe("store sync conflict resolution with two clones and a bare remote", () => {
-  it("merges tasks.md by task id and takes the incoming generated blocks", async () => {
-    const D = task("d4d4d4d4", "Add the sync doctor check");
-    const E = task("e5e5e5e5", "Document apns.json");
+  it("takes the incoming generated blocks", async () => {
     const { local, writer, commit } = fixture({
-      "demo/tasks.md": tasks([A, B, C]),
       "demo/reference/topics/sync.md": topic("2026-09-20T00:00:00Z", ["- Base bullet"]),
       "demo/summary.md": summary("2026-09-20"),
     });
     // Local: completes B, adds D, edits A, removes nothing; regenerates both blocks and adds a topic bullet.
     commit(local, {
-      "demo/tasks.md": tasks([task("a1a1a1a1", "Ship the release notes (local)"), C, D], [task("b2b2b2b2", "Fix the flaky sync test", true)]),
       "demo/reference/topics/sync.md": topic("2026-09-21T00:00:00Z", ["- Base bullet", "- Local bullet"]),
       "demo/summary.md": summary("2026-09-21 local"),
     }, "local work");
     // Remote: edits A and B, removes C, adds E; regenerates both blocks.
     commit(writer, {
-      "demo/tasks.md": tasks([task("a1a1a1a1", "Ship the release notes (remote)"), task("b2b2b2b2", "Fix the flaky sync test on Linux"), E]),
       "demo/reference/topics/sync.md": topic("2026-09-22T00:00:00Z", ["- Base bullet"]),
       "demo/summary.md": summary("2026-09-22 remote"),
     }, "remote work");
@@ -101,10 +94,6 @@ describe("store sync conflict resolution with two clones and a bare remote", () 
 
     expect(result.ok).toBe(true);
     expect(result.output).toContain("resolved conflicts in");
-    expect(read(local, "demo/tasks.md")).toBe(tasks(
-      [task("a1a1a1a1", "Ship the release notes (remote)"), D, E],
-      [task("b2b2b2b2", "Fix the flaky sync test", true)],
-    ));
     expect(read(local, "demo/reference/topics/sync.md")).toBe(topic("2026-09-22T00:00:00Z", ["- Base bullet", "- Local bullet"]));
     expect(read(local, "demo/summary.md")).toBe(summary("2026-09-22 remote"));
     expect(git(local, "rev-list", "--parents", "-n", "1", "HEAD").split(" ")).toHaveLength(3);
@@ -115,7 +104,6 @@ describe("store sync conflict resolution with two clones and a bare remote", () 
     const recovered = await recoverPushConflict(local);
     expect(recovered.ok).toBe(true);
     git(writer, "pull");
-    expect(read(writer, "demo/tasks.md")).toBe(read(local, "demo/tasks.md"));
   });
 
   // The MacBook store diverged this way: both machines appended notes, review
@@ -236,10 +224,10 @@ describe("store sync conflict resolution with two clones and a bare remote", () 
   });
 
   it("aborts on any other conflicted file and logs every conflicted path", async () => {
-    const { local, writer, commit } = fixture({ "demo/tasks.md": tasks([A, B]), "demo/notes.md": "base\n" });
-    commit(local, { "demo/tasks.md": tasks([task("a1a1a1a1", "Ship it (local)"), B]), "demo/notes.md": "local\n" }, "local");
+    const { local, writer, commit } = fixture({ "demo/notes.md": "base\n" });
+    commit(local, { "demo/notes.md": "local\n" }, "local");
+    commit(writer, { "demo/notes.md": "remote\n" }, "remote");
     const localHead = git(local, "rev-parse", "HEAD");
-    commit(writer, { "demo/tasks.md": tasks([task("a1a1a1a1", "Ship it (remote)"), B]), "demo/notes.md": "remote\n" }, "remote");
     git(writer, "push");
 
     const result = await pullAtSessionStart(local);

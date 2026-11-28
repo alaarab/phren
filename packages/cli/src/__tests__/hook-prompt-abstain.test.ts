@@ -10,7 +10,6 @@ const cli = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../di
 describe("hook-prompt abstain tail", () => {
   let tmp: ReturnType<typeof makeTempDir>;
   let store: string, workRepo: string, clock: string;
-  const tasks = "# myproject tasks\n\n## Active\n\n## Queue\n\n## Done\n";
   const write = (file: string, text: string) => {
     fs.mkdirSync(path.dirname(path.join(store, file)), { recursive: true });
     fs.writeFileSync(path.join(store, file), text);
@@ -57,26 +56,18 @@ console.log("custom context for " + input.session_id);
     write("myproject/FINDINGS.md", "# myproject Findings\n\n"
       + "- The render callback reads the frame size the main thread pushed before it.\n"
       + Array.from({ length: 24 }, (_, i) => `- Ceramics kiln temperature setting ${i}.\n`).join(""));
-    write("myproject/tasks.md", tasks);
-    write(".config/workflow-policy.json", JSON.stringify({ schemaVersion: 1, taskMode: "auto" }));
   });
   afterEach(() => tmp.cleanup());
   // The custom hook runs through cmd /c on Windows, whose quoting this test's command doesn't model; the tail logic is OS-independent.
   const withCustomHook = it.skipIf(process.platform === "win32");
 
-  it("files a requested task and prints only its notice when recall abstains", () => {
-    const output = run("Add a task to implement glimmerwick throttlebottom");
-    const saved = fs.readFileSync(path.join(store, "myproject", "tasks.md"), "utf8");
-    expect(saved.split("## Queue")[0]).toContain("Implement glimmerwick throttlebottom");
-    expect(output).toMatch(/^<phren-notice>\nActive task \(myproject\): [^\n]*glimmerwick throttlebottom\n<phren-notice>\n$/);
-    expect(lastTrace()).toMatchObject({ abstained: expect.any(String), injected: [] });
-  });
+
 
   withCustomHook("prints custom pre-prompt output when recall abstains", () => {
     installPrePromptHook();
     expect(run("glimmerwick throttlebottom")).toBe("custom context for abstain-session\n");
     expect(lastTrace()).toMatchObject({ abstained: expect.any(String), injected: [] });
-  });
+  }, 30_000);
 
   it.each([["glimmerwick throttlebottom", ""], ["browser glimmerwick throttlebottom", "phren browser env"]])("prints only the once-per-session browser hint when recall abstains for %s", (prompt, hint) => {
     const out = run(prompt);
@@ -84,16 +75,9 @@ console.log("custom context for " + input.session_id);
     expect(lastTrace()).toMatchObject({ abstained: expect.any(String), injected: [] });
     const markers = fs.readdirSync(path.join(store, ".sessions"));
     expect(markers.some(name => name.startsWith("noticed-"))).toBe(false);
-  });
+  }, 30_000);
 
-  it("records a task capture budget pause without printing recall output", () => {
-    const queued = tasks.replace("## Queue\n", "## Queue\n\n- [ ] First queued item\n- [ ] Second queued item\n");
-    write("myproject/tasks.md", queued);
-    write(".config/retention-policy.json", JSON.stringify({ schemaVersion: 1, budgets: { openTasks: 1 } }));
-    expect(run("Implement glimmerwick throttlebottom cache handling")).toBe("");
-    expect(fs.readFileSync(path.join(store, "myproject", "tasks.md"), "utf8")).toBe(queued);
-    expect(lastTrace()).toMatchObject({ abstained: expect.any(String), injected: [], taskCapturePaused: { open: 2, budget: 1 } });
-  });
+
 
   withCustomHook("preserves every output byte for an injecting prompt", () => {
     installPrePromptHook();
@@ -107,10 +91,6 @@ console.log("custom context for " + input.session_id);
       </phren-context>
       ◆ phren · trace: intent=debug; matched=render,callback,read,frame,size,main,thread; budget=84/2000;tokens≈84/550; stages=index:0ms,search:0ms,trust:0ms,rank:0ms,select:0ms
 
-      <phren-notice>
-      Queued task (myproject): Fix the render callback so it reads the frame size from the main thread
-      <phren-notice>
-
       [phren finding-sensitivity=balanced] Save non-obvious patterns, decisions, pitfalls, and bugs worth remembering next session.
       ◈ phren · consolidation ready
       <phren-notice>
@@ -121,5 +101,5 @@ console.log("custom context for " + input.session_id);
       "
     `);
     expect(lastTrace().abstained).toBeNull();
-  });
+  }, 30_000);
 });

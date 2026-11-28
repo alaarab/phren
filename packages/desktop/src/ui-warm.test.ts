@@ -23,9 +23,9 @@ describe("startWarm", () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(mount).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(mount.mock.calls.map(([id]) => id)).toEqual(["projects", "tasks"]);
+    expect(mount.mock.calls.map(([id]) => id)).toEqual(["projects"]);
     frame("online");
     await vi.advanceTimersByTimeAsync(5000);
-    expect(mount).toHaveBeenCalledTimes(2);
+    expect(mount).toHaveBeenCalledTimes(1);
   });
 });

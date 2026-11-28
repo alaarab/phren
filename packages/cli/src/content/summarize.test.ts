@@ -222,7 +222,7 @@ describe("summarizeProject", () => {
     const summary = fs.readFileSync(path.join(proj, "summary.md"), "utf8");
     expect(summary.startsWith("# demo\n\nA demo project.")).toBe(true); // nothing above the block touched
     expect(summary).toContain("## What phren knows");
-    expect(summary).toContain("2 active findings, 2 archived across 1 topic, 2 open tasks.");
+    expect(summary).toContain("2 active findings, 2 archived across 1 topic.");
     expect(summary).toContain("**api** — 2 findings, archived on 2026-03-01: 1 pattern, 1 bug.");
     const knows = readKnowsBlock(dir, "demo");
     expect(knows?.text).toContain("2 active findings");

@@ -334,25 +334,6 @@ export function resolveAllStores(phrenPath: string, options: { migrateAttachment
   return resolveStoreEntries(phrenPath, readStoreRegistry(phrenPath));
 }
 
-/** Task discovery must neither migrate attachments nor treat a partial registry
- * as proof of an unambiguous task identity. No writes or warnings on this path. */
-export function readTaskStoreEntries(phrenPath: string): StoreEntry[] {
-  const result = readStoreRegistryDetailed(phrenPath, { migrateAttachments: false });
-  if (result.lossy) return [];
-  // The legacy registry normalizer tolerates bad subscription members by
-  // dropping them. For task access that could turn an invalid list into "all
-  // projects", so validate the original evidence before using that view.
-  for (const [file, label] of [[storesFilePath(phrenPath), STORES_FILENAME], [attachedStoresFilePath(phrenPath), ATTACHED_STORES_FILENAME]]) {
-    const raw = readYamlFile(file, label);
-    if (raw.exists && (!isRecord(raw.value) || !Array.isArray(raw.value.stores)
-      || raw.value.stores.some(store => !isRecord(store) || (store.projects !== undefined
-        && (!Array.isArray(store.projects) || store.projects.some(project => typeof project !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(project))))))) return [];
-  }
-  const registry = result.registry && { ...result.registry, stores: result.registry.stores.map(store =>
-    store.role === "primary" ? { ...store, path: path.resolve(phrenPath) } : store) };
-  return resolveStoreEntries(phrenPath, registry);
-}
-
 function resolveStoreEntries(phrenPath: string, registry: StoreRegistry | null): StoreEntry[] {
   const stores: StoreEntry[] = registry ? [...registry.stores] : [implicitPrimaryStore(phrenPath)];
 

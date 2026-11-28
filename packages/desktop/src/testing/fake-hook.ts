@@ -164,7 +164,7 @@ function defaultSchedules() {
   const base = { computer: "This computer", owned: true, running: false, lastRun: null, lastRuns: [], createdAt: "2026-10-01T09:00:00Z", updatedAt: "2026-10-01T09:00:00Z" };
   return { schedules: [
     { ...base, id: "nightly-triage", name: "Nightly triage", project: "phren", harness: "claude", enabled: true, every: "daily", at: "22:00",
-      prompt: "Triage the issues opened today and file Phren tasks for the real ones.", nextRun: at(42) },
+      prompt: "Triage the issues opened today and review the owner Inbox.", nextRun: at(42) },
     { ...base, id: "deps-check", name: "Dependency check", project: "phren", harness: "codex", enabled: true, every: "interval", interval: "6h",
       prompt: "Check for outdated dependencies and open one PR with safe bumps.", nextRun: at(185) },
     { ...base, id: "release-notes", name: "Draft release notes", project: "phren", harness: "claude", enabled: false, every: "weekly", days: ["fri"], at: "16:00",
@@ -398,21 +398,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
       if (before !== null) await options.holdOlderPages?.();
       return { json: { type: "older", source: url.searchParams.get("source") ?? "claude", session: url.searchParams.get("session") ?? "", ...transcriptPage(before === null ? undefined : Number(before)) } };
     },
-    "GET /v1/tasks/stores": () => ({ json: { stores: [{ id: "personal", name: "Personal", primary: true, role: "owner", metadataWritable: true, projects: ["phren", "website"] }] } }),
-    "GET /v1/tasks": (_req, _body, url) => {
-      const project = url.searchParams.get("project") ?? "phren";
-      const titles = project === "phren"
-        ? ["Polish the Home dashboard", "Review the launch flow", "Document the desktop shortcuts", "Check the release notes"]
-        : ["Refresh the landing page", "Improve mobile navigation", "Review accessibility", "Publish the getting started guide"];
-      return { json: { project, revision: "sample-1", metadataWritable: true, items: {
-        Active: titles.map((line, i) => ({ id: `A${i + 1}`, stableId: `${project}-${i}`, line, checked: false,
-          createdAt: new Date(Date.UTC(2026, 9, 15, 12 - i, project === "phren" ? 30 : 0)).toISOString(), responsibility: "agent", readiness: "ready" })),
-        // Saved today (Home's "Saved today" card): created minutes ago, whatever the clock says.
-        Queue: [{ id: "Q1", stableId: `${project}-today`, line: project === "phren" ? "Sample task saved today: tidy the release checklist" : "Sample task saved today: compress the hero image",
-          checked: false, createdAt: project === "phren" ? earlierToday(12, 2) : earlierToday(40, 1), responsibility: "agent", readiness: "ready" }],
-        Done: [],
-      } } };
-    },
+    "GET /v1/store/directory": () => ({ json: { stores: [{ id: "personal", name: "Personal", primary: true, role: "owner", available: true, projects: ["phren", "website"] }] } }),
     "GET /v1/projects/repos": () => ({ json: { repos: [
       { name: "phren", project: "phren", directory: "/Users/you/phren", registered: true, lastSeen: "2026-10-15T12:00:00Z" },
       { name: "website", project: "website", directory: "/Users/you/website", registered: true, lastSeen: "2026-10-14T12:00:00Z" },
@@ -420,13 +406,13 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     "GET /v1/projects/website/memory": () => ({ json: { project: "website", findings: [
       { id: "fid:website-today", text: "Sample finding saved today: serve the hero image from the preview host.", type: "pattern", status: "active", created: localToday(), citation: null },
       { id: "fid:website", text: "Route website requests through the preview host." },
-    ], truths: [], tasks: [] } }),
+    ], truths: [] } }),
     "GET /v1/projects/website/memory/search": () => ({ json: { results: [{ kind: "finding", text: "Route website requests through the preview host.", score: 0.95, finding: { id: "fid:website", type: "pattern" } }] } }),
     "GET /v1/projects/phren/memory": () => ({ json: { project: "phren", findings: [
       { id: "fid:phren-today", text: "Sample finding saved today: the Hook caps findings at 500 per project.", type: "pitfall", status: "active", created: localToday(), citation: null },
       SAMPLE_FINDING,
       ...SAMPLE_STALE_FINDINGS,
-    ], truths: [], tasks: [] } }),
+    ], truths: [] } }),
     "GET /v1/projects/phren/memory/search": () => ({ json: { results: [{ kind: "finding", text: SAMPLE_FINDING.text, score: 0.9, finding: SAMPLE_FINDING }] } }),
     "GET /v1/resources": () => ({ json: { resources: defaultResources() } }),
     "GET /v1/harnesses": () => ({ json: { harnesses: [

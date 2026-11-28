@@ -4,10 +4,9 @@ import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { isValidProjectName, errorMessage, safeProjectPath } from "../utils.js";
-import { readFindings, readTasks, resolveTaskFilePath, TASKS_FILENAME, FINDINGS_FILENAME } from "../data/access.js";
+import { readFindings, FINDINGS_FILENAME } from "../data/access.js";
 import { debugLog, findArchivedProjectNameCaseInsensitive, findProjectNameCaseInsensitive, normalizeProjectNameForCreate } from "../shared.js";
 import { logger } from "../logger.js";
-
 
 
 const importPayloadSchema = z.object({
@@ -16,7 +15,6 @@ const importPayloadSchema = z.object({
   summary: z.string().optional(),
   agentsMd: z.string().optional(),
   claudeMd: z.string().optional(),
-  taskRaw: z.string().optional(),
   findingsRaw: z.string().optional(),
   learnings: z
     .array(
@@ -24,14 +22,6 @@ const importPayloadSchema = z.object({
         text: z.string(),
       }).passthrough()
     )
-    .optional(),
-  task: z
-    .object({
-      Active: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional(), githubIssue: z.number().optional(), githubUrl: z.string().optional() }).passthrough()).optional(),
-      Queue: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional(), githubIssue: z.number().optional(), githubUrl: z.string().optional() }).passthrough()).optional(),
-      Done: z.array(z.object({ line: z.string(), checked: z.boolean().optional(), context: z.string().optional(), priority: z.string().optional(), pinned: z.boolean().optional(), id: z.string().optional(), githubIssue: z.number().optional(), githubUrl: z.string().optional() }).passthrough()).optional(),
-    })
-    .partial()
     .optional(),
 }).passthrough();
 
@@ -42,7 +32,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     "export_project",
     {
       title: "◆ phren · export",
-      description: "Export a project's data (findings, task, summary) as portable JSON for sharing or backup. For linked Markdown notes, use the CLI command phren export vault <dir>.",
+      description: "Export a project's data (findings and summary) as portable JSON for sharing or backup. For linked Markdown notes, use the CLI command phren export vault <dir>.",
       inputSchema: z.object({
         project: z.string().describe("Project name to export."),
       }),
@@ -73,13 +63,6 @@ export function register(server: McpServer, ctx: McpContext): void {
       if (learningsResult.ok) exported.learnings = learningsResult.data;
       const findingsPath = safeProjectPath(projectDir, FINDINGS_FILENAME);
       if (findingsPath && fs.existsSync(findingsPath)) exported.findingsRaw = fs.readFileSync(findingsPath, "utf8");
-
-      const taskResult = readTasks(resolvedPhrenPath, project);
-      if (taskResult.ok) {
-        exported.task = taskResult.data.items;
-        const taskRawPath = resolveTaskFilePath(resolvedPhrenPath, project);
-        if (taskRawPath && fs.existsSync(taskRawPath)) exported.taskRaw = fs.readFileSync(taskRawPath, "utf8");
-      }
 
       const agentsPath = safeProjectPath(projectDir, "AGENTS.md");
       const legacyPath = safeProjectPath(projectDir, "CLAUDE.md");
@@ -122,7 +105,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         const parsed = parsedResult.data;
 
         // Warn about unknown fields silently discarded by .passthrough()
-        const knownTopLevel = new Set(["project", "overwrite", "summary", "agentsMd", "claudeMd", "learnings", "task", "taskRaw", "exportedAt", "version", "findingsRaw"]);
+        const knownTopLevel = new Set(["project", "overwrite", "summary", "agentsMd", "claudeMd", "learnings", "exportedAt", "version", "findingsRaw"]);
         const unknownFields = Object.keys(decoded as Record<string, unknown>).filter(k => !knownTopLevel.has(k));
         if (unknownFields.length > 0) {
           debugLog(`import_project: unknown fields will be ignored: ${unknownFields.join(", ")}`);
@@ -155,8 +138,22 @@ export function register(server: McpServer, ctx: McpContext): void {
 
         const stagingRoot = fs.mkdtempSync(path.join(phrenPath, `.phren-import-${projectName}-`));
         const stagedProjectDir = path.join(stagingRoot, projectName);
+        const backupDir = path.join(stagingRoot, "previous");
+        const replaced = new Map<string, boolean>();
+        let createdProject = false;
+        const restore = () => {
+          if (createdProject) {
+            fs.rmSync(projectDir, { recursive: true, force: true });
+            return;
+          }
+          for (const [name, backedUp] of replaced) {
+            const destination = path.join(projectDir, name);
+            fs.rmSync(destination, { force: true });
+            if (backedUp) fs.renameSync(path.join(backupDir, name), destination);
+          }
+        };
         const imported: string[] = [];
-        let backupDir: string | null = null;
+
         const cleanupDir = (dir: string) => {
           if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
         };
@@ -169,36 +166,6 @@ export function register(server: McpServer, ctx: McpContext): void {
             lines.push(`- ${item.text}`);
           }
           lines.push("");
-          return lines.join("\n");
-        };
-
-        const buildTaskContent = () => {
-          // Prefer the raw task string (lossless: preserves priority/pinned/stable IDs)
-          if (typeof parsed.taskRaw === "string") return parsed.taskRaw;
-          if (!parsed.task) return null;
-          const sections = ["Active", "Queue", "Done"] as const;
-          const lines = [`# ${projectName} tasks`, ""];
-          for (const section of sections) {
-            lines.push(`## ${section}`, "");
-            const items = parsed.task[section];
-            if (items) {
-              for (const item of items) {
-                const prefix = item.checked || section === "Done" ? "- [x] " : "- [ ] ";
-                const priorityTag = item.priority ? ` [${item.priority}]` : "";
-                lines.push(`${prefix}${item.line}${priorityTag}`);
-                if (item.context) lines.push(`  Context: ${item.context}`);
-                if (item.githubIssue || item.githubUrl) {
-                  const githubRef = item.githubIssue && item.githubUrl
-                    ? `#${item.githubIssue} ${item.githubUrl}`
-                    : item.githubIssue
-                      ? `#${item.githubIssue}`
-                      : item.githubUrl!;
-                  lines.push(`  GitHub: ${githubRef}`);
-                }
-              }
-            }
-            lines.push("");
-          }
           return lines.join("\n");
         };
 
@@ -222,25 +189,23 @@ export function register(server: McpServer, ctx: McpContext): void {
             imported.push(FINDINGS_FILENAME);
           }
 
-          const taskContent = buildTaskContent();
-          if (taskContent) {
-            fs.writeFileSync(path.join(stagedProjectDir, TASKS_FILENAME), taskContent);
-            imported.push(TASKS_FILENAME);
-          }
-
-          backupDir = overwrite ? path.join(phrenPath, `${projectName}.import-backup-${Date.now()}`) : null;
-
           try {
             if (overwrite && fs.existsSync(projectDir)) {
-              fs.renameSync(projectDir, backupDir!);
+              fs.mkdirSync(backupDir);
+              for (const name of imported) {
+                const destination = path.join(projectDir, name);
+                const exists = fs.lstatSync(destination, { throwIfNoEntry: false });
+                if (exists) fs.renameSync(destination, path.join(backupDir, name));
+                replaced.set(name, Boolean(exists));
+                fs.renameSync(path.join(stagedProjectDir, name), destination);
+              }
+            } else {
+              fs.renameSync(stagedProjectDir, projectDir);
+              createdProject = true;
             }
-            fs.renameSync(stagedProjectDir, projectDir);
-            cleanupDir(stagingRoot);
           } catch (error) {
-            if (backupDir && fs.existsSync(backupDir) && !fs.existsSync(projectDir)) {
-              fs.renameSync(backupDir, projectDir);
-            }
-            cleanupDir(stagingRoot);
+            try { restore(); cleanupDir(stagingRoot); }
+            catch (err) { logger.debug("data", `import_project backupRestore: ${errorMessage(err)}`); }
             return mcpResponse({
               ok: false,
               error: error instanceof Error ? `Failed to finalize import: ${error.message}` : "Failed to finalize import.",
@@ -260,22 +225,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         try {
           await rebuildIndex();
         } catch (indexError) {
-          // Index rebuild failed — restore backup if we replaced the project dir
-          if (!overwrite) {
-            // Non-overwrite case: no backup to restore — remove the orphaned project dir
-            try { fs.rmSync(projectDir, { recursive: true }); } catch { /* best-effort */ }
-          } else if (backupDir) {
-            try {
-              if (fs.existsSync(backupDir) && !fs.existsSync(projectDir)) {
-                fs.renameSync(backupDir, projectDir);
-              } else if (fs.existsSync(backupDir)) {
-                fs.rmSync(projectDir, { recursive: true, force: true });
-                fs.renameSync(backupDir, projectDir);
-              }
-            } catch (err: unknown) {
-              logger.debug("data", `import_project backupRestore: ${errorMessage(err)}`);
-            }
-          }
+          try { restore(); cleanupDir(stagingRoot); }
+          catch (err) { logger.debug("data", `import_project backupRestore: ${errorMessage(err)}`); }
           return mcpResponse({
             ok: false,
             error: indexError instanceof Error ? `Index rebuild failed after import: ${indexError.message}` : "Index rebuild failed after import.",
@@ -283,14 +234,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           });
         }
 
-        // Backup is only deleted after successful rebuild so we can restore on failure
-        if (backupDir && fs.existsSync(backupDir)) {
-          try {
-            fs.rmSync(backupDir, { recursive: true, force: true });
-          } catch (err: unknown) {
-            logger.debug("data", `import_project backupCleanup: ${errorMessage(err)}`);
-          }
-        }
+        cleanupDir(stagingRoot);
         return mcpResponse({
           ok: true,
           message: `Imported project "${projectName}": ${imported.join(", ")}`,

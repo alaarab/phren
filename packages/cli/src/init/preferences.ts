@@ -50,7 +50,6 @@ export interface InstallPreferences {
   lifecycleAutomations?: boolean;
   proactivity?: "high" | "medium" | "low";
   proactivityFindings?: "high" | "medium" | "low";
-  proactivityTask?: "high" | "medium" | "low";
   hookTools?: Record<string, boolean>;
   disabledSkills?: Record<string, boolean>;
   installedVersion?: string;

@@ -11,7 +11,7 @@ import {
 import { addNote } from "@phren/cli/data/notes";
 import type { PhrenContext } from "./context.js";
 
-type SessionCounterField = "findingsAdded" | "tasksCompleted";
+type SessionCounterField = "findingsAdded";
 
 export interface SessionResumeSnapshot {
   sessionId: string;

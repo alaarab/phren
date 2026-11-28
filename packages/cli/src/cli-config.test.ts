@@ -282,7 +282,7 @@ describe("CLI config: show", () => {
 
   it("shows the source as global after a value is set, and surfaces it in --diff", () => {
     runCli(
-      ["config", "task-mode", "set", "suggest"],
+      ["config", "finding-sensitivity", "set", "minimal"],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
     );
     const json = runCli(
@@ -290,14 +290,14 @@ describe("CLI config: show", () => {
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
     );
     const view = JSON.parse(json.stdout);
-    expect(view.fields.taskMode.value).toBe("suggest");
-    expect(view.fields.taskMode.source).toBe("global");
+    expect(view.fields.findingSensitivity.value).toBe("minimal");
+    expect(view.fields.findingSensitivity.source).toBe("global");
 
     const diff = runCli(
       ["config", "show", "--diff"],
       { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" }
     );
-    expect(diff.stdout).toContain("suggest");
+    expect(diff.stdout).toContain("minimal");
     expect(diff.stdout).toContain("global");
   });
 

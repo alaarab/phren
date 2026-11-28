@@ -124,7 +124,6 @@ The titlebar pills:
 | Review | Worker returns with reports and diffs, line comments sent back as one prompt; Trains: open pull requests per repository with checks and release authority |
 | Conductor | The running conductor, dispatches and returns, the owner inbox, standing grants, computer sets, release authority |
 | Projects | Every project with its summary and counts; skills, knobs, add a project, launch an agent there |
-| Tasks | Active, Queue and Done with readiness; create, edit, complete, move, launch as an agent |
 | Memory | Findings, the review queue (approve, reject, edit), notes, truths, topics and the 3D graph, for any computer's store |
 | Code | What changed, most used and code notes from the code index |
 | Schedules | Scheduled prompts, the next runs, history, run now, edit |
@@ -139,10 +138,7 @@ before**: the findings and truths that match it, with **Ask the agent** to
 put the failure and the finding in the chat. **Fix it** (there and on the
 project page's Code block) opens the launch sheet for a new agent with a first
 prompt you can edit: the request, its branch, each failing check with its
-message and link, and what Phren remembers about them. The current pull
-request, and the project page's Code block for the checkout's branch, list the
-open Phren tasks that name that branch or its issue number, with **Done** to
-complete one.
+message and link, and what Phren remembers about them.
 
 The desktop also notifies you when the pull request of a working (or recently
 active) session's branch turns failing or passing. It asks each project's Hook

@@ -9,7 +9,6 @@ import { AccountFailover } from "./account-failover.js";
 import { ownerInboxSources } from "./owner-inbox-sources.js";
 import { OwnerInbox } from "./owner-inbox.js";
 import { OwnerInboxPushSweep } from "./owner-inbox-push.js";
-import { StaleTaskSources } from "./task-stale.js";
 import { ownerInboxDone } from "./owner-inbox-done.js";
 import { boundedBadge, Housekeeper, SCAN_MS as HOUSEKEEPING_SCAN_MS, TICK_MS as HOUSEKEEPING_TICK_MS } from "./housekeeping/housekeeper.js";
 import { liveProcessCwds } from "./housekeeping/safety.js";
@@ -66,10 +65,7 @@ import { AccountUsageReader } from "./usage.js";
 import { paneOwners, processTable, ResourceMonitor } from "./resources.js";
 import { ALERT_CHECK_MS, HealthAlerts } from "./machine-health-alerts.js";
 import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
-import { taskWorkEnabled } from "./task-work.js";
-import { TASK_WORK_TICK_MS, TaskWorkSweeper } from "./task-work-live.js";
 import { DREAM_TICK_MS, DreamScheduler, dreamProjectOf, effectiveDreamSessions, dreamStoreProjects, dreamTickerEnabled, readLastRun, runDreamChild } from "./dream-schedule.js";
-import { readAuditLastRun, TASK_AUDIT_TICK_MS, TaskAuditScheduler, runTaskAuditChild, taskAuditEnabled } from "./task-audit-schedule.js";
 import { getDreamingConfig } from "../config/dreaming.js";
 import { dailyCanaryDue, runCanary } from "./canary.js";
 import { defaultPhrenPath } from "../shared.js";
@@ -162,10 +158,9 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   }
   // Assigned once resources exist below; the inbox only reads it on its ticks.
   let housekeeper: Housekeeper | undefined;
-  const staleTasks = modules.has("tasks") ? new StaleTaskSources() : undefined;
   const inbox = dispatches ? new OwnerInbox(async () => {
     const observed = await ownerInboxSources(agentHooks);
-    return { ...observed, sources: [...observed.sources, ...housekeeper?.inboxSources() ?? [], ...staleTasks?.sources() ?? []] };
+    return { ...observed, sources: [...observed.sources, ...housekeeper?.inboxSources() ?? []] };
   }, path.join(root, "owner-inbox.json"), items => ownerInboxDone(items)) : undefined;
   // Inbox alerts ride the inbox's own reconciliation: the sweep sees the same
   // open snapshot regardless of whether the phone ever reads the list.
@@ -415,21 +410,6 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       effectiveDreamSessions(String(server.session), await sharedSnapshot(String(server.session), 4000), dreamProject, agentHooks, codexQuestions)))).flat(),
     run: project => runDreamChild(scheduleStore, project) }) : undefined;
   const dreamTimer = dreams ? setInterval(() => { countTick("dreams"); void dreams.tick().catch(() => {}); }, DREAM_TICK_MS) : undefined;
-  // Weekly per-project task audits (bridge/task-audit-schedule.ts): each project's dreaming
-  // config gates them the same way, so an audit rides the window the owner already tuned.
-  const taskAudits = modules.has("tasks") && taskAuditEnabled() ? new TaskAuditScheduler({ now: () => new Date(),
-    projects: () => dreamStoreProjects(scheduleStore, modules.profile),
-    config: project => getDreamingConfig(scheduleStore, project),
-    lastRun: project => readAuditLastRun(scheduleStore, project),
-    liveSessions: async () => (await Promise.all((await recentServers()).map(async server =>
-      effectiveDreamSessions(String(server.session), await sharedSnapshot(String(server.session), 4000), dreamProject, agentHooks, codexQuestions)))).flat(),
-    run: project => runTaskAuditChild(scheduleStore, project) }) : undefined;
-  const taskAuditTimer = taskAudits ? setInterval(() => { countTick("task-audit"); void taskAudits.tick().catch(() => {}); }, TASK_AUDIT_TICK_MS) : undefined;
-  // Task work links (task-work.ts): pull requests that name a task are linked to it, and a
-  // merged linked pull request or a closed linked issue moves the task to Done.
-  const taskWork = modules.has("tasks") && taskWorkEnabled() ? new TaskWorkSweeper(scheduleStore) : undefined;
-  const taskWorkTimer = taskWork ? setInterval(() => { countTick("task-work"); void taskWork.tick().catch(() => {}); }, TASK_WORK_TICK_MS) : undefined;
-  if (taskWork) setTimeout(() => { void taskWork.tick().catch(() => {}); }, 2 * 60_000).unref();
   // Off unless PHREN_CANARY_DAILY=1 or `phren canary --daily on`.
   // Refresh the shared Codex sign-in before its workers each try to at once.
   const codexAuth = codexAppServerEnabled() && codexAuthRefreshEnabled() ? new CodexAuthKeeper(codexServers) : undefined;
@@ -505,7 +485,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       const macWindowsStopped = stopMacWindows();
       closeMacWindowStreams();
       browsers.close(); gitboyWebhooks.stop(); storePulls.stop(); storeSync.stop(); fanoutMessages.close(); stopRetention();
-      for (const timer of [scheduleTimer, dreamTimer, taskAuditTimer, taskWorkTimer, canaryTimer, healthTimer, housekeepingTimer, inventoryTimer, codexAuthTimer, activityTimer]) clearInterval(timer);
+      for (const timer of [scheduleTimer, dreamTimer, canaryTimer, healthTimer, housekeepingTimer, inventoryTimer, codexAuthTimer, activityTimer]) clearInterval(timer);
       scheduler?.close(); codeReindexer?.close(); codexServers.close(); gitWatch.close(); agentHooks.close();
       ws.clients.forEach(c => c.terminate()); terminateClosing(); ws.close(); http.close(() => resolve(macWindowsStopped)); http.closeAllConnections();
       stopProbes();

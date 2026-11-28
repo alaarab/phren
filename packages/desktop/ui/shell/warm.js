@@ -1,10 +1,10 @@
 // Warm the slow sections while the app is idle: once a computer is online,
-// mount Projects and Tasks hidden (their mount starts their first reads), so
+// mount Projects hidden (their mount starts their first reads), so
 // the first visit draws from memory instead of waiting on every Hook.
 import { store } from "./store.js";
 import { sectionHandle } from "./sections.js";
 
-export const WARM_SECTIONS = ["projects", "tasks"];
+export const WARM_SECTIONS = ["projects"];
 const SETTLE_MS = 3000;
 
 /** Start warming after the first overview with an online computer; returns a stop function. */

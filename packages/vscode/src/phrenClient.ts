@@ -59,12 +59,6 @@ export interface FindingCitation {
   repo?: string;
 }
 
-export interface GetTasksOptions {
-  status?: "all" | "active" | "queue" | "done" | "active+queue";
-  limit?: number;
-  done_limit?: number;
-}
-
 export interface SessionHistoryOptions {
   limit?: number;
   sessionId?: string;
@@ -109,7 +103,7 @@ export class PhrenClient {
   private spawnProcess(): ChildProcessWithoutNullStreams {
     const child = spawn(this.options.nodePath ?? process.execPath, [this.options.mcpServerPath, this.options.storePath], {
       stdio: "pipe",
-      // This client calls tools by their full names (complete_task, session_start,
+      // This client calls tools by their full names (session_start,
       // list_skills, …). The server's default `core` profile folds those behind
       // composites for agents; a first-party client asks for the full surface.
       // It also renders the tools' structured data, which clanker mode leaves out.
@@ -253,13 +247,7 @@ export class PhrenClient {
     return this.callTool("promote_note", findingType ? { project, note, findingType } : { project, note });
   }
 
-  async getTasks(project: string, options: GetTasksOptions = {}): Promise<unknown> {
-    return this.callTool("get_tasks", { project, ...options });
-  }
 
-  async getAllTasks(options: GetTasksOptions = {}): Promise<unknown> {
-    return this.callTool("get_tasks", { ...options });
-  }
 
   async sessionHistory(options: SessionHistoryOptions = {}): Promise<unknown> {
     return this.callTool("session_history", { ...options });
@@ -339,33 +327,12 @@ export class PhrenClient {
     return this.callTool("list_hook_errors", {});
   }
 
-  async updateTask(project: string, item: string, updates: Record<string, unknown>): Promise<unknown> {
-    return this.callTool("update_task", { project, item, updates });
-  }
 
-  async addTask(project: string, item: string): Promise<unknown> {
-    return this.callTool("add_task", { project, item });
-  }
 
-  async completeTask(project: string, item: string): Promise<unknown> {
-    return this.callTool("complete_task", { project, item });
-  }
 
-  async removeTask(project: string, item: string): Promise<unknown> {
-    return this.callTool("remove_task", { project, item });
-  }
 
-  async pinTask(project: string, item: string): Promise<unknown> {
-    return this.callTool("pin_task", { project, item });
-  }
 
-  async unpinTask(project: string, item: string): Promise<unknown> {
-    return this.callTool("pin_task", { project, item, unpin: true });
-  }
 
-  async promoteTaskToIssue(project: string, item: string): Promise<unknown> {
-    return this.callTool("update_task", { project, item, updates: { create_issue: true } });
-  }
 
   async pinMemory(project: string, memory: string): Promise<unknown> {
     return this.callTool("pin_memory", { project, memory });
@@ -451,19 +418,6 @@ export class PhrenClient {
     return this.callTool("resolve_contradiction", { project, finding_text, finding_text_other, resolution });
   }
 
-  async linkTaskIssue(
-    project: string,
-    item: string,
-    issue_number?: number,
-    issue_url?: string,
-    unlink?: boolean,
-  ): Promise<unknown> {
-    const updates: Record<string, unknown> = {};
-    if (issue_number !== undefined) updates.github_issue = issue_number;
-    if (issue_url) updates.github_url = issue_url;
-    if (unlink) updates.unlink_github = unlink;
-    return this.callTool("update_task", { project, item, updates });
-  }
 
   async getConfig(domain?: string, project?: string): Promise<unknown> {
     const args: Record<string, unknown> = { domain: domain ?? "all" };

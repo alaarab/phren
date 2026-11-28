@@ -84,7 +84,7 @@ describe("buildIndex file-read amplification", () => {
     // fragment extraction. These files are not part of the topic corpus, so one
     // read is the whole story.
     expect(at("summary.md")).toBe(1);
-    expect(at("tasks.md")).toBe(1);
+    expect(at("tasks.md")).toBe(0);
 
     // The remaining reads are a single project-wide pass by readProjectTopics()
     // (project-topics.ts), which derives adaptive topics from AGENTS.md +
@@ -96,16 +96,16 @@ describe("buildIndex file-read amplification", () => {
       expect(at(path.join("reference", `ref-${i}.md`))).toBe(2);
     }
 
-    // 6 reference * 2 + summary 1 + tasks 1 + findings 2 + claude 3
+    // 6 reference * 2 + summary 1 + findings 2 + AGENTS 3
     const totalReads = [...counts.values()].reduce((sum, n) => sum + n, 0);
-    expect(totalReads).toBe(19);
+    expect(totalReads).toBe(18);
 
-    // The batched rebuild still indexes everything it used to. (The index also
-    // carries the machine's native agent memory files, so scope the count.)
+    // Scope the count to the store because the index carries native agent memory too.
     const indexedPaths = (queryRows(db, "SELECT path FROM docs", []) ?? [])
       .map((row) => String(row[0]))
       .filter((docPath) => docPath.startsWith(store + path.sep));
-    expect(indexedPaths.length).toBe(10);
+    expect(indexedPaths.length).toBe(9);
+    expect(indexedPaths).not.toContain(path.join(store, "demo", "tasks.md"));
     expect((queryRows(db, "SELECT source_id FROM entity_links", []) ?? []).length).toBeGreaterThan(0);
     db.close();
   });

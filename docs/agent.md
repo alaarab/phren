@@ -2,7 +2,7 @@
 
 `phren agent` is phren's own coding agent. It reads, edits and runs your code
 with tool calls, like Claude Code or Codex, and it starts every session already
-knowing the project: its truths, open tasks, recent findings and the summary of
+knowing the project: its truths, recent findings and the summary of
 the last session. What it learns goes back into the same phren store your other
 agents use.
 
@@ -277,7 +277,7 @@ stores the tokens in private files under `~/.phren/agent/mcp-auth`
 (`PHREN_MCP_AUTH_DIR` overrides it). `oauth` can also be an object with
 `clientId`, optional `clientSecret`, `scope` and `callbackPort` (default
 14557). Basic memory tools are also built in; the core MCP server adds the
-complete task, administration and conductor operations.
+administration and conductor operations.
 
 Phren-agent can be launched or made a [conductor](conductor.md). The Hook
 supplies its startup brief using `--append-system-prompt-file <path>` and
@@ -460,14 +460,13 @@ A blocked headless prompt ends with subtype `error_hook_blocked`. Markdown files
 The agent uses the phren store directly, the same one `phren init` created
 and your other agents read.
 
-**When a session starts** it loads the project's truths, open tasks, recent
+**When a session starts** it loads the project's truths, recent
 findings, the project's `AGENTS.md`, the enabled skills and, with `--resume`,
 the previous session's summary. Items waiting in the review queue are shown
 separately and marked as unconfirmed.
 
 **During the session** it has built-in tools to search memory
 (`phren_search`), save a finding (`phren_add_finding`), and read, add and
-complete tasks (`phren_get_tasks`, `phren_add_task`, `phren_complete_task`),
 plus `run_skill` for your phren skills.
 
 **When the context fills up** (or on `/compact`) it asks the model for a
@@ -752,9 +751,6 @@ detected.
 ### Phren memory
 - **phren_search** — Search findings across all projects
 - **phren_add_finding** — Capture a finding
-- **phren_add_task** — Create a task
-- **phren_get_tasks** — List tasks for a project
-- **phren_complete_task** — Mark a task done
 
 ---
 

@@ -1,11 +1,10 @@
-export type TaskSection = "Active" | "Queue" | "Done";
-export type PhrenCategory = "findings" | "notes" | "truths" | "sessions" | "task" | "queue" | "reference" | "hooks";
-export type SessionBucket = "findings" | "tasks";
+export type PhrenCategory = "findings" | "notes" | "truths" | "sessions" | "queue" | "reference" | "hooks";
+export type SessionBucket = "findings";
 export type QueueSection = "Review" | "Stale" | "Conflicts";
 
 export interface RootSectionNode {
   kind: "rootSection";
-  section: "projects" | "tasks" | "machines" | "review" | "skills" | "hooks" | "graph" | "manage";
+  section: "projects" | "machines" | "review" | "skills" | "hooks" | "graph" | "manage";
   description?: string;
 }
 
@@ -42,10 +41,6 @@ export interface ProjectNode {
   active?: boolean;
   reviewCount?: number;
   conflictCount?: number;
-  activeCount?: number;
-  queueCount?: number;
-  /** Open tasks (Active + Queue) when the source gives a total but no split. */
-  openCount?: number;
 }
 
 export interface CategoryNode {
@@ -92,32 +87,6 @@ export interface NoteNode {
   time: string;
   text: string;
   promoted: boolean;
-}
-
-export interface TaskSectionGroupNode {
-  kind: "taskSectionGroup";
-  projectName: string;
-  section: TaskSection;
-  count: number;
-}
-
-export interface GlobalTaskSectionGroupNode {
-  kind: "globalTaskSectionGroup";
-  section: "Pinned" | TaskSection;
-  count: number;
-}
-
-export interface TaskNode {
-  kind: "task";
-  projectName: string;
-  id: string;
-  line: string;
-  section: TaskSection;
-  checked: boolean;
-  priority?: string;
-  pinned?: boolean;
-  issueUrl?: string;
-  issueNumber?: number;
 }
 
 export interface SkillGroupNode {
@@ -255,9 +224,6 @@ export type PhrenNode =
   | FindingNode
   | NoteDateGroupNode
   | NoteNode
-  | TaskSectionGroupNode
-  | GlobalTaskSectionGroupNode
-  | TaskNode
   | QueueSectionGroupNode
   | AggregateQueueSectionGroupNode
   | ReviewProjectGroupNode
@@ -302,17 +268,6 @@ export interface NoteSummary {
   promoted: boolean;
 }
 
-export interface TaskSummary {
-  id: string;
-  line: string;
-  section: TaskSection;
-  checked: boolean;
-  priority?: string;
-  pinned?: boolean;
-  issueUrl?: string;
-  issueNumber?: number;
-}
-
 export interface QueueItemSummary {
   projectName: string;
   id: string;
@@ -346,7 +301,6 @@ export interface SessionSummary {
 
 export interface SessionArtifactSummary {
   findings: FindingSummary[];
-  tasks: TaskSummary[];
 }
 
 export interface DateFilter {

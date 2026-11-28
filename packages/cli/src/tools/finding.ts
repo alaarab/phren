@@ -1,3 +1,4 @@
+import { editFinding as editFindingCore, parseFindingsContent, FINDINGS_FILENAME } from "../data/access.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
@@ -33,8 +34,6 @@ import { runCustomHooks } from "../hooks.js";
 import { incrementSessionFindings } from "./session.js";
 import { extractFragmentNames } from "../shared/fragment-graph.js";
 import { extractFactFromFinding } from "./extract-facts.js";
-import { appendChildFinding, editFinding as editFindingCore, parseFindingsContent, FINDINGS_FILENAME } from "../data/access.js";
-import { getActiveTaskForSession } from "../task/lifecycle.js";
 import {
   isInactiveFindingLine,
   supersedeFinding,
@@ -161,7 +160,7 @@ export async function handleAddFinding(
     tool?: string;
     project: string;
     finding: string | string[];
-    citation?: { file?: string; line?: number; repo?: string; commit?: string; name?: string; symbol?: string; supersedes?: string; task_item?: string };
+    citation?: { file?: string; line?: number; repo?: string; commit?: string; name?: string; symbol?: string; supersedes?: string };
     sessionId?: string;
     findingType?: (typeof FINDING_TYPES)[number];
     scope?: string;
@@ -343,34 +342,6 @@ export async function handleAddFinding(
         runCustomHooks(phrenPath, "post-finding", { PHREN_PROJECT: project });
         incrementSessionFindings(phrenPath, 1, sessionId, project);
         extractFactFromFinding(phrenPath, project, taggedFinding);
-        // Bidirectional link: if there's an active task in this session, append this finding to it.
-        if (sessionId) {
-          const activeTask = getActiveTaskForSession(phrenPath, sessionId, project);
-          if (activeTask) {
-            const taskMatch = activeTask.stableId ? `bid:${activeTask.stableId}` : activeTask.line;
-            // Extract fid from the last written line in FINDINGS.md
-            try {
-              const findingsPath = path.join(phrenPath, project, FINDINGS_FILENAME);
-              const findingsContent = fs.readFileSync(findingsPath, "utf8");
-              const lines = findingsContent.split("\n");
-              const taggedText = taggedFinding.replace(/^-\s+/, "").trim().slice(0, 60).toLowerCase();
-              for (let li = lines.length - 1; li >= 0; li--) {
-                const l = lines[li];
-                if (!l.startsWith("- ")) continue;
-                const lineText = l.replace(/<!--.*?-->/g, "").replace(/^-\s+/, "").trim().slice(0, 60).toLowerCase();
-                if (lineText === taggedText || l.toLowerCase().includes(taggedText.slice(0, 30))) {
-                  const fidMatch = l.match(/<!--\s*fid:([a-z0-9]{8})\s*-->/);
-                  if (fidMatch) {
-                    appendChildFinding(phrenPath, project, taskMatch, `fid:${fidMatch[1]}`);
-                  }
-                  break;
-                }
-              }
-            } catch {
-              // Non-fatal: task-finding linkage is best-effort
-            }
-          }
-        }
       }
       const conflictsWithList = semanticConflicts.checked
         ? extractConflictsWith(semanticConflicts.annotations)
@@ -869,7 +840,6 @@ export function register(server: McpServer, ctx: McpContext): void {
           name: z.string().optional().describe("The function, type or variable this finding is about: Name, Type.member or name(). Validated against the project's code index; stored unresolved when it does not resolve."),
           symbol: z.string().optional().describe("Deprecated: use name. Accepted until @phren/cli 0.3.1."),
           supersedes: z.string().optional().describe("First 60 chars of the old finding this one replaces. The old entry will be marked as superseded."),
-          task_item: z.string().optional().describe("Task item stable ID like bid:abcd1234, positional ID like A1, or item text to link this finding to."),
         }).optional().describe("Optional source citation for traceability (only used when finding is a single string)."),
         sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this if you want session metrics to include this write."),
         findingType: z.enum(FINDING_TYPES)
@@ -993,7 +963,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ phren · push",
       description:
         "Commit and push any changes in the phren store. Call this at the end of a session " +
-        "or after adding multiple findings/tasks items. Commits all modified files in the " +
+        "or after adding multiple findings items. Commits all modified files in the " +
         "phren directory and pushes if a remote is configured.",
       inputSchema: z.object({
         message: z.string().optional().describe("Commit message. Defaults to 'update phren'."),

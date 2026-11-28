@@ -71,34 +71,19 @@ describe("buildTreeItem: project", () => {
     expect(item.description).toMatch(/^a+\.\.\.$/);
   });
 
-  it("shows open task counts and combines them with a review badge", () => {
-    const tasksOnly = buildTreeItem(
-      { kind: "project", projectName: "app", activeCount: 3, queueCount: 5 },
-      undefined,
-    );
-    expect(tasksOnly.description).toBe("3 active · 5 queued");
-
+  it("shows a review badge on the project", () => {
     const withReview = buildTreeItem(
-      { kind: "project", projectName: "app", activeCount: 3, reviewCount: 2 },
+      { kind: "project", projectName: "app", reviewCount: 2 },
       undefined,
     );
-    expect(withReview.description).toBe("2 review · 3 active");
+    expect(withReview.description).toBe("2 review");
   });
 
-  it("shows an open total when the source gives no active/queue split", () => {
-    const item = buildTreeItem({ kind: "project", projectName: "app", openCount: 12 }, undefined);
-    expect(item.description).toBe("12 open");
-  });
 
-  it("prefers the active/queue split over an open total", () => {
-    const item = buildTreeItem({ kind: "project", projectName: "app", activeCount: 3, queueCount: 5, openCount: 8 }, undefined);
-    expect(item.description).toBe("3 active · 5 queued");
-  });
 
-  it("omits zero-valued task counts so an empty project stays clean", () => {
-    const item = buildTreeItem({ kind: "project", projectName: "app", activeCount: 0, queueCount: 0, openCount: 0, brief: "app" }, undefined);
-    expect(item.description).toBe("app");
-  });
+
+
+
 });
 
 describe("buildTreeItem: category", () => {
@@ -203,26 +188,7 @@ describe("buildTreeItem: note", () => {
   });
 });
 
-describe("buildTreeItem: task", () => {
-  it("marks non-Done tasks as active in contextValue and issues the openTask command", () => {
-    const item = buildTreeItem(
-      { kind: "task", projectName: "app", id: "t1", line: "ship it", section: "Active", checked: false },
-      undefined,
-    );
-    expect(item.contextValue).toBe("phren.task.active");
-    expect(item.description).toBe("app");
-    expect(item.command?.command).toBe("phren.openTask");
-  });
 
-  it("marks Done tasks distinctly", () => {
-    const item = buildTreeItem(
-      { kind: "task", projectName: "app", id: "t1", line: "shipped", section: "Done", checked: true },
-      undefined,
-    );
-    expect(item.contextValue).toBe("phren.task.done");
-    expect(icon(item)).toBe("check");
-  });
-});
 
 describe("buildTreeItem: reviewProjectGroup", () => {
   it("shows both conflict and review counts joined, and totals when both are zero", () => {

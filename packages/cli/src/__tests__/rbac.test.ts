@@ -133,7 +133,6 @@ describe("admin role", () => {
     process.env.PHREN_ACTOR = "admin-user";
     expect(permissionDeniedError(phrenPath, "add_finding")).toBeNull();
     expect(permissionDeniedError(phrenPath, "manage_config")).toBeNull();
-    expect(permissionDeniedError(phrenPath, "remove_task")).toBeNull();
   });
 });
 
@@ -148,11 +147,9 @@ describe("contributor role", () => {
     });
   });
 
-  it("allows contributors to add findings and tasks", () => {
+  it("allows contributors to add findings", () => {
     process.env.PHREN_ACTOR = "contrib-user";
     expect(permissionDeniedError(phrenPath, "add_finding")).toBeNull();
-    expect(permissionDeniedError(phrenPath, "add_task")).toBeNull();
-    expect(permissionDeniedError(phrenPath, "complete_task")).toBeNull();
     expect(permissionDeniedError(phrenPath, "edit_finding")).toBeNull();
     expect(permissionDeniedError(phrenPath, "add_note")).toBeNull();
     expect(permissionDeniedError(phrenPath, "edit_note")).toBeNull();
@@ -184,7 +181,6 @@ describe("reader role", () => {
     process.env.PHREN_ACTOR = "reader-user";
     expect(permissionDeniedError(phrenPath, "add_finding")).not.toBeNull();
     expect(permissionDeniedError(phrenPath, "remove_finding")).not.toBeNull();
-    expect(permissionDeniedError(phrenPath, "add_task")).not.toBeNull();
     expect(permissionDeniedError(phrenPath, "add_note")).not.toBeNull();
     expect(permissionDeniedError(phrenPath, "manage_config")).not.toBeNull();
   });

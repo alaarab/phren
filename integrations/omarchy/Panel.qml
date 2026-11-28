@@ -26,7 +26,7 @@ Panel {
   readonly property int refreshSec: Math.max(10, Number(root.setting("refreshIntervalSec", 30)))
   readonly property int webPort: Number(root.setting("webPort", 3499))
 
-  property var status: ({ ok: false, projects: [], recalls: [], totals: { projects: 0, findings: 0, tasks: 0 }, live: false, store: "", version: "" })
+  property var status: ({ ok: false, projects: [], recalls: [], totals: { projects: 0, findings: 0 }, live: false, store: "", version: "" })
   property double nowMs: Date.now()
   property bool cursorActive: false
   property int cursor: 0
@@ -68,7 +68,6 @@ Panel {
     var t = root.status.totals || {}
     if (!root.status.ok) return "no store at " + (root.status.store || "~/.phren")
     var parts = [(t.projects || 0) + " projects", (t.findings || 0) + " findings"]
-    if ((t.tasks || 0) > 0) parts.push(t.tasks + " open tasks")
     return parts.join(" · ")
   }
 
@@ -310,7 +309,7 @@ Panel {
                 Text {
                   id: countText
                   anchors.right: parent.right
-                  text: modelData.findings + " ✦" + (modelData.tasks > 0 ? "  " + modelData.tasks + " ▤" : "") + "  " + root.ago(modelData.updatedAgoSec)
+                  text: modelData.findings + " ✦" + "  " + root.ago(modelData.updatedAgoSec)
                   color: root.dim
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption

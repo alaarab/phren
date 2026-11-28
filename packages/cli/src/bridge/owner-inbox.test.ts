@@ -27,12 +27,12 @@ describe("owner inbox", () => {
     expect((await inbox().run({})).items).toEqual([]);
     expect((await inbox().run({ includeResolved: true })).items).toMatchObject([{ state: "resolved", resolution: "Router restarted" }]);
   });
-  it("validates the command, task, pr and key fields of a manual add", async () => {
+  it("validates the command, pr and key fields of a manual add", async () => {
     const box = inbox();
-    const added = await box.run({ action: "add", title: "Merge the release", command: "gh pr merge 877 --squash\necho\tmerged", task: "bid:c2cc33d0", pr: "https://github.com/alaarab/phren/pull/877/" });
-    expect(added.item).toMatchObject({ command: "gh pr merge 877 --squash\necho\tmerged", task: "bid:c2cc33d0", pr: "https://github.com/alaarab/phren/pull/877" });
+    const added = await box.run({ action: "add", title: "Merge the release", command: "gh pr merge 877 --squash\necho\tmerged", pr: "https://github.com/alaarab/phren/pull/877/" });
+    expect(added.item).toMatchObject({ command: "gh pr merge 877 --squash\necho\tmerged", pr: "https://github.com/alaarab/phren/pull/877" });
     for (const bad of [
-      { task: "bid:zzzzzzzz" }, { task: "c2cc33d0" }, { pr: "https://github.com/o/r/issues/5" }, { pr: "http://github.com/o/r/pull/1" },
+      { pr: "https://github.com/o/r/issues/5" }, { pr: "http://github.com/o/r/pull/1" },
       { pr: "https://github.com/o/r/pull/not-a-number" }, { command: "echo hi\r\necho bye" }, { command: "echo \x07bell" },
       { command: "echo\x00" }, { command: "" }, { command: Array.from({ length: 21 }, (_, i) => `line ${i + 1}`).join("\n") }, { key: "has space" },
     ]) await expect(box.run({ action: "add", title: "Bad add", ...bad })).rejects.toThrow(z.ZodError);
@@ -71,11 +71,11 @@ describe("owner inbox", () => {
       project: z.string().max(200).optional(), computer: z.string().max(253).optional(),
       target: inboxTargetSchema.optional(), dispatch: z.string().uuid().optional(), actionId: z.string().max(200).optional(),
       source: z.string().max(500).optional(), live: z.boolean().optional(),
-      command: z.string().min(1).max(4000).optional(), task: z.string().max(40).optional(),
+      command: z.string().min(1).max(4000).optional(),
       pr: z.string().max(1000).optional(), key: z.string().min(1).max(200).optional(),
     }).strict();
     const box = inbox();
-    await box.run({ action: "add", title: "Rotate the deploy key", command: "true", task: "bid:c2cc33d0", issue: "github.com/alaarab/phren#42" });
+    await box.run({ action: "add", title: "Rotate the deploy key", command: "true", issue: "github.com/alaarab/phren#42" });
     await box.run({ action: "add", title: "Approve the release", key: "release" });
     const stored = JSON.parse(await readFile(path.join(root, "owner-inbox.json"), "utf8"));
     expect(z.array(rowSchema03100).parse(stored)).toHaveLength(2);
@@ -338,7 +338,7 @@ describe("owner inbox", () => {
     const resolve = { action: "resolve", computer: "Desk", id, resolution: "Approved" };
     await expect(ownerInboxView(box, add)).resolves.toMatchObject({ item: { inboxComputer: "Desk", id, state: "open" } });
     for (const input of [
-      { ...add, command: "true" }, { ...add, task: "bid:c2cc33d0" }, { ...add, pr: "https://github.com/o/r/pull/9" },
+      { ...add, command: "true" }, { ...add, pr: "https://github.com/o/r/pull/9" },
       { ...add, key: "release" }, { ...resolve, ifUpdatedAt: at },
     ]) await expect(ownerInboxView(box, input)).rejects.toMatchObject({ status: 409, details: { code: "owner-inbox-actions-unsupported" } });
     await expect(ownerInboxView(box, resolve)).resolves.toMatchObject({ item: { inboxComputer: "Desk", id, state: "resolved" } });

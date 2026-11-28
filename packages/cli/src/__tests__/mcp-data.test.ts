@@ -51,7 +51,7 @@ describe("mcp-data: export/import round-trip", () => {
     tmp.cleanup();
   });
 
-  it("exports a project with findings, task, and summary", async () => {
+  it("exports a project with findings and summary", async () => {
     const projectDir = path.join(tmp.path, "test-proj");
     fs.mkdirSync(projectDir, { recursive: true });
 
@@ -74,8 +74,6 @@ describe("mcp-data: export/import round-trip", () => {
     expect(res.data.summary).toContain("A test project.");
     expect(res.data.claudeMd).toContain("Use vitest");
     expect(res.data.findingsRaw).toContain("Always use WAL mode");
-    expect(res.data.task.Active).toHaveLength(1);
-    expect(res.data.task.Done).toHaveLength(1);
   });
 
   it("import recreates project files from exported JSON", async () => {
@@ -147,10 +145,11 @@ describe("mcp-data: export/import round-trip", () => {
     expect(res.error).toContain("different casing");
   });
 
-  it("import with overwrite replaces existing project", async () => {
+  it("import with overwrite replaces supplied files and leaves legacy data untouched", async () => {
     const projectDir = path.join(tmp.path, "overme");
     fs.mkdirSync(projectDir, { recursive: true });
     writeFile(path.join(projectDir, "summary.md"), "# old content");
+    writeFile(path.join(projectDir, "tasks.md"), "# legacy data");
 
     register(server as any, makeCtx(tmp.path));
 
@@ -160,6 +159,7 @@ describe("mcp-data: export/import round-trip", () => {
     );
     expect(res.ok).toBe(true);
     expect(fs.readFileSync(path.join(tmp.path, "overme", "summary.md"), "utf8")).toContain("replaced content");
+    expect(fs.readFileSync(path.join(projectDir, "tasks.md"), "utf8")).toBe("# legacy data");
   });
 
   it("export returns error for nonexistent project", async () => {
@@ -210,44 +210,9 @@ describe("mcp-data: export/import round-trip", () => {
     expect(fs.existsSync(path.join(tmp.path, "phren"))).toBe(true);
   });
 
-  it("import builds task content from structured data", async () => {
-    register(server as any, makeCtx(tmp.path));
 
-    const payload = {
-      project: "task-test",
-      task: {
-        Active: [{ line: "Active task", checked: false, githubIssue: 14, githubUrl: "https://github.com/alaarab/phren/issues/14" }],
-        Queue: [{ line: "Queued task", checked: false }],
-        Done: [{ line: "Done task", checked: true }],
-      },
-    };
-    const res = parseResult(
-      await server.call("import_project", { data: JSON.stringify(payload) })
-    );
-    expect(res.ok).toBe(true);
 
-    const task = fs.readFileSync(path.join(tmp.path, "task-test", "tasks.md"), "utf8");
-    expect(task).toContain("- [ ] Active task");
-    expect(task).toContain("GitHub: #14 https://github.com/alaarab/phren/issues/14");
-    expect(task).toContain("- [ ] Queued task");
-    expect(task).toContain("- [x] Done task");
-  });
 
-  it("export includes structured GitHub issue linkage on task items", async () => {
-    const projectDir = path.join(tmp.path, "gh-task");
-    fs.mkdirSync(projectDir, { recursive: true });
-    writeFile(
-      path.join(projectDir, "tasks.md"),
-      "# gh-task task\n\n## Active\n\n- [ ] Ship issue linking <!-- bid:deadbeef -->\n  GitHub: #14 https://github.com/alaarab/phren/issues/14\n\n## Queue\n\n## Done\n"
-    );
-
-    register(server as any, makeCtx(tmp.path));
-
-    const res = parseResult(await server.call("export_project", { project: "gh-task" }));
-    expect(res.ok).toBe(true);
-    expect(res.data.task.Active[0].githubIssue).toBe(14);
-    expect(res.data.task.Active[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
-  });
 
   it("import builds findings content from learnings array", async () => {
     register(server as any, makeCtx(tmp.path));

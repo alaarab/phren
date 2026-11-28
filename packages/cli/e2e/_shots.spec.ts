@@ -26,7 +26,7 @@ async function openGraphTab(page: Page) {
 }
 
 // Build a rich payload in the page: several projects, many findings across
-// topics, tasks, and a health spread driven by score lastUsedAt.
+// topics and a health spread driven by score lastUsedAt.
 async function mountRichGraph(page: Page) {
   await page.evaluate(() => {
     const topics = [
@@ -43,8 +43,7 @@ async function mountRichGraph(page: Page) {
     let n = 0;
     projects.forEach((proj, pi) => {
       const findingCount = 10 + pi * 6;
-      const taskCount = 4 + pi;
-      nodes.push({ id: "project:" + proj, label: proj, group: "project", project: proj, findingCount, taskCount, refCount: findingCount });
+      nodes.push({ id: "project:" + proj, label: proj, group: "project", project: proj, findingCount, refCount: findingCount });
       for (let i = 0; i < findingCount; i++) {
         const [slug, tlabel] = topics[(i + pi) % topics.length];
         const id = "finding:" + proj + ":" + i;
@@ -57,12 +56,6 @@ async function mountRichGraph(page: Page) {
           fullLabel: tlabel + " finding " + (i + 1) + " for " + proj + " — a representative memory describing the pattern, decision, or pitfall discovered while working on this area of the codebase.",
           date: "2026-0" + (1 + (i % 6)) + "-1" + (i % 9),
         });
-        links.push({ source: "project:" + proj, target: id });
-      }
-      for (let t = 0; t < taskCount; t++) {
-        const section = t % 3 === 0 ? "Active" : t % 3 === 1 ? "Queue" : "Done";
-        const id = "task:" + proj + ":" + t;
-        nodes.push({ id, group: "task-" + section.toLowerCase(), project: proj, section, priority: t % 2 ? "high" : "", label: "Task " + (t + 1) + " for " + proj, fullLabel: "Task " + (t + 1) + " for " + proj + " — something to do." });
         links.push({ source: "project:" + proj, target: id });
       }
     });

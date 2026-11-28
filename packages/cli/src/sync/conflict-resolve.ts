@@ -1,7 +1,6 @@
 /**
  * Resolves the content conflicts a store merge can settle without a person:
- * tasks.md per task id against the merge base, daily notes per note id
- * against the base, generated summaries from the incoming side, and the
+ * daily notes by note ID against the merge base, generated summaries from the incoming side, and the
  * append-only record files (findings, journal, review queue, topic archives)
  * as a union of both sides. Everything else stays conflicted so the caller
  * aborts and names it.
@@ -16,25 +15,21 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { isTaskFileName } from "../filenames.js";
 import { debugLog, EXEC_TIMEOUT_MS } from "../shared.js";
 import { errorMessage } from "../utils.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
-import { mergeFindings, mergeTask } from "../content/validate.js";
+import { mergeFindings } from "../content/validate.js";
 import { cleanBlock, KNOWS_END, KNOWS_START, NOW_END, NOW_START, upsertBlock } from "../content/summarize.js";
-import { dedupeTaskIds, mergeTasksByBid } from "./task-merge.js";
 import { NOTE_HEADING_RE } from "../data/notes.js";
 
 export interface ConflictResolution { resolved: string[]; unresolved: string[] }
 
-type Strategy = "tasks" | "findings" | "archive" | "topic" | "summary" | "notes" | "union" | "theirs" | null;
+type Strategy = "findings" | "topic" | "summary" | "notes" | "union" | "theirs" | null;
 
 export function conflictStrategy(relFile: string): Strategy {
   const file = relFile.replace(/\\/g, "/");
   const name = path.posix.basename(file).toLowerCase();
-  if (isTaskFileName(name)) return "tasks";
   if (name === "findings.md") return "findings";
-  if (/^\.config\/task-archive\/[^/]+\.md$/i.test(file)) return "archive";
   if (/(^|\/)reference\/topics\/[^/]+\.md$/i.test(file)) return "topic";
   if (name === "summary.md") return "summary";
   if (name === "review.md" || name === "truths.md") return "union";
@@ -47,7 +42,7 @@ export function conflictStrategy(relFile: string): Strategy {
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, {
-    // The default 1 MiB buffer failed on a task archive that had outgrown it,
+    // The default 1 MiB buffer failed on an archive that had outgrown it,
     // and an unreadable side left the whole merge unresolved.
     env: nonInteractiveGitEnv(), cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_MS, maxBuffer: 256 * 1024 * 1024,
   });
@@ -166,7 +161,6 @@ function mergeWithGeneratedBlock(base: string, ours: string, theirs: string, sta
   return upsertBlock(rest, start, end, block, where);
 }
 
-const dedupe = (content: string | null): string | null => content === null ? null : dedupeTaskIds(content).content;
 
 function orUnion(merge: () => string | null, base: string, ours: string, theirs: string, after: (content: string | null) => string | null = (c) => c): string | null {
   try {
@@ -179,11 +173,8 @@ function orUnion(merge: () => string | null, base: string, ours: string, theirs:
 function resolveContent(strategy: Exclude<Strategy, null>, base: string, ours: string, theirs: string): string | null {
   switch (strategy) {
     // When a smarter merge refuses, a line union still keeps every record of
-    // both sides (repeated task ids collapsed): a knowledge file never blocks a sync.
-    case "tasks": return orUnion(() => mergeTasksByBid(base, ours, theirs), base, ours, theirs, dedupe);
+    // both sides.
     case "findings": return orUnion(() => mergeFindings(ours, theirs, base), base, ours, theirs);
-    // Archived tasks only accumulate: keep both sides, the incoming version of any duplicate.
-    case "archive": return dedupe(orUnion(() => mergeTask(theirs, ours), base, ours, theirs));
     case "topic": return mergeWithGeneratedBlock(base, ours, theirs, NOW_START, NOW_END, "top");
     // Summaries are regenerated from the store: when the hand-written part
     // doesn't merge cleanly, take the incoming file whole and let the next

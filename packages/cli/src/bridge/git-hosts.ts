@@ -4,7 +4,7 @@ import { git } from "./projects.js";
 import { runCombined } from "./git-publish.js";
 import { gitboy } from "./git-host-gitboy.js";
 import { gitlab } from "./git-host-gitlab.js";
-import { mergeableWord, type ForgeItem } from "../task/work.js";
+import { mergeableWord, type ForgeItem } from "../forge/links.js";
 
 
 /** Where a repository's pull or merge requests live. Phren supports three git
@@ -211,7 +211,7 @@ export function checkRuns(items: unknown): Json[] {
 
 /** gh never prompts, never nags about updates, and talks to the remote's own
  * domain (a GitHub Enterprise server as much as the public one). */
-function ghEnv(host: GitHost): NodeJS.ProcessEnv {
+export function ghEnv(host: Pick<GitHost, "domain">): NodeJS.ProcessEnv {
   return { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", NO_COLOR: "1", ...(host.domain ? { GH_HOST: host.domain } : {}) };
 }
 

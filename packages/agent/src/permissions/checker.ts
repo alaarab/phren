@@ -23,7 +23,6 @@ export const READ_ONLY_TOOLS = new Set([
   "list_mcp_resources",
   "read_mcp_resource",
   "phren_search",
-  "phren_get_tasks",
   "list_agents",
 ]);
 
@@ -43,7 +42,6 @@ const AUTO_CONFIRM_TOOLS = new Set([
   "multi_edit",
   "apply_patch",
   "phren_add_finding",
-  "phren_complete_task",
   // Spawning forks a child process running with auto-confirm permissions —
   // suggest mode must ask first (these were unprompted in every mode before).
   "spawn_agent",

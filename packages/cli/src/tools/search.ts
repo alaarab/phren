@@ -2,7 +2,6 @@ import { cachedCitationFreshness, refreshCitationFreshness, citationFreshnessAnn
 import { getProjectRemote, readProjectConfig } from "../project-config.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { projectMemoryCounts } from "../content/summarize.js";
-import { moduleEnabled } from "../modules/runtime.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
@@ -131,30 +130,7 @@ function filterFindingsContentByScope(content: string, activeScope: string): str
   return out.join("\n");
 }
 
-function taskLineScope(line: string): string | undefined {
-  const scopeMatch = line.match(/<!--[^>]*\bscope:([^\s>]+)[^>]*-->/);
-  return normalizeMemoryScope(scopeMatch?.[1]);
-}
 
-function filterTaskContentByScope(content: string, activeScope: string): string {
-  const lines = content.split("\n");
-  const out: string[] = [];
-  let keepContinuation = false;
-  for (const line of lines) {
-    if (line.startsWith("- ")) {
-      keepContinuation = isMemoryScopeVisible(taskLineScope(line), activeScope);
-      if (keepContinuation) out.push(line);
-      continue;
-    }
-    if (/^\s+/.test(line)) {
-      if (keepContinuation) out.push(line);
-      continue;
-    }
-    keepContinuation = false;
-    out.push(line);
-  }
-  return out.join("\n");
-}
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
@@ -167,7 +143,7 @@ async function handleGetMemoryDetail(ctx: McpContext, { id: rawId, offset }: { i
   } catch {
     return mcpResponse({ ok: false, error: `Invalid memory ID format: "${rawId}" contains malformed URL encoding.` });
   }
-  const entryId = rawId.trim().toLowerCase().match(/^(fid:[a-z0-9]{8}|bid:[a-f0-9]{8})$/)?.[1];
+  const entryId = rawId.trim().toLowerCase().match(/^(fid:[a-z0-9]{8})$/)?.[1];
   // Paired with the ids clanker mode injected this session, for the open rate in store health.
   recordMemoryOpen(phrenPath, entryId ?? id);
   if (entryId) return handleGetEntryDetail(ctx, entryId);
@@ -238,13 +214,13 @@ async function handleGetMemoryDetail(ctx: McpContext, { id: rawId, offset }: { i
   });
 }
 
-/** One finding (`fid:`) or task (`bid:`) with its continuation lines, found through the index. */
+/** One finding (`fid:`) with its continuation lines, found through the index. */
 function handleGetEntryDetail(ctx: McpContext, entryId: string) {
   const db = ctx.db();
   // Active files first, then the archive topics that keep a finding's fid.
   const docs = queryDocRows(
     db,
-    "SELECT project, filename, type, content, path FROM docs WHERE content LIKE ? ORDER BY CASE type WHEN 'findings' THEN 0 WHEN 'task' THEN 0 ELSE 1 END",
+    "SELECT project, filename, type, content, path FROM docs WHERE content LIKE ? ORDER BY CASE type WHEN 'findings' THEN 0 ELSE 1 END",
     [`%${entryId}%`],
   ) ?? [];
   for (const doc of docs) {
@@ -358,11 +334,6 @@ async function handleSearchKnowledge(
             const hasVisible = filteredContent.split("\n").some((line) => line.startsWith("- "));
             return hasVisible ? { ...row, content: filteredContent } : null;
           }
-          if (row.type === "task") {
-            const filteredContent = filterTaskContentByScope(row.content, activeScope);
-            const hasVisible = filteredContent.split("\n").some((line) => line.startsWith("- "));
-            return hasVisible ? { ...row, content: filteredContent } : null;
-          }
           return row;
         })
         .filter((row): row is NonNullable<typeof row> => Boolean(row));
@@ -457,7 +428,6 @@ async function handleSearchKnowledge(
       db,
       undefined,
       query,
-      { skipTaskFilter: true, filterType: filterType ?? null }
     );
 
     // Apply trust filter — same as hook-prompt uses — to strip stale/low-confidence findings
@@ -577,7 +547,7 @@ async function handleSearchKnowledge(
     const fallbackNote = usedFallback ? " (keyword fallback)" : "";
     const fragmentNote = relatedFragments.length > 0 ? `\n\nRelated fragments: ${relatedFragments.join(", ")}` : "";
     if (clankerEnabled(phrenPath)) {
-      // One row per matching finding or task (fid:/bid:), else per document.
+      // One row per matching finding (fid:), else per document.
       const terms = queryTerms(query);
       const rowCap = maxResults * 2;
       const clankerRows: ClankerRow[] = [];
@@ -672,8 +642,7 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
     if (store && fs.existsSync(path.join(store.path, lookupName))) {
       const projDir = path.join(store.path, lookupName);
       const fsDocs: Array<{ project: string; filename: string; type: string; content: string; path: string }> = [];
-      for (const [file, type] of [["summary.md", "summary"], ["AGENTS.md", "claude"], [FINDINGS_FILENAME, "findings"], ["tasks.md", "task"], ["truths.md", "canonical"]] as const) {
-        if (type === "task" && !moduleEnabled(store.path, "tasks", ctx.profile)) continue;
+      for (const [file, type] of [["summary.md", "summary"], ["AGENTS.md", "claude"], [FINDINGS_FILENAME, "findings"], ["truths.md", "canonical"]] as const) {
         const filePath = path.join(projDir, file);
         if (fs.existsSync(filePath)) {
           fsDocs.push({ project: lookupName, filename: file, type, content: fs.readFileSync(filePath, "utf8").slice(0, 8000), path: filePath });
@@ -783,8 +752,8 @@ async function handleListProjects(ctx: McpContext, { page, page_size }: { page?:
     return mcpResponse({ ok: false, error: `Page ${pageNum} out of range. Total pages: ${totalPages}.` });
   }
 
-  const badgeTypes = ["claude", "findings", "summary", "task"] as const;
-  const badgeLabels: Record<string, string> = { claude: "AGENTS.md", findings: "FINDINGS", summary: "summary", task: "task" };
+  const badgeTypes = ["claude", "findings", "summary"] as const;
+  const badgeLabels: Record<string, string> = { claude: "AGENTS.md", findings: "FINDINGS", summary: "summary" };
 
   const projectList = pageProjects.map((entry) => {
     // Primary store projects: query the DB for badge info
@@ -811,7 +780,6 @@ async function handleListProjects(ctx: McpContext, { page, page_size }: { page?:
       if (fs.existsSync(path.join(projDir, "AGENTS.md"))) badges.push("AGENTS.md");
       if (fs.existsSync(path.join(projDir, FINDINGS_FILENAME))) badges.push("FINDINGS");
       if (fs.existsSync(path.join(projDir, "summary.md"))) badges.push("summary");
-      if (store && moduleEnabled(store.path, "tasks", ctx.profile) && fs.existsSync(path.join(projDir, "tasks.md"))) badges.push("task");
     }
     return { name: entry.name, store: entry.store, brief: "", badges, fileCount: badges.length };
   });
@@ -908,7 +876,6 @@ async function handleGetFindings(
     const lines = capped.map((entry) => {
       const metadata: string[] = [];
       metadata.push(`status=${entry.status}`);
-      if (entry.taskItem) metadata.push(`task=${entry.taskItem}`);
       if (entry.scope) metadata.push(`scope=${entry.scope}`);
       if (entry.symbol) metadata.push(`name=${entry.symbol}`);
       if (entry.supersedes) metadata.push(`supersedes="${entry.supersedes.slice(0, 30)}"`);
@@ -985,12 +952,12 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ phren · memory detail",
       description:
         "Fetch the full content of a specific memory entry by its ID. Use this to expand a search_knowledge " +
-        "excerpt or a row from clanker mode's compact index. A `fid:` (finding) or `bid:` (task) id returns that one entry; " +
+        "excerpt or a row from clanker mode's compact index. A `fid:` id returns that one entry; " +
         "a `mem:project/path/to/file.md` id returns the document, paged by offset.",
       inputSchema: z.object({
         id: z.string().describe(
-          "`fid:xxxxxxxx`, `bid:xxxxxxxx`, or `mem:project/path/to/file.md` (e.g. `mem:my-app/reference/api/auth.md`). " +
-          "Returned by search_knowledge, get_findings, get_tasks and the hook-prompt index."
+          "`fid:xxxxxxxx` or `mem:project/path/to/file.md` (e.g. `mem:my-app/reference/api/auth.md`). " +
+          "Returned by search_knowledge, get_findings and the hook-prompt index."
         ),
         offset: z.number().int().min(0).optional().describe(
           `Character offset to start reading from. Documents longer than ${DETAIL_PAGE_CHARS} characters are returned in pages; pass the previous response's next_offset.`
@@ -1011,7 +978,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         project: z.string().optional().describe("Filter by project name."),
         type: z.enum(DOC_TYPES)
           .optional()
-          .describe("Filter by document type: claude, findings, reference, summary, task, skill"),
+          .describe("Filter by document type: claude, findings, reference, summary, skill"),
         tag: z.preprocess(
           value => typeof value === "string" ? value.toLowerCase() : value,
           z.enum(FINDING_TAGS)

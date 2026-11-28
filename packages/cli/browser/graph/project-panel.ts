@@ -3,8 +3,8 @@ import { clamp, esc, nodeDetail, state } from "./state.js";
 import { clearSelection, peekNode, selectNode } from "./interactions.js";
 
 // Project contents pane — a right-docked, scrollable index of a project's
-// findings and tasks. It appears whenever a project is "in context" (its orb
-// is focused, or one of its own findings/tasks is selected) so you can scroll
+// findings. It appears whenever a project is "in context" (its orb
+// is focused, or one of its own findings is selected) so you can scroll
 // the whole list, filter it, and jump straight to any item instead of hunting
 // for its node in 3D. Rows expand for reading and editing in place, while
 // health-tinted rows plus the health filter make aging findings easy to prune.
@@ -442,7 +442,7 @@ function startCornerResize(event: PointerEvent): void {
 }
 const filters = {
   query: "",
-  kind: "all" as "all" | "finding" | "task",
+  kind: "all" as "all" | "finding",
   health: "all" as "all" | "aging" | "healthy" | "decaying" | "stale",
   sort: "aging" as "aging" | "recent" | "az",
 };
@@ -543,10 +543,10 @@ function contextNode(): PaneContext | null {
   return null;
 }
 
-/** All findings + tasks belonging to a project (payload order preserved). */
+/** All findings belonging to a project (payload order preserved). */
 function projectItems(projectName: string): RuntimeNode[] {
   return state.rawNodes.filter(
-    (node) => (node.kind === "finding" || node.kind === "task") && node.project === projectName,
+    (node) => (node.kind === "finding") && node.project === projectName,
   );
 }
 
@@ -567,12 +567,10 @@ function rowHtml(node: RuntimeNode): string {
   const editing = !selectMode && editingId === node.id;
   const active = !selectMode && state.selectedNodeId === node.id ? " active" : "";
   const isPicked = selectMode && picked.has(node.id) ? " picked" : "";
-  const dotColor = node.kind === "task" ? node.baseColor : HEALTH_COLOR[node.health] || "#8b96c9";
+  const dotColor = HEALTH_COLOR[node.health] || "#8b96c9";
   const label = node.fullLabel || node.label || node.id;
   const preview = node.label || label;
-  const chip = node.kind === "task"
-    ? (node.section || "task")
-    : (node.topicLabel || node.topicSlug || node.health);
+  const chip = (node.topicLabel || node.topicSlug || node.health);
   // In select mode rows carry a checkbox; otherwise hover actions: peek (fly the
   // camera without opening the dossier) and delete (only when a host supports it).
   const check = selectMode ? `<span class="phren-pp-check">${picked.has(node.id) ? "✓" : ""}</span>` : "";
@@ -583,19 +581,11 @@ function rowHtml(node: RuntimeNode): string {
   const del = !selectMode && hasActions
     ? `<span class="phren-pp-del" data-pp-del title="Delete this ${esc(node.kind)}">🗑</span>`
     : "";
-  const taskFields = node.kind === "task"
-    ? `<div class="phren-pp-inline-fields">`
-      + `<label>Status<select data-pp-section>`
-      + ["Queue", "Active", "Done"].map((value) => `<option value="${value}"${node.section === value ? " selected" : ""}>${value}</option>`).join("")
-      + `</select></label>`
-      + `<label>Priority<select data-pp-priority>`
-      + [["", "None"], ["high", "High"], ["medium", "Medium"], ["low", "Low"]].map(([value, text]) => `<option value="${value}"${(node.priority || "") === value ? " selected" : ""}>${text}</option>`).join("")
-      + `</select></label></div>`
-    : `<div class="phren-pp-inline-meta"><span>Topic · ${esc(node.topicLabel || node.topicSlug || "General")}</span><span>Health · ${esc(node.health)}</span></div>`;
+  const inlineMeta = `<div class="phren-pp-inline-meta"><span>Topic · ${esc(node.topicLabel || node.topicSlug || "General")}</span><span>Health · ${esc(node.health)}</span></div>`;
   const inlineEditor = editing
     ? `<div class="phren-pp-inline-editor" data-pp-editor>`
       + `<textarea data-pp-text aria-label="Edit ${esc(node.kind)} text">${esc(label)}</textarea>`
-      + taskFields
+      + inlineMeta
       + `<div class="phren-pp-inline-actions"><button type="button" data-pp-cancel>Cancel</button><button type="button" data-pp-save>Save</button></div>`
       + `</div>`
     : `<span class="phren-pp-rowdetail">${esc(label)}</span>`;
@@ -620,11 +610,10 @@ function renderList(): void {
   const project = state.nodeById.get(renderedProjectId);
   const projectName = project ? project.project || project.id : "";
   const items = projectItems(projectName).filter(matchesFilters);
-  // Findings, then tasks; each group ordered by the active sort mode.
+  // Findings ordered by the active sort mode.
   const findings = items.filter((n) => n.kind === "finding").sort(sortComparator);
-  const tasks = items.filter((n) => n.kind === "task").sort(sortComparator);
 
-  if (!findings.length && !tasks.length) {
+  if (!findings.length) {
     listEl.innerHTML = `<div class="phren-pp-empty">No matching items</div>`;
     cursorId = null;
     renderBulkBar();
@@ -634,10 +623,6 @@ function renderList(): void {
   if (findings.length) {
     html += `<div class="phren-pp-group"><span class="phren-pp-group-label">Findings</span><span class="phren-pp-group-count">${findings.length}</span></div>`;
     html += findings.map(rowHtml).join("");
-  }
-  if (tasks.length) {
-    html += `<div class="phren-pp-group"><span class="phren-pp-group-label">Tasks</span><span class="phren-pp-group-count">${tasks.length}</span></div>`;
-    html += tasks.map(rowHtml).join("");
   }
   listEl.innerHTML = html;
   // Drop the cursor if its row was filtered out; otherwise repaint it.
@@ -854,8 +839,6 @@ function buildPanel(projectId: string): void {
   const findingItems = all.filter((n) => n.kind === "finding");
   const loadedFindingCount = findingItems.length;
   const findingCount = typeof project?.findingCount === "number" ? project.findingCount : loadedFindingCount;
-  const loadedTaskCount = all.length - loadedFindingCount;
-  const taskCount = typeof project?.taskCount === "number" ? project.taskCount : loadedTaskCount;
 
   // Memory-health tally across the project's findings — a stacked bar plus a
   // clickable key so aging memory is visible (and filterable) at a glance.
@@ -878,7 +861,7 @@ function buildPanel(projectId: string): void {
     paneHeadHtml({
       kind: "Project",
       name: projectName,
-      sub: `${findingCount} findings · ${taskCount} tasks`,
+      sub: `${findingCount} findings`,
       extra: healthBar,
     }),
     '<div class="phren-pp-controls">',
@@ -886,7 +869,6 @@ function buildPanel(projectId: string): void {
     '<div class="phren-pp-chips" aria-label="Content filters">',
     `<button type="button" class="phren-pp-chip${filters.kind === "all" ? " on" : ""}" aria-pressed="${filters.kind === "all"}" data-pp-chip data-kind="all">All</button>`,
     `<button type="button" class="phren-pp-chip${filters.kind === "finding" ? " on" : ""}" aria-pressed="${filters.kind === "finding"}" data-pp-chip data-kind="finding">Findings</button>`,
-    `<button type="button" class="phren-pp-chip${filters.kind === "task" ? " on" : ""}" aria-pressed="${filters.kind === "task"}" data-pp-chip data-kind="task">Tasks</button>`,
     `<button type="button" class="phren-pp-chip${filters.health === "aging" ? " on" : ""}" aria-pressed="${filters.health === "aging"}" data-pp-chip data-health="aging" title="Show only decaying or stale">⚠ Aging</button>`,
     state.itemActionCallbacks.length
       ? `<button type="button" class="phren-pp-chip${selectMode ? " on" : ""}" aria-pressed="${selectMode}" data-pp-select title="Select multiple items">Select</button>`
@@ -1005,8 +987,7 @@ function buildFragmentPanel(entityId: string): void {
   };
   const projItems = (n: RuntimeNode) => {
     const f = typeof n.findingCount === "number" ? n.findingCount : 0;
-    const t = typeof n.taskCount === "number" ? n.taskCount : 0;
-    return `${f + t} items`;
+    return `${f} items`;
   };
 
   const rows: string[] = [];
@@ -1115,7 +1096,7 @@ function applyChip(chip: HTMLElement): void {
   if (health === "aging") {
     filters.health = filters.health === "aging" ? "all" : "aging";
   } else {
-    const kind = chip.getAttribute("data-kind") as "all" | "finding" | "task" | null;
+    const kind = chip.getAttribute("data-kind") as "all" | "finding" | null;
     if (kind) filters.kind = kind;
   }
   // Reflect chip state without a full rebuild.
@@ -1270,7 +1251,7 @@ export function refreshProjectPanel(opts?: { data?: boolean; transitioning?: boo
   const sel = state.selectedNodeId;
   if (sel && (filters.kind !== "all" || filters.health !== "all")) {
     const node = state.nodeById.get(sel);
-    if (node && (node.kind === "finding" || node.kind === "task") && !matchesFilters(node)) {
+    if (node && (node.kind === "finding") && !matchesFilters(node)) {
       filters.kind = "all";
       filters.health = "all";
       buildPanel(ctx.id);

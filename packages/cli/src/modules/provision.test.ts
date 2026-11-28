@@ -43,7 +43,6 @@ it("preserves edited starter files while suppressing their disabled owner's mirr
   const skill = path.join(tmp.path, "global", "skills", "conductor", "SKILL.md");
   fs.appendFileSync(skill, "\nMy own workflow.\n");
   setModuleEnabled(tmp.path, "conductor", false);
-  setModuleEnabled(tmp.path, "tasks", false);
   reconcileStarterSkills(tmp.path, starter);
   expect(fs.readFileSync(skill, "utf8")).toContain("My own workflow.");
   expect(fs.readFileSync(path.join(tmp.path, "global", "AGENTS.md"), "utf8")).not.toContain("get_tasks");

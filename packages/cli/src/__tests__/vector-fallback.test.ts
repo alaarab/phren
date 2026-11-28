@@ -101,25 +101,7 @@ describe("vectorFallback content hydration", () => {
     expect(results[0].content).toContain("high score content");
   });
 
-  it("strips task Done items the same way the indexer does", async () => {
-    const taskPath = path.join(tmp.path, "proj", "tasks.md");
-    writeFile(
-      taskPath,
-      "# Task\n\n## Active\n- Keep this visible\n\n## Done\n- Hidden completed task\n"
-    );
 
-    const cache = getEmbeddingCache(tmp.path);
-    (cache as any)._setEntries([
-      { path: taskPath, model: "nomic-embed-text", vec: [0.1, 0.2, 0.3] },
-    ]);
-
-    vi.mocked(cosineSimilarity).mockReturnValue(0.8);
-
-    const results = await vectorFallback(tmp.path, "task query", new Set(), 5);
-    expect(results.length).toBe(1);
-    expect(results[0].content).toContain("Keep this visible");
-    expect(results[0].content).not.toContain("Hidden completed task");
-  });
 
   it("classifies Windows-style task paths correctly during hydration", async () => {
     expect(deriveVectorDocIdentity("C:\\phren", "C:\\phren\\proj\\tasks.md")).toEqual({

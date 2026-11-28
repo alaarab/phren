@@ -51,33 +51,6 @@ import { withSafeLock, ensureProject, walkDirectory } from "../shared/data-utils
 import { iterateProjectFindings, rewriteFindingLine } from "../finding/locate.js";
 import { storeAwareProjectPath } from "../store-routing.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
-export type { TaskSection, TaskItem, TaskDoc } from "./tasks.js";
-export {
-  readTasks,
-  readTasksAcrossProjects,
-  resolveTaskItem,
-  addTask,
-  addTasks,
-  completeTasks,
-  completeTask,
-  removeTask,
-  removeTasks,
-  updateTask,
-  linkTaskIssue,
-  pinTask,
-  unpinTask,
-  workNextTask,
-  tidyDoneTasks,
-  taskMarkdown,
-  appendChildFinding,
-  promoteTask,
-  TASKS_FILENAME,
-  TASK_FILE_ALIASES,
-  canonicalTaskFilePath,
-  resolveTaskFilePath,
-  isTaskFileName,
-  type AddTaskOptions,
-} from "./tasks.js";
 export {
   addProjectToProfile,
   listMachines,
@@ -103,11 +76,11 @@ export interface FindingItem {
   id: string;
   /** Stable 8-char hex ID embedded as `<!-- fid:XXXXXXXX -->`. Survives reordering and consolidation. */
   stableId?: string;
+  sessionId?: string;
   date: string;
   text: string;
   citation?: string;
   citationData?: FindingCitation;
-  taskItem?: string;
   confidence?: number;
   scope?: string;
   /** Machine hostname where this finding was originally recorded. */
@@ -402,8 +375,8 @@ export function parseFindingsContent(content: string, opts: ReadFindingsOptions 
       confidence,
       citation,
       citationData,
-      taskItem: citationData?.task_item,
       scope,
+      ...(provenance?.session_id ? { sessionId: provenance.session_id } : {}),
       machine,
       actor,
       supersededBy: supersededByMatch ? supersededByMatch[1] : undefined,

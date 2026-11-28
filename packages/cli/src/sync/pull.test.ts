@@ -154,31 +154,7 @@ describe("store polling with real Git repositories", () => {
     expect(run.mock.calls.some(([, args]) => args[0] === "fetch")).toBe(false);
   });
 
-  it("commits a task written through add_task before pulling and keeps both sides of tasks.md", async () => {
-    const { reader, writer } = fixture();
-    const tasksPath = (repo: string) => path.join(repo, "project", "tasks.md");
-    const localTasks = "# task\n\n## Active\n\n## Queue\n\n- [ ] Local task written by add_task\n\n## Done\n";
-    writeFile(tasksPath(reader), localTasks);
 
-    // The task is still uncommitted when the sync routine runs; the remote has not moved.
-    expect((await pollStore(reader, 60, runPollGit, 100_000)).status).toBe("unchanged");
-    expect(git(reader, "show", "HEAD:project/tasks.md")).toContain("Local task written by add_task");
-    expect(git(reader, "status", "--porcelain")).toBe("");
-
-    // A second computer adds a task to the same file and pushes.
-    const remoteTasks = "# task\n\n## Active\n\n## Queue\n\n- [ ] Remote task from another computer\n\n## Done\n";
-    writeFile(tasksPath(writer), remoteTasks);
-    git(writer, "add", ".");
-    git(writer, "commit", "-m", "remote task");
-    git(writer, "push");
-
-    expect((await pollStore(reader, 60, runPollGit, 160_000)).status).toBe("updated");
-    const merged = fs.readFileSync(tasksPath(reader), "utf8");
-    expect(merged).toContain("Local task written by add_task");
-    expect(merged).toContain("Remote task from another computer");
-    expect(merged).not.toContain("<<<<<<<");
-    expect(git(reader, "status", "--porcelain")).toBe("");
-  });
 
   it("defers diverged history without starting a rebase or changing local commits", async () => {
     const { reader, publish, commit } = fixture();

@@ -22,7 +22,6 @@ export function isOwnerInboxPushSource(item: Pick<InboxItem, "kind" | "source" |
     case "prompt": // This Hook's own panes and sessions.
     case "housekeeping": // This Hook's housekeeping and machine-health warnings.
       return true;
-    case "task-stale": // Materialized from the synced task store, even with a claim.
     default: // Unclassified sources are list-only.
       return false;
   }

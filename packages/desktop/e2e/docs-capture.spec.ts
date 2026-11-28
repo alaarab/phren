@@ -45,11 +45,11 @@ const FINDINGS = [
 
 // A sample memory store per computer, so Projects shows summaries and counts (the UI reads them from the store routes).
 const CAPABILITIES = { memoryStore: true, fileWrite: true, fileSearch: true, gitReview: true, files: true, fileResolution: true, repositoryFiles: true, schedules: true, transcript: true, prompt: true, diff: true, overviewStream: true, resources: true };
-const SAMPLE_PROJECTS: Record<string, { summary: string; tasks: string[]; findings: number }> = {
-  phren: { summary: "Memory for coding agents: findings, tasks and a hook that recalls them.", tasks: ["Polish the Home dashboard", "Review the launch flow", "Check the release notes"], findings: 24 },
-  website: { summary: "The marketing site: landing page, docs and the getting started guide.", tasks: ["Refresh the landing page", "Review accessibility"], findings: 11 },
-  "api-gateway": { summary: "Routes requests by host and enforces per-tenant rate limits.", tasks: ["Drain the queue before closing the socket"], findings: 7 },
-  "mobile-app": { summary: "The phone client: sessions, approvals and talk mode.", tasks: ["Improve mobile navigation", "Cache the host lookup", "Ship the onboarding flow", "Fix the login redirect"], findings: 15 },
+const SAMPLE_PROJECTS: Record<string, { summary: string; findings: number }> = {
+  phren: { summary: "Memory for coding agents: findings and a hook that recalls them.", findings: 24 },
+  website: { summary: "The marketing site: landing page, docs and the getting started guide.", findings: 11 },
+  "api-gateway": { summary: "Routes requests by host and enforces per-tenant rate limits.", findings: 7 },
+  "mobile-app": { summary: "The phone client: sessions, approvals and talk mode.", findings: 15 },
 };
 const b64 = (text: string) => Buffer.from(text).toString("base64");
 function storeRoutes(names: string[]) {
@@ -59,7 +59,6 @@ function storeRoutes(names: string[]) {
     const p = SAMPLE_PROJECTS[name];
     const files: Record<string, string> = {
       "summary.md": `${p.summary}\n`,
-      "tasks.md": `## Active\n${p.tasks.map((t) => `- ${t}`).join("\n")}\n\n## Done\n`,
       "FINDINGS.md": `${Array.from({ length: p.findings }, (_, i) => `- [pattern] Sample finding ${i + 1}`).join("\n")}\n`,
     };
     for (const [file, text] of Object.entries(files)) {

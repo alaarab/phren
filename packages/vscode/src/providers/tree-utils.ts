@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { PhrenCategory, TaskNode, TaskSection } from "./tree-types";
+import type { PhrenCategory } from "./tree-types";
 
 export function categoryIconId(category: PhrenCategory): string {
   if (category === "findings") {
@@ -14,9 +14,6 @@ export function categoryIconId(category: PhrenCategory): string {
   if (category === "sessions") {
     return "history";
   }
-  if (category === "task") {
-    return "checklist";
-  }
   if (category === "queue") {
     return "inbox";
   }
@@ -24,19 +21,6 @@ export function categoryIconId(category: PhrenCategory): string {
     return "plug";
   }
   return "book";
-}
-
-export function taskIconId(task: TaskNode): string {
-  if (task.checked || task.section === "Done") {
-    return "check";
-  }
-  if (task.pinned) {
-    return "pinned";
-  }
-  if (task.section === "Active") {
-    return "play";
-  }
-  return "clock";
 }
 
 export function truncate(value: string, maxLength: number): string {
@@ -76,10 +60,6 @@ export function asBoolean(value: unknown): boolean | undefined {
 
 export function asNumber(value: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
-}
-
-export function asTaskSection(value: unknown): TaskSection | undefined {
-  return value === "Active" || value === "Queue" || value === "Done" ? value : undefined;
 }
 
 export function asSessionStatus(value: unknown): "active" | "ended" | undefined {

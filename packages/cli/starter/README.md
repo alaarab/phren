@@ -15,7 +15,6 @@ Each subdirectory is a project. Add one for every codebase you work on.
 │   ├── AGENTS.md    # architecture, commands, key patterns
 │   ├── summary.md   # five-line project card
 │   ├── FINDINGS.md  # fragments accumulated over time
-│   ├── tasks.md     # task queue that persists across sessions
 │   └── .claude/
 │       └── skills/  # project-specific skills
 ├── profiles/        # YAML files mapping project sets to machine roles
@@ -32,7 +31,6 @@ New to phren? Here's what each file does and when it matters.
 
 **FINDINGS.md** fills itself. As Claude discovers insights, patterns, and decisions during your sessions, it tells phren and entries land here grouped by date. Old entries fade from retrieval over time. Wrong entries can be removed with `remove_finding()`.
 
-**tasks.md** is your task board file. It keeps Active (working now), Queue (up next), and Done (finished) in one place so the work history stays with the project. You can also manage it from `phren shell`.
 
 **global/AGENTS.md** applies everywhere. Your style preferences, tool choices, things Claude should always know regardless of which project you're in.
 
@@ -56,7 +54,6 @@ If you cloned manually:
 2. **Work normally**: Claude reads your project docs and builds on what phren remembers
 3. **Fragments accumulate**: tell phren what you learned, or he picks up insights automatically
 4. **Session ends**: phren commits and pushes what he collected
-5. **Review occasionally**: run `phren shell` to triage what phren queued, manage tasks, and check health
 
 ## Syncing across machines
 

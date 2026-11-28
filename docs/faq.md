@@ -103,7 +103,6 @@ Security defaults for `phren web-ui`:
 
 **Automatic:**
 - Findings added via `add_finding` MCP tool (agents call this when they discover something worth saving)
-- Task items via `add_task`
 - Session state committed and pushed by the Stop hook after every response
 
 **Manual:**
@@ -126,11 +125,9 @@ Lifecycle metadata stays attached to finding entries, so history remains auditab
 
 ## What is finding impact scoring?
 
-Impact scoring tracks which findings were injected into context and whether those sessions completed tasks. Repeatedly successful findings get a stronger retrieval boost. Finding type tags (`[decision]`, `[pattern]`, `[context]`, etc.) control decay rates — decisions never expire while context notes fade after 30 days.
 
 ## How does cross-session resume work?
 
-`session_end` writes task checkpoints (task ID/text, edited files, failing tests, last attempt, next step).  
 `session_start` surfaces those checkpoints so agents can resume quickly.  
 `session_history` gives list/drill-down access to prior sessions and artifacts.
 
@@ -155,7 +152,6 @@ Project setup note:
 - `phren add` is the canonical path for existing repos.
 - Shared vs project-local setup is covered in `docs/llms-install.md` and `docs/ide-setup.md`.
 - Governance behavior and review flows are documented in `docs/governance.md`.
-- The local task is still the primary planning surface. GitHub issue links are optional metadata on task items, and promotion is one-way by default to avoid issue spam.
 
 ## Does phren require MCP?
 
@@ -248,7 +244,6 @@ Opens the interactive shell. Single-key navigation:
 | Key | View |
 |-----|------|
 | `p` | Projects |
-| `b` | Task |
 | `l` | Findings |
 | `m` | Review Queue |
 | `s` | Skills |
@@ -263,7 +258,7 @@ Press `?` for the full keybinding reference inside the shell.
 
 ## How do I share phren with my team?
 
-Create a team store — a shared git repo that holds findings, tasks, and skills visible to everyone who joins it:
+Create a team store — a shared git repo that holds findings and skills visible to everyone who joins it:
 
 ```bash
 phren team init my-team --remote git@github.com:org/phren-team.git

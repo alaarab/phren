@@ -92,7 +92,7 @@ backup by the installer.
 ### Memory without GitHub
 
 A paired computer also serves its phren store to the phone (`memoryStore` in
-`/v1/health`): the Projects, Tasks and Memory tabs read the store's working tree
+`/v1/health`): the Projects and Memory tabs read the store's working tree
 through the Hook, and edits are written back with a compare-and-swap on each
 file's git blob sha. Files the store ignores stay off the phone. GitHub is only
 needed for sync away from the computer and for team stores.
@@ -166,16 +166,15 @@ worktree it created, before starting Claude or Codex there (see
 ### Gitboy read-only memory
 
 Gitboy, a self-hosted Git server, shows a read-only Phren tab per repository
-(that project's findings, truths and tasks), marks files and PRs Phren has
-findings about, looks up CI failures it has seen before, prints task tips on
-`git push`, and can save a fix as a finding. Phren stays the source of truth;
+(that project's findings and truths), marks files and PRs Phren has
+findings about, looks up CI failures it has seen before, `git push`, and can save a fix as a finding. Phren stays the source of truth;
 gitboy stores nothing. Gitboy's server reaches the Hook over SSH with keys
 scoped to these routes:
 
 | Scope | Key comment | Routes |
 |---|---|---|
-| `gitboy-read` | `phren-gitboy` | `GET /v1/projects/:project/memory`, `/memory/files`, `/memory/search`, `/tasks` |
-| `gitboy-write` | `phren-gitboy-write` | `POST /v1/projects/:project/findings`, `POST /v1/projects/:project/tasks/complete` |
+| `gitboy-read` | `phren-gitboy` | `GET /v1/projects/:project/memory`, `/memory/files`, `/memory/search` |
+| `gitboy-write` | `phren-gitboy-write` | `POST /v1/projects/:project/findings` |
 
 Each scope is its own key with its own forced command, so a read key can never
 write and the write key reads nothing.
@@ -252,19 +251,17 @@ F = { "id": string, "text": string, "type": string|null,
       "status": "active"|"superseded"|"contradicted"|"retracted"|"stale"|"invalid_citation",
       "created": string|null,
       "citation": { "file": string|null, "line": number|null, "commit": string|null, "name": string|null } | null }
-T = { "id": string, "text": string, "created": string|null, "context": string|null }
 ```
 
-- `id` is `fid:<8 hex>` / `bid:<8 hex>` when the entry has a stable id, else a
-  positional id (`L3`, `A1`) that can change between reads.
+- `id` is `fid:<8 hex>` when the entry has a stable id, else a
+  positional id (`L3`) that can change between reads.
 - `type` is the finding's leading tag (`decision`, `pitfall`, `pattern`, `bug`,
   `workaround`, `context`), removed from `text`; `null` when untagged.
 - `created` is a `YYYY-MM-DD` date. `citation` carries the file, line, commit
   and the cited function or type (`name`); the local checkout path never leaves.
 - Text that trips phren's credential detector is withheld whole and replaced
   with `[redacted: withheld, contained <kind>]`.
-- Every route needs the `memory` module (`404` otherwise; `/tasks` also needs
-  `tasks`). An unknown project is `404`, an invalid name `400`, a wrong method
+- Every route needs the `memory` module (`404` otherwise). An unknown project is `404`, an invalid name `400`, a wrong method
   `405`. `/v1/health` advertises `projectMemory: true`.
 
 **`GET /v1/projects/:project/memory`** returns the whole project:
@@ -272,13 +269,10 @@ T = { "id": string, "text": string, "created": string|null, "context": string|nu
 ```
 { "project": string, "store_id": string|null, "remote": string|null, "truncated": boolean,
   "findings": [F], "truths": [{ "text": string }],
-  "tasks": { "active": [T], "queue": [T], "done": [T] } }
+  "tasks": { "active": [], "queue": [], "done": [] } }
 ```
 
-Findings come newest first and are capped at 500; Active and Queue at 200
-each; Done at the 50 most recent. `truncated` is true when any list was cut.
-`store_id` is the store's 8-hex task-store id when it has one. Tasks are empty
-when the `tasks` module is off.
+From 0.4.0, the task groups are always empty. Findings come newest first and are capped at 500. `truncated` is true when the list was cut. `store_id` is the portable store ID when present.
 
 **`GET /v1/projects/:project/memory/files?path=<p>&path=<p>…`** (1 to 500
 paths) returns the findings about those files, for PR annotations and gutter
@@ -315,20 +309,6 @@ weight, 0 to 1, halved for findings that are no longer active; `matched` is how
 many distinct tokens matched. An entry must match at least two of the tokens
 the project knows (one, if it knows only one). It reads only this project's
 files; it does not open the store-wide search index.
-
-**`GET /v1/projects/:project/tasks?branch=<name>`** returns open tasks (Active
-and Queue) for a `git push` tip:
-
-```
-{ "project": string, "branch": string, "truncated": boolean,
-  "tasks": [T & { "section": "active"|"queue", "match": "branch"|"issue" }] }
-```
-
-`branch`: the task's text or context contains the branch name, or its last
-`/` segment when that is 4 characters or more (case-insensitive). `issue`: the
-branch carries an issue number (`fix/123-login`, `issue-123`, `gh-123`) and the
-task is linked to that issue or mentions `#123`, `/issues/123` or `/pull/123`.
-One read of `tasks.md`; at most 50.
 
 **`POST /v1/projects/:project/findings`** (`gitboy-write` only) saves a finding,
 for "save this fix as a finding". Body, at most 8192 bytes:
@@ -995,7 +975,7 @@ answered without one as `saved.offline`, `saved.shared` and `saved.cached`.
 The Hook reconciles every store this computer has with its remote every five
 minutes (the first pass a minute after it starts; `PHREN_STORE_SYNC_SECONDS`
 changes it, `0` turns it off; the manual preset and project-local installs never
-sync), so schedules, tasks and findings converge on a computer nobody is typing
+sync), so schedules and findings converge on a computer nobody is typing
 on. Each pass removes abandoned state (a Git index lock older than ten minutes,
 a merge or rebase untouched for an hour, Phren lock files whose process has
 exited, backup refs older than 14 days, worktree records whose folders are
@@ -1003,10 +983,7 @@ gone), commits pending store writes, merges the remote and pushes. A readonly or
 pull-only store only pulls.
 
 When both sides moved, the pre-merge HEAD is kept as `refs/phren/backup/<ms>`
-and the merge resolves knowledge files without losing either side: tasks by
-task id (a repeated id collapses to its completed, then Active, then longest
-record), findings, truths, notes, journals and the review queue as a union,
-task archives by task id. Generated parts take the remote's copy and are
+and the merge resolves findings and notes by stable ID. Generated parts take the remote's copy and are
 regenerated: summary.md's "What phren knows" block and the topic `## Now`
 blocks. Only a file a person writes (AGENTS.md, CLAUDE.md, a skill) changed on
 both sides stops the merge; it is aborted, named in the store's health, the
@@ -1078,7 +1055,7 @@ ticked in the last two minutes (no schedule runs); reads one idle session's
 transcript, read only; and lists live sessions everywhere, failing on an
 unreachable computer. Each step records `ok`, `failed` or `skipped` with the
 reason and duration in `canary.json` in the bridge directory. It never types into
-an existing pane and never touches schedules or tasks. The Hook runs it once a
+an existing pane and never touches schedules. The Hook runs it once a
 day when `PHREN_CANARY_DAILY=1` is in its environment or after
 `phren canary --daily on` (`--daily off` stops it).
 
@@ -1899,7 +1876,7 @@ A linked computer name in a POST list reads only that Hook's inbox.
 
 `Item` is `{id,kind:"manual"|"needs-you"|"blocked",title,state:"open"|"resolved",
 createdAt,updatedAt,inboxComputer,project?,computer?,target?,dispatch?,actionId?,
-source?,live?,resolvedAt?,resolution?,command?,task?,pr?,issue?,key?,paste?}`. All times are ISO timestamps. `target`
+source?,live?,resolvedAt?,resolution?,command?,pr?,issue?,key?,paste?}`. All times are ISO timestamps. `target`
 is a full session target or a starting target for a startup dialog. `id` is a
 UUID; `source` is opaque. `inboxComputer:"local"` means the connected Hook owns
 it; another name means send the action to that Hook. `computer` describes the
@@ -1918,7 +1895,7 @@ Send the flag in the query, not the body: a Hook that predates the field refuses
 a body key it does not know and ignores the query flag. The suffix is applied
 once, so an add that repeats a row already carrying the link writes nothing.
 
-Add accepts `{action:"add",title,project?,id?,computer?,command?,task?,pr?,issue?,key?}`.
+Add accepts `{action:"add",title,project?,id?,computer?,command?,pr?,issue?,key?}`.
 Resolve accepts `{action:"resolve",id,resolution?,computer?,ifUpdatedAt?}`.
 Both return `{ok:true,item}`. `computer` routes to the named linked Hook. Omit
 it for local. Remote responses include the row's `inboxComputer`. The generated
@@ -1929,7 +1906,7 @@ resolve id returns 404. Resolve changes only inbox state.
 Adds match open manual items by normalized PR or `key`. An add may name a
 resolved manual id with changed fields to reopen it. Writes that match
 different items return 409. Identical adds and resolves without a precondition
-are idempotent. To send `command`, `task`, `pr`, `key` or `ifUpdatedAt` to
+are idempotent. To send `command`, `pr`, `key` or `ifUpdatedAt` to
 another Hook, its `/v1/health` must advertise `capabilities.ownerInboxActions`;
 an `issue` needs `capabilities.ownerInboxIssues`.
 An older Hook still accepts legacy adds and resolves. Requests with new fields
@@ -1961,8 +1938,7 @@ by case are ambiguous and answer 409. An unknown id is 404; a changed revision
 or an already closed row is 409. Resolve means handled, dismiss removes the row
 from the shared list for everyone reading that Hook; both set `state:"resolved"`,
 bump `updatedAt`, and record `resolvedAt` and `resolution:"done"|"dismissed"`.
-Neither action answers a question, changes an approval, closes a Phren task or
-runs housekeeping, and a dismissed live wait stays suppressed until that wait
+Neither action answers a question, changes an approval, runs housekeeping, and a dismissed live wait stays suppressed until that wait
 ends. The route requires a valid paired-phone signature from its first request
 (`capabilities.ownerInboxClose`), accepts no terminal confirmation, and refuses
 a peer origin; a linked-only computer is listed through the aggregate but needs
@@ -1974,7 +1950,7 @@ Hook, prompts from its panes and sessions, dispatch returns for workers running
 on that Hook, and its housekeeping and machine-health warnings. The Hook where
 the worker runs owns the ask. Mirrored returns on a dispatching Hook appear only
 in the Inbox list when the worker runs on a peer. Rows from the synced Phren
-store, including claimed and unclaimed stale tasks, also appear only in the
+store, also appear only in the
 list. Alert eligibility is independent of peer names and versions. Retries use
 the row's collapse ID, `inbox-<id>`.
 
@@ -1984,12 +1960,51 @@ unknown. A Done action sends resolve to `inboxComputer`, with optional notes.
 Keep permission and question answers on their existing routes. Automatic items appear only while verified live; answered questions and ended
 or closed sources resolve on reads or within the five-second activity tick.
 Repeated observations update the same item per pane, session and question.
-Manual items also resolve on a merged or closed GitHub or gitboy PR or a Done
-task. GitLab merge-request links are for reference. Unmerged closure and Done
-task evidence must be fresh for the item's latest edit. Show history on demand,
+Manual items also resolve on a merged or closed GitHub or gitboy PR. GitLab merge-request links are for reference. Evidence of unmerged closure must be fresh for the item's latest edit. Show history on demand,
 retain ids across retries, and refresh after actions. On upgrade, stale automatic
 items resolve with `stale: source gone`; an unreachable worker is hidden as
 unverified rather than resolved. No phone UI changes are included here.
+
+## Store directory
+
+`GET /v1/store/directory` lists available stores, their project names, and the portable repository identities used for store pulls. `GET /v1/tasks/stores` is a read-only alias kept for older phones that verify the store before reading finding freshness. Both paths return the identity flags older phones decode (`identityReady` and `ambiguous`), with `metadataWritable: false`.
+
+## Issues from the phone
+
+With `capabilities.issues: 1` the Hook serves the owner's forge issues from its
+memory stores. All routes are owner-only: a peer computer and an agent's MCP
+call are refused with 403, and the five writes also require the paired phone's
+owner-proof signature from the first request (`owner-proof.ts`). The service
+behind them is `packages/cli/src/forge/`; the Hook only shapes requests and
+answers. See [Issues](issues.md) for repository selection, Gitboy and GitHub
+credentials, and claims.
+
+| Route | Inputs | Answer |
+| --- | --- | --- |
+| `GET /v1/issues` | `repos` (repeatable or comma-separated), `state` (`open` default, `closed`, `all`), `assignee` (`me` or a user), `label`, `search`, `limit` (1-200, default 50) | `{issues, errors, truncated}` through the same bounded fan-out as the CLI: up to four repositories at a time, typed per-repository failures in `errors`, and only issue rows. When all repositories fail the response has a forge error status plus `errors`. |
+| `GET /v1/issues/item` | `repo`, `number` | `{issue}`, with the full body. |
+| `POST /v1/issues/create` | `repo`, `title`, optional `body`, `checklist` (strings), `labels` | `{ok:true, issue}`. |
+| `POST /v1/issues/edit` | `repo`, `number`, optional `title`, `body`, `checklist` (`{text,done}`), `addLabels`, `removeLabels`, `state` | `{ok:true, issue}`. |
+| `POST /v1/issues/comment` | `repo`, `number`, `body` | `{ok:true, url}`. |
+| `POST /v1/issues/claim` | `repo`, `number`, optional `computer` (defaults to this computer) and `release` | `{ok:true, issue}`. |
+| `POST /v1/issues/close` | `repo`, `number`, optional `comment` | `{ok:true, issue}`. |
+
+Without `repos`, a list covers every project in every store this Hook reads
+whose repository resolves (`repoForProject`, the same checkout lookup as the
+code index); that set is cached for five minutes. A project takes its
+repository from `issues:` in its `phren.project.yaml`, else its checkout's
+`origin`, preferring a `gitboy` remote for a GitHub origin.
+
+List responses, including errors, are capped at 256 KiB of serialized JSON.
+Bodies show up to 2,000 characters and checklists show up to 16 KiB per row.
+A row carries `truncated: true` when either was shortened. Use
+`/v1/issues/item` for the full body and checklist. The top-level
+`truncated: true` indicates that rows or error details were cut.
+
+Forge failures carry a stable status and a `forge-<code>` code: `auth` is 502,
+`not-found` 404, `forbidden` 403, `rate-limited` 429, `unavailable` 503 and
+`invalid` 400. Claim conflicts return 409 with `forge-conflict`. A malformed body or query is 400. The route never returns a
+token or a forge response body.
 
 ## Schedule editing
 

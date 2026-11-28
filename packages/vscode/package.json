@@ -2,7 +2,7 @@
   "name": "phren-vscode",
   "displayName": "Phren",
   "description": "Browse, search, and manage your Phren memory layer for AI coding agents directly from VS Code.",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "publisher": "alaarab",
   "author": "Ala Arab",
   "license": "MIT",
@@ -138,11 +138,6 @@
         "title": "Phren: Set This Machine's Profile"
       },
       {
-        "command": "phren.addTask",
-        "title": "Phren: Add Task",
-        "icon": "$(add)"
-      },
-      {
         "command": "phren.pinMemory",
         "title": "Phren: Pin Memory"
       },
@@ -168,26 +163,6 @@
         "title": "Phren: Open machines.yaml"
       },
       {
-        "command": "phren.completeTask",
-        "title": "Phren: Complete Task",
-        "icon": "$(check)"
-      },
-      {
-        "command": "phren.removeTask",
-        "title": "Phren: Delete Task",
-        "icon": "$(trash)"
-      },
-      {
-        "command": "phren.pinTask",
-        "title": "Phren: Pin / Unpin Task",
-        "icon": "$(pin)"
-      },
-      {
-        "command": "phren.updateTask",
-        "title": "Phren: Update Task",
-        "icon": "$(edit)"
-      },
-      {
         "command": "phren.removeFinding",
         "title": "Phren: Remove Finding",
         "icon": "$(trash)"
@@ -206,16 +181,6 @@
         "command": "phren.resolveContradiction",
         "title": "Phren: Resolve Contradiction",
         "icon": "$(issues)"
-      },
-      {
-        "command": "phren.linkTaskIssue",
-        "title": "Phren: Link GitHub Issue",
-        "icon": "$(link)"
-      },
-      {
-        "command": "phren.createTaskIssue",
-        "title": "Phren: Create GitHub Issue",
-        "icon": "$(github)"
       },
       {
         "command": "phren.projectConfig",
@@ -324,22 +289,6 @@
           "when": "false"
         },
         {
-          "command": "phren.completeTask",
-          "when": "false"
-        },
-        {
-          "command": "phren.removeTask",
-          "when": "false"
-        },
-        {
-          "command": "phren.pinTask",
-          "when": "false"
-        },
-        {
-          "command": "phren.updateTask",
-          "when": "false"
-        },
-        {
           "command": "phren.removeFinding",
           "when": "false"
         },
@@ -369,14 +318,6 @@
         },
         {
           "command": "phren.resolveContradiction",
-          "when": "false"
-        },
-        {
-          "command": "phren.linkTaskIssue",
-          "when": "false"
-        },
-        {
-          "command": "phren.createTaskIssue",
           "when": "false"
         },
         {
@@ -462,26 +403,6 @@
           "group": "inline"
         },
         {
-          "command": "phren.completeTask",
-          "when": "viewItem == phren.task.active",
-          "group": "inline"
-        },
-        {
-          "command": "phren.removeTask",
-          "when": "viewItem == phren.task.active || viewItem == phren.task.done",
-          "group": "inline"
-        },
-        {
-          "command": "phren.updateTask",
-          "when": "viewItem == phren.task.active",
-          "group": "inline"
-        },
-        {
-          "command": "phren.pinTask",
-          "when": "viewItem == phren.task.active",
-          "group": "inline"
-        },
-        {
           "command": "phren.removeFinding",
           "when": "viewItem == phren.finding",
           "group": "inline"
@@ -500,16 +421,6 @@
           "command": "phren.resolveContradiction",
           "when": "viewItem == phren.finding.contradicted",
           "group": "lifecycle"
-        },
-        {
-          "command": "phren.linkTaskIssue",
-          "when": "viewItem == phren.task.active || viewItem == phren.task.queue",
-          "group": "github"
-        },
-        {
-          "command": "phren.createTaskIssue",
-          "when": "viewItem == phren.task.active || viewItem == phren.task.queue",
-          "group": "github"
         },
         {
           "command": "phren.openSessionOverview",
@@ -621,7 +532,7 @@
           {
             "id": "addFirstProject",
             "title": "Add Your First Project",
-            "description": "Track your workspace so findings and tasks persist.\n\n[Add Project](command:phren.addProject)",
+            "description": "Track your workspace so findings persist.\n\n[Add Project](command:phren.addProject)",
             "completionEvents": [
               "onContext:phren.firstProjectAdded"
             ],
@@ -633,7 +544,7 @@
           {
             "id": "exploreSidebar",
             "title": "Explore the Sidebar",
-            "description": "Browse projects, findings, tasks, and the knowledge graph.\n\n[Open Sidebar](command:phren.explorer.focus)",
+            "description": "Browse projects, findings and the knowledge graph.\n\n[Open Sidebar](command:phren.explorer.focus)",
             "completionEvents": [
               "onView:phren.explorer"
             ],
@@ -706,11 +617,11 @@
             "default": "high",
             "order": 2,
             "enumDescriptions": [
-              "High — Always auto-capture findings and tasks without waiting for explicit signals. Phren actively monitors conversations for insights worth saving.",
+              "High — Always auto-capture findings without waiting for explicit signals. Phren actively monitors conversations for insights worth saving.",
               "Medium — Only auto-capture when explicit signals are detected (e.g. words like 'add finding', 'worth remembering', tags like [decision], [pitfall]). Quieter but still responsive.",
-              "Low — Never auto-capture. Phren only saves findings and tasks when you explicitly use a command or MCP tool. Fully manual."
+              "Low — Never auto-capture. Phren only saves findings when you explicitly use a command or MCP tool. Fully manual."
             ],
-            "markdownDescription": "**Global proactivity level** for both findings and tasks. Controls whether Phren auto-captures insights or waits for explicit signals. Override per-type with the findings and tasks settings below."
+            "markdownDescription": "**Global proactivity level** for both findings. Controls whether Phren auto-captures insights or waits for explicit signals. Override per-type with the findings settings below."
           },
           "phren.proactivityFindings": {
             "type": "string",
@@ -727,40 +638,6 @@
               "Low — Never auto-capture findings. Only saved via explicit add_finding calls."
             ],
             "markdownDescription": "**Override proactivity for findings only.** When set, this takes priority over the global `#phren.proactivity#` for finding capture. Leave at the same level as global proactivity if you don't need a separate override."
-          },
-          "phren.proactivityTasks": {
-            "type": "string",
-            "enum": [
-              "high",
-              "medium",
-              "low"
-            ],
-            "default": "high",
-            "order": 4,
-            "enumDescriptions": [
-              "High — Always auto-capture tasks from conversations (e.g. 'we should fix X' → task created).",
-              "Medium — Only capture tasks when explicit signals detected (e.g. 'add this to tasks', 'put that on the todo list').",
-              "Low — Never auto-capture tasks. Only created via explicit add_task calls."
-            ],
-            "markdownDescription": "**Override proactivity for tasks only.** When set, this takes priority over the global `#phren.proactivity#` for task capture. Leave at the same level as global proactivity if you don't need a separate override."
-          },
-          "phren.taskMode": {
-            "type": "string",
-            "enum": [
-              "off",
-              "manual",
-              "suggest",
-              "auto"
-            ],
-            "default": "auto",
-            "order": 5,
-            "enumDescriptions": [
-              "Off — Task system completely disabled. No task tracking, no task injection into context.",
-              "Manual — Tasks only created when you explicitly request them (e.g. 'add task: fix the login bug').",
-              "Suggest — Agent suggests tasks but waits for your confirmation before adding them. Good for reviewing before committing.",
-              "Auto — Agent adds tasks automatically when it detects actionable work items in conversation. Most hands-off."
-            ],
-            "markdownDescription": "**Task automation mode.** Controls how the agent interacts with the task system. Separate from proactivity — this controls the agent's permission to create/manage tasks, while proactivity controls *when* it tries to."
           },
           "phren.autoExtract": {
             "type": "boolean",

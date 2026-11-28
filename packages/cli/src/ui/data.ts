@@ -15,7 +15,6 @@ import { readCustomHooks } from "../hooks.js";
 import { hookConfigPaths, hookConfigRoots } from "../provider-adapters.js";
 import { readProjectConfig, isProjectHookEnabled, PROJECT_HOOK_EVENTS } from "../project-config.js";
 import { getAllSkills } from "../skill/registry.js";
-import { readTasks, TASKS_FILENAME } from "../data/tasks.js";
 import { FINDINGS_FILENAME, readFindings } from "../data/access.js";
 import { buildIndex, queryDocBySourceKey, queryRows } from "../shared/index.js";
 import type { SqlJsDatabase } from "../shared/index.js";
@@ -55,7 +54,6 @@ export interface GraphNode {
   date?: string;
   /** Project nodes only: real per-project totals for tooltips/labels. */
   findingCount?: number;
-  taskCount?: number;
 }
 
 export interface GraphDocRef {
@@ -107,7 +105,6 @@ interface ProjectInfo {
   storePath: string;
   store?: string;
   findingCount: number;
-  taskCount: number;
   hasClaudeMd: boolean;
   hasSummary: boolean;
   hasReference: boolean;
@@ -308,7 +305,7 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
   const topicMetaMap = new Map<string, GraphTopicMeta>();
   // Track which project nodes have already been pushed (same name may appear in multiple stores)
   const addedProjectNodeIds = new Set<string>();
-  // Project nodes by name so per-project finding/task totals can be stamped after the scans
+  // Project nodes by name so per-project finding totals can be stamped after the scans
   const projectNodeByName = new Map<string, GraphNode>();
 
   // Finding ids are content hashes, so duplicate-text bullets collide — every
@@ -355,7 +352,6 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
           store: storeName,
           tagged: false,
           findingCount: 0,
-          taskCount: 0,
         };
         nodes.push(projectNode);
         projectNodeByName.set(project, projectNode);
@@ -375,7 +371,6 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         store: storeName,
         tagged: false,
         findingCount: 0,
-        taskCount: 0,
       };
       nodes.push(projectNode);
       projectNodeByName.set(project, projectNode);
@@ -549,50 +544,6 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
         for (const snippet of item.contradicts ?? []) edge(snippet, "contradicts", true);
       }
     }
-  }
-
-  // ── Tasks ──────────────────────────────────────────────────────────
-  try {
-    for (const { storePath, project } of storeProjects) {
-      const taskResult = readTasks(storePath, project);
-      if (!taskResult.ok) continue;
-      const taskStoreName = storePathToName.get(storePath) || "unknown";
-      const doc = taskResult.data;
-      let taskCount = 0;
-      const MAX_TASKS = 50;
-      for (const section of ["Active", "Queue"] as const) {
-        const group = section === "Active" ? "task-active" : "task-queue";
-        for (const item of doc.items[section]) {
-          if (taskCount >= MAX_TASKS) break;
-          const nodeId = `${project}:task:${item.id}`;
-          const label = item.line.length > 55 ? `${item.line.slice(0, 52)}...` : item.line;
-          const scoreKey = entryScoreKey(project, TASKS_FILENAME, item.line);
-          nodes.push({
-            id: nodeId,
-            label,
-            fullLabel: item.line,
-            group,
-            project,
-            store: taskStoreName,
-            tagged: false,
-            scoreKey,
-            scoreKeys: [scoreKey],
-            refDocs: [{ doc: `${project}/${TASKS_FILENAME}`, project, scoreKey }],
-            refCount: 0,
-            priority: item.priority,
-            section: item.section,
-          });
-          links.push({ source: project, target: nodeId });
-          taskCount++;
-        }
-      }
-      const projectNode = projectNodeByName.get(project);
-      if (projectNode) {
-        projectNode.taskCount = (projectNode.taskCount || 0) + taskCount;
-      }
-    }
-  } catch {
-    // task loading failed — continue with other data sources
   }
 
   // ── Fragments (fragment graph) ──────────────────────────────────────
@@ -783,11 +734,10 @@ export async function buildGraph(phrenPath: string, profile?: string, focusProje
   const filteredNodes = nodes.filter((n) => n.group !== "project" || connectedIds.has(n.id));
 
   // The counts beside a project are what it holds, not the slice drawn here:
-  // live findings, journal findings, the whole archive, and every open task.
+  // live findings, journal findings, the whole archive.
   for (const [project, projectNode] of projectNodeByName) {
     const counts = projectMemoryCounts(phrenPath, project);
     projectNode.findingCount = counts.findings;
-    projectNode.taskCount = counts.openTasks;
   }
 
   const total = filteredNodes.length;
@@ -837,8 +787,6 @@ function buildProjectInfo(basePath: string, project: string, store?: string): Pr
     }
   }
 
-  // Every open task (Active and Queue), the same number the graph shows.
-  const taskCount = counts.openTasks;
 
   let summaryText = "";
   if (fs.existsSync(summaryPath)) {
@@ -859,7 +807,6 @@ function buildProjectInfo(basePath: string, project: string, store?: string): Pr
     storePath: basePath,
     store,
     findingCount,
-    taskCount,
     hasClaudeMd: fs.existsSync(claudeMdPath),
     hasSummary: fs.existsSync(summaryPath),
     hasReference: fs.existsSync(refPath) && fs.statSync(refPath).isDirectory(),
@@ -912,5 +859,5 @@ export function collectProjectsForUI(phrenPath: string, profile?: string): Proje
     logger.debug("memory-ui", `collectProjectsForUI team stores: ${errorMessage(err)}`);
   }
 
-  return results.sort((a, b) => (b.findingCount + b.taskCount) - (a.findingCount + a.taskCount));
+  return results.sort((a, b) => b.findingCount - a.findingCount);
 }

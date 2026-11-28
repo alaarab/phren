@@ -35,7 +35,6 @@ const SEARCH_TYPES = new Set([
   "summary",
   "findings",
   "reference",
-  "task",
   "changelog",
   "canonical",
   "review-queue",
@@ -67,7 +66,7 @@ function printSearchUsage() {
   console.error("  phren search --project <name> [--type <type>] [--limit <n>] [--all]");
   console.error("  phren search --history                    Show recent searches");
   console.error("  phren search --from-history <n>           Re-run search #n from history");
-  console.error("  type: claude|summary|findings|reference|task|changelog|canonical|review-queue|skill|other");
+  console.error("  type: claude|summary|findings|reference|changelog|canonical|review-queue|skill|other");
 }
 
 function validateAndNormalizeSearchOptions(

@@ -1,5 +1,4 @@
-import { taskReadiness, filterTaskDoc, taskCounts } from "../data/task-contract.js";
-import { moduleEnabled } from "../modules/runtime.js";
+
 /**
  * View rendering functions for the phren interactive shell.
  * Extracted from shell.ts to keep the orchestrator under 300 lines.
@@ -7,15 +6,11 @@ import { moduleEnabled } from "../modules/runtime.js";
 
 import { projectMemoryCounts } from "../content/summarize.js";
 import * as fs from "fs";
-import * as path from "path";
 import {
-  canonicalTaskFilePath,
   listProjectCards,
-  readTasks,
   readFindings,
   readReviewQueue,
   readRuntimeHealth,
-  resolveTaskFilePath,
   ShellState,
 } from "../data/access.js";
 import {
@@ -42,7 +37,6 @@ import {
   type DoctorResultLike,
 } from "./types.js";
 import {
-  tasksByFilter,
   queueByFilter,
 } from "./palette.js";
 import {
@@ -52,9 +46,7 @@ import {
 import { readInstallPreferences } from "../init/preferences.js";
 import { PROJECT_HOOK_EVENTS, isProjectHookEnabled, readProjectConfig } from "../project-config.js";
 import { getScopedSkills } from "../skill/registry.js";
-import { errorMessage } from "../utils.js";
 import { resolveProjectStorePath } from "../cli/namespaces-utils.js";
-import { logger } from "../logger.js";
 import type { GraphController } from "./graph/controller.js";
 import { renderGraphView, graphSummary } from "./graph/graph-view.js";
 
@@ -117,7 +109,6 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
     const labels: Record<string, string> = {
       filter: "filter",
       command: "cmd",
-      add: "add task",
       "learn-add": "add finding",
       "skill-add": "new skill name",
       "graph-search": "search graph",
@@ -130,7 +121,6 @@ function renderBottomBar(state: ShellState, navMode: "navigate" | "input", input
   // the bar never costs more than a single row.
   const essentials: Record<string, string[]> = {
     Projects: [`${k("↑↓")} ${d("move")}`, `${k("↵")} ${d("open")}`, `${k("e")} ${d("edit AGENTS.md")}`],
-    Tasks: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("add")}`, `${k("↵")} ${d("done")}`],
     Findings: [`${k("↑↓")} ${d("move")}`, `${k("a")} ${d("add")}`],
     "Review Queue": [`${k("↑↓")} ${d("move")}`, `${k("↵")} ${d("inspect")}`],
     Skills: [`${k("↑↓")} ${d("move")}`, `${k("e")} ${d("edit")}`, `${k("t")} ${d("toggle")}`],
@@ -170,8 +160,6 @@ interface ProjectDashboardEntry {
   summary: string;
   docs: string[];
   store?: string;
-  activeCount: number;
-  queueCount: number;
   findingCount: number;
   reviewCount: number;
 }
@@ -182,22 +170,17 @@ function collectProjectDashboardEntries(ctx: ViewContext): ProjectDashboardEntry
     if (card.name === "global") {
       return {
         ...card,
-        activeCount: 0,
-        queueCount: 0,
         findingCount: 0,
         reviewCount: 0,
       };
     }
 
     const storePath = resolveProjectStorePath(ctx.phrenPath, card.name);
-    const task = readTasks(storePath, card.name);
     const findings = readFindings(storePath, card.name);
     const review = readReviewQueue(storePath, card.name);
 
     return {
       ...card,
-      activeCount: task.ok ? task.data.items.Active.length : 0,
-      queueCount: task.ok ? task.data.items.Queue.length : 0,
       // Everything the project holds, archive included, as every graph shows it.
       findingCount: findings.ok ? projectMemoryCounts(storePath, card.name).findings : 0,
       reviewCount: review.ok ? review.data.length : 0,
@@ -206,37 +189,29 @@ function collectProjectDashboardEntries(ctx: ViewContext): ProjectDashboardEntry
 }
 
 function renderProjectsDashboard(ctx: ViewContext, entries: ProjectDashboardEntry[], height: number): string[] {
-  const tasksEnabled = moduleEnabled(ctx.phrenPath, "tasks", ctx.profile);
   const runtime = readRuntimeHealth(ctx.phrenPath);
   const scoped = entries.filter((entry) => entry.name !== "global");
   const totals = scoped.reduce((acc, entry) => {
-    acc.active += entry.activeCount;
-    acc.queue += entry.queueCount;
     acc.findings += entry.findingCount;
     acc.review += entry.reviewCount;
     return acc;
-  }, { active: 0, queue: 0, findings: 0, review: 0 });
+  }, { findings: 0, review: 0 });
 
-  const activePreview = scoped
-    .filter((entry) => entry.activeCount > 0 || entry.queueCount > 0)
-    .slice(0, 3)
-    .map((entry) => `${style.bold(entry.name)} ${style.dim(`A${entry.activeCount} · Q${entry.queueCount}`)}`);
   const findingsPreview = scoped
     .filter((entry) => entry.findingCount > 0)
     .slice(0, 3)
     .map((entry) => `${style.bold(entry.name)} ${style.dim(`${entry.findingCount} findings`)}`);
 
   const lines = [
-    `  ${badge(ctx.profile || "default", style.boldBlue)}  ${style.bold(String(scoped.length))} projects  ${style.dim("·")}  ${tasksEnabled ? `${style.boldGreen(String(totals.active))} active  ${style.dim("·")}  ${style.boldYellow(String(totals.queue))} queued  ${style.dim("·")}  ` : ""}${style.boldCyan(String(totals.findings))} findings  ${style.dim("·")}  ${style.boldMagenta(String(totals.review))} review`,
+    `  ${badge(ctx.profile || "default", style.boldBlue)}  ${style.bold(String(scoped.length))} projects  ${style.dim("·")}  ${style.boldCyan(String(totals.findings))} findings  ${style.dim("·")}  ${style.boldMagenta(String(totals.review))} review`,
     ctx.state.project
-      ? `  ${style.green("●")} active context ${style.boldCyan(ctx.state.project)}  ${style.dim(tasksEnabled ? "· ↵ opens selected project tasks" : "· ↵ opens selected project findings")}`
-      : `  ${style.dim("No project selected yet")}  ${style.dim(tasksEnabled ? "· ↵ sets context and opens tasks" : "· ↵ sets context and opens findings")}`,
+      ? `  ${style.green("●")} active context ${style.boldCyan(ctx.state.project)}  ${style.dim("· ↵ opens selected project findings")}`
+      : `  ${style.dim("No project selected yet")}  ${style.dim("· ↵ sets context and opens findings")}`,
     `  ${style.dim("Sync")} ${style.dim(runtime.lastSync?.lastPushStatus || runtime.lastAutoSave?.status || "unknown")}  ${style.dim("·")}  ${style.dim("unsynced")} ${style.bold(String(runtime.lastSync?.unsyncedCommits ?? 0))}  ${style.dim("·")}  ${style.dim("intro")} ${style.cyan(ctx.state.introMode || "once-per-version")}`,
   ];
 
   if (height >= 12) {
     lines.push("");
-    if (tasksEnabled) lines.push(`  ${style.bold("Task pulse")}  ${activePreview.length ? activePreview.join(style.dim("  ·  ")) : style.dim("No active tasks across this profile.")}`);
     lines.push(`  ${style.bold("Recent fragments")}  ${findingsPreview.length ? findingsPreview.join(style.dim("  ·  ")) : style.dim("Nothing yet.")}`);
   }
 
@@ -274,7 +249,7 @@ function renderProjectsView(ctx: ViewContext, cursor: number, height: number): s
     const cursorChar = isSelected ? style.cyan("▶") : " ";
     const bullet = isActive ? style.green("●") : style.dim("○");
     const nameStr = isActive ? style.boldGreen(card.name) : style.bold(card.name);
-    const docsStr = style.dim(`[${moduleEnabled(ctx.phrenPath, "tasks", ctx.profile) ? `A${card.activeCount} · Q${card.queueCount} · ` : ""}F${card.findingCount} · R${card.reviewCount}]`);
+    const docsStr = style.dim(`[F${card.findingCount} · R${card.reviewCount}]`);
     const storeStr = card.store ? `  ${style.dim("·")} ${style.cyan(card.store)}` : "";
 
     let nameRow = `  ${cursorChar} ${bullet} ${nameStr}  ${docsStr}${storeStr}`;
@@ -302,185 +277,6 @@ function renderProjectsView(ctx: ViewContext, cursor: number, height: number): s
   );
   ctx.setScroll(vp.scrollStart);
   return [...dashboardLines, ...vp.lines];
-}
-
-// ── Task helpers ────────────────────────────────────────────────────────
-
-function sectionBullet(title: string): { bullet: string; colorFn: (s: string) => string } {
-  switch (title) {
-    case "Active": return { bullet: style.green("●"), colorFn: style.boldGreen };
-    case "Queue": return { bullet: style.yellow("●"), colorFn: style.boldYellow };
-    case "Done": return { bullet: style.gray("●"), colorFn: style.dim };
-    default: return { bullet: "●", colorFn: style.bold };
-  }
-}
-
-function priorityIndicator(priority?: string, isDone?: boolean): string {
-  if (isDone) return style.dim("○");
-  switch (priority) {
-    case "high": return style.boldRed("●");
-    case "medium": return style.yellow("◐");
-    case "low": return style.dim("○");
-    default: return style.dim("·");
-  }
-}
-
-function taskStatusIcon(section: string, checked?: boolean): string {
-  if (checked || section === "Done") return style.dim("✓");
-  if (section === "Active") return style.magenta("◉");
-  return style.dim("☐");
-}
-
-export interface SubsectionsCache {
-  project: string;
-  /** Keys are stable item IDs (bid hash when present, else "row:N") mapped to subsection name */
-  map: Map<string, string>;
-}
-
-const BID_RE = /<!--\s*bid:([a-z0-9]{8})\s*-->/;
-
-function parseSubsections(taskPath: string, project: string, cache: SubsectionsCache | null): { map: Map<string, string>; cache: SubsectionsCache } {
-  if (cache?.project === project) return { map: cache.map, cache };
-  const map = new Map<string, string>();
-  try {
-    const raw = fs.readFileSync(taskPath, "utf8");
-    let currentSub = "";
-    let rowIdx = 0;
-    for (const line of raw.split("\n")) {
-      const subMatch = line.match(/^###\s+(.+)/);
-      if (subMatch) { currentSub = subMatch[1].trim(); continue; }
-      if (line.match(/^##\s/)) { currentSub = ""; continue; }
-      if (line.startsWith("- ")) {
-        if (currentSub) {
-          const bidMatch = line.match(BID_RE);
-          const key = bidMatch ? bidMatch[1] : `row:${rowIdx}`;
-          map.set(key, currentSub);
-        }
-        rowIdx++;
-      }
-    }
-  } catch (err: unknown) {
-    logger.debug("shell-view", `buildSubsectionMap: ${errorMessage(err)}`);
-  }
-  const newCache = { project, map };
-  return { map, cache: newCache };
-}
-
-// ── Tasks view ─────────────────────────────────────────────────────────────
-
-function renderTaskView(ctx: ViewContext, cursor: number, height: number, subsectionsCache: SubsectionsCache | null): { lines: string[]; subsectionsCache: SubsectionsCache | null } {
-  const cols = renderWidth();
-  const project = ctx.state.project;
-  if (!project) {
-    return { lines: [style.dim("  No project selected — navigate to Projects (← →) and press ↵")], subsectionsCache };
-  }
-
-  const storePath = resolveProjectStorePath(ctx.phrenPath, project);
-  const result = readTasks(storePath, project);
-  if (!result.ok) return { lines: [result.error], subsectionsCache };
-
-  const parsed = filterTaskDoc(ctx.phrenPath, result.data, { responsibility: ctx.state.taskResponsibility });
-  const counts = taskCounts(ctx.phrenPath, result.data);
-  const laneHeader = `  ${ctx.state.taskResponsibility ?? "Human + Agent"} · Human ${counts.human} · Agent ready ${counts.agentReady} · Waiting ${counts.agentWaitingOnHuman + counts.agentWaitingOnTask} (:lane human|agent|all)`;
-  const warnings = parsed.issues.length
-    ? [`  ${style.yellow("⚠")}  ${style.yellow(parsed.issues.join("; "))}`, ""]
-    : [];
-
-  const taskFile = resolveTaskFilePath(storePath, project)
-    ?? canonicalTaskFilePath(storePath, project)
-    ?? path.join(storePath, project, "tasks.md");
-  const subsResult = parseSubsections(taskFile, project, subsectionsCache);
-  const subsections = subsResult.map;
-  const newCache = subsResult.cache;
-
-  const active = ctx.state.filter ? tasksByFilter(parsed.items.Active, ctx.state.filter) : parsed.items.Active;
-  const queue = ctx.state.filter ? tasksByFilter(parsed.items.Queue, ctx.state.filter) : parsed.items.Queue;
-  const done = ctx.state.filter ? tasksByFilter(parsed.items.Done, ctx.state.filter) : parsed.items.Done;
-  const flatItems = [...active, ...queue, ...done];
-
-  if (!flatItems.length) {
-    const hint = ctx.state.filter ? "  No items match the filter." : `  No tasks yet. Press ${style.boldCyan("a")} to add one.`;
-    return { lines: [...warnings, style.dim(hint)], subsectionsCache: newCache };
-  }
-
-  const queueStart = active.length;
-  const doneStart = active.length + queue.length;
-
-  const allLines: string[] = [style.dim(laneHeader)];
-  let cursorFirstLine = 0;
-  let cursorLastLine = 0;
-  let lastSection = "";
-  let lastSub = "";
-
-  for (let absIdx = 0; absIdx < flatItems.length; absIdx++) {
-    const item = flatItems[absIdx];
-    const isSelected = absIdx === cursor;
-    const isDone = absIdx >= doneStart;
-
-    const section = absIdx < queueStart ? "Active" : absIdx < doneStart ? "Queue" : "Done";
-    if (section !== lastSection) {
-      lastSection = section;
-      lastSub = "";
-      const { bullet, colorFn } = sectionBullet(section);
-      if (allLines.length > 0) allLines.push("");
-      allLines.push(`  ${bullet} ${colorFn(section)}`);
-    }
-
-    const sub = (item.stableId ? subsections.get(item.stableId) : undefined) ?? subsections.get(`row:${absIdx}`) ?? "";
-    if (sub && sub !== lastSub) {
-      lastSub = sub;
-      allLines.push(`    ${style.boldYellow(sub)}`);
-    }
-
-    if (isSelected) cursorFirstLine = allLines.length;
-
-    const prioIcon = priorityIndicator(item.priority, isDone);
-    const statusIcon = taskStatusIcon(section, item.checked);
-    const pinTag = item.pinned ? ` ${style.boldCyan("★")}` : "";
-    const ghTag = item.githubIssue
-      ? ` ${style.dim("[")}${style.cyan(`#${item.githubIssue}`)}${style.dim("]")}`
-      : "";
-    const lineText = isDone ? style.dim(item.line) : item.line;
-    const idStr = style.dim(item.id.padEnd(3));
-
-    const ready = taskReadiness(ctx.phrenPath, result.data, item);
-    const laneTag = ` [${ready.responsibility} · ${ready.readiness}]`;
-    let row = `    ${prioIcon} ${statusIcon} ${idStr} ${lineText}${pinTag}${ghTag}${laneTag}`;
-    row = isSelected && !isDone
-      ? formatSelectableLine(row, cols, true)
-      : truncateLine(row, cols);
-    allLines.push(row);
-
-    for (const prerequisite of ready.prerequisites) {
-      const responsibility = prerequisite.missing ? "Unknown responsibility" : prerequisite.responsibility === "human" ? "Human" : "Agent";
-      allLines.push(truncateLine(`              ${prerequisite.missing ? "Unavailable" : prerequisite.completed ? "✓" : "Waiting on"} [${responsibility}] ${prerequisite.title}`, cols));
-      // Identity components are validated ASCII. Wrap rather than truncate so
-      // similarly titled cross-store tasks stay distinguishable in narrow panes.
-      const identity = `${prerequisite.storeId}/${prerequisite.project}/${prerequisite.stableId}`;
-      const indent = " ".repeat(Math.min(14, Math.max(0, cols - 1)));
-      const width = Math.max(1, cols - indent.length);
-      for (let start = 0; start < identity.length; start += width) allLines.push(indent + identity.slice(start, start + width));
-    }
-    if (item.context) {
-      const ctxLine = `              ${style.dimItalic("→ " + item.context)}`;
-      allLines.push(isSelected && !isDone ? formatSelectableLine(ctxLine, cols, true) : truncateLine(ctxLine, cols));
-    }
-
-    if (isSelected) cursorLastLine = allLines.length - 1;
-  }
-
-  const usableHeight = Math.max(1, height - warnings.length - (allLines.length > height ? 1 : 0));
-  const vp = viewportWithStatus(
-    allLines,
-    cursorFirstLine,
-    cursorLastLine,
-    usableHeight,
-    ctx.currentScroll(),
-    cursor,
-    active.length + queue.length,
-  );
-  ctx.setScroll(vp.scrollStart);
-  return { lines: [...warnings, ...vp.lines], subsectionsCache: newCache };
 }
 
 // ── Findings view ──────────────────────────────────────────────────────────
@@ -906,9 +702,7 @@ export async function renderShell(
   helpScroll: number,
   message: string,
   doctorSnapshot: () => Promise<DoctorResultLike>,
-  subsectionsCache: SubsectionsCache | null,
   setHealthLineCount: (n: number) => void,
-  setSubsectionsCache: (c: SubsectionsCache | null) => void,
 ): Promise<string> {
   const graphSummaryLine = ctx.state.view === "Graph" && ctx.graph ? graphSummary(ctx.graph()) : "";
   const topBar = renderTopBar(ctx.state, graphSummaryLine, enabledSubViews(ctx.phrenPath, ctx.profile));
@@ -922,7 +716,7 @@ export async function renderShell(
   if (showHelp) {
     // The help is longer than a small terminal, and used to be clipped in
     // silence — on 24 rows more than half of it simply was not there.
-    const all = shellHelpText().split("\n").filter(line => moduleEnabled(ctx.phrenPath, "tasks", ctx.profile) || !/task/i.test(stripAnsi(line)));
+    const all = shellHelpText().split("\n");
     if (all.length <= height) {
       contentLines = all;
     } else {
@@ -937,12 +731,6 @@ export async function renderShell(
       case "Projects":
         contentLines = renderProjectsView(ctx, cursor, height);
         break;
-      case "Tasks": {
-        const result = renderTaskView(ctx, cursor, height, subsectionsCache);
-        contentLines = result.lines;
-        setSubsectionsCache(result.subsectionsCache);
-        break;
-      }
       case "Findings":
         contentLines = renderFindingsView(ctx, cursor, height);
         break;

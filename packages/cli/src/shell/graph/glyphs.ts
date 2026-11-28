@@ -14,7 +14,6 @@ export type GlyphSet = Record<NodeKind, string>;
 const UNICODE: GlyphSet = {
   project: "◉",
   finding: "✦",
-  task: "▤",
   entity: "❖",
   reference: "▣",
   topic: "◆",
@@ -25,7 +24,6 @@ const UNICODE: GlyphSet = {
 const NERD: GlyphSet = {
   project: "", // nf-fa-folder
   finding: "", // nf-fa-lightbulb_o
-  task: "", // nf-fa-check_square_o
   entity: "", // nf-fa-share_alt (node graph)
   reference: "", // nf-fa-book
   topic: "", // nf-fa-tag

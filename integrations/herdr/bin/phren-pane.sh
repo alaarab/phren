@@ -14,7 +14,7 @@ fi
 args=(shell --here)
 case "$view" in
   dashboard) ;;
-  tasks)     args+=(--view tasks) ;;
+  findings)  args+=(--view findings) ;;
   findings)  args+=(--view findings) ;;
   review)    args+=(--view review) ;;
   *)         args+=(--view "$view") ;;

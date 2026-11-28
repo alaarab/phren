@@ -114,10 +114,10 @@ describe("CLI integration: doctor", () => {
 });
 
 describe("CLI integration: no store", () => {
-  it("says to run init, not to enable a module, for a module command", () => {
+  it("asks the user to initialize a store before listing issues", () => {
     const tmp = makeTempDir("phren-cli-nostore-");
     try {
-      const { stderr, exitCode } = runCli(["task", "list"], { PHREN_PATH: path.join(tmp.path, "missing"), HOME: tmp.path });
+      const { stderr, exitCode } = runCli(["issue", "list"], { PHREN_PATH: path.join(tmp.path, "missing"), HOME: tmp.path });
       expect(exitCode).toBe(1);
       expect(stderr).toContain("phren init");
       expect(stderr).not.toContain("is disabled");
@@ -470,7 +470,6 @@ describe("CLI integration: search edge cases", () => {
     fs.mkdirSync(projDir, { recursive: true });
     fs.writeFileSync(path.join(projDir, "FINDINGS.md"), "# alpha FINDINGS\n\n## 2025-06-01\n\n- caching layer timeout fix\n- database connection pool sizing\n");
     fs.writeFileSync(path.join(projDir, "summary.md"), "# alpha\n\n**What:** A caching project\n");
-    fs.writeFileSync(path.join(projDir, "tasks.md"), "# alpha Task\n\n## Active\n\n- Implement retry logic\n\n## Queue\n\n- Refactor config loader\n\n## Done\n\n- Initial setup\n");
     fs.writeFileSync(path.join(projDir, "truths.md"), "# Truths\n\n- Always use UTC timestamps (pinned)\n");
     fs.writeFileSync(path.join(projDir, "AGENTS.md"), "# alpha\n\nProject-level instructions for alpha.\n");
   });
@@ -808,73 +807,9 @@ describe("CLI integration: skill-list", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// NEW TESTS: tasks command
 // ────────────────────────────────────────────────────────────────────────────
 
-describe("CLI integration: tasks", () => {
-  let phrenDir: string;
-  let cleanup: () => void;
 
-  beforeEach(() => {
-    ({ phrenDir, cleanup } = setupPhrenDir());
-  });
-
-  afterEach(() => cleanup());
-
-  it("prints no tasks found when none exist", () => {
-    const { stdout, exitCode } = runCli(
-      ["tasks"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toMatch(/(No tasks found|All tasks are empty)/);
-  });
-
-  it("names an unknown project instead of saying no tasks", () => {
-    const { stderr, exitCode } = runCli(["task", "list", "no-such-project"], { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" });
-    expect(exitCode).toBe(1);
-    expect(stderr).toMatch(/"no-such-project" is neither a profile nor a project/);
-  });
-
-  it("lists active and queued items", () => {
-    const projDir = path.join(phrenDir, "task-proj");
-    fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(projDir, "tasks.md"),
-      "# task-proj Task\n\n## Active\n\n- Fix login bug\n- Update dependencies\n\n## Queue\n\n- Add dark mode\n\n## Done\n\n- Setup project\n"
-    );
-
-    const { stdout, exitCode } = runCli(
-      ["tasks"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("task-proj");
-    expect(stdout).toContain("Fix login bug");
-    expect(stdout).toContain("Add dark mode");
-    expect(stdout).toContain("2 active, 1 queued");
-  });
-
-  it("handles multiple projects", () => {
-    for (const name of ["proj-a", "proj-b"]) {
-      const projDir = path.join(phrenDir, name);
-      fs.mkdirSync(projDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(projDir, "tasks.md"),
-        `# ${name} Task\n\n## Active\n\n- Task for ${name}\n\n## Queue\n\n## Done\n\n`
-      );
-    }
-
-    const { stdout, exitCode } = runCli(
-      ["tasks"],
-      { PHREN_PATH: phrenDir, PHREN_ACTOR: "cli-test" }
-    );
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("proj-a");
-    expect(stdout).toContain("proj-b");
-    expect(stdout).toContain("2 active, 0 queued");
-  });
-});
 
 // ────────────────────────────────────────────────────────────────────────────
 // NEW TESTS: unknown command
@@ -1175,7 +1110,7 @@ describe("CLI integration: help and health", () => {
       store = setupIsolatedCliEnv("phren-help-");
       grantAdmin(store.phrenDir);
       fs.writeFileSync(path.join(store.phrenDir, ".config", "modules.yaml"), "version: 1\nenabled:\n"
-        + ["memory", "tasks", "hook", "git", "schedules", "conductor", "fanout", "code"].map(name => `  ${name}: true\n`).join(""));
+        + ["memory", "hook", "git", "schedules", "conductor", "fanout", "code"].map(name => `  ${name}: true\n`).join(""));
     });
     afterAll(() => store.cleanup());
     for (const cmd of namespaces) {

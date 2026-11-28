@@ -70,7 +70,7 @@ Runtime path resolution order:
     keyword extraction + synonym expansion
     lexical-first FTS5 retrieval
     optional vector fallback when lexical confidence is low
-    recency/task-aware reranking
+    recency and intent reranking
 
 [3] Governance
     citation checks + confidence decay + policy gates
@@ -120,7 +120,6 @@ their old database handles until they finish. No Hook restart is involved.
 Phren MCP is split into 15 modules:
 
 1. Search and browse
-2. Task management
 3. Finding capture and lifecycle
 4. Daily notes
 5. Memory quality
@@ -161,7 +160,6 @@ All state stays local as files (markdown/json), with git as transport in shared 
     FINDINGS.md
     notes/
       YYYY-MM-DD.md
-    tasks.md
     review.md
     truths.md
     reference/
@@ -190,7 +188,6 @@ All state stays local as files (markdown/json), with git as transport in shared 
     last-summary.json
 
   .sessions/
-    checkpoint-<project>-<task>.json
 ```
 
 ## Findings: Lifecycle, Provenance, Impact
@@ -204,7 +201,6 @@ Findings now carry richer state:
 Impact scoring pipeline:
 
 1. injected findings are logged by ID when surfaced in context
-2. session completion checks for task completion in that session
 3. completed outcomes update impact logs
 4. high-impact findings get boosted in future retrieval
 
@@ -213,10 +209,9 @@ Impact scoring pipeline:
 Session continuity has three parts:
 
 - `session_start` returns prior summary + recent findings + checkpoint hints
-- `session_end` writes summary and task checkpoint snapshots
+- `session_end` writes a summary
 - `session_history` lists sessions or returns detailed session artifacts
 
-Task checkpoints include task ID/text, edited files, failing tests, and resume hints (`lastAttempt` and `nextStep`). Completed tasks clear their checkpoint files.
 
 ## Skill Resolution System
 
@@ -279,7 +274,6 @@ Retrieval is optimized for bounded context usage:
 - lexical-first FTS5 path handles most queries
 - vector fallback runs only when lexical confidence is weak
 - progressive disclosure keeps injection bounded (`PHREN_CONTEXT_TOKEN_BUDGET`)
-- task APIs support summary/pagination/single-item fetch patterns
 
 This keeps memory growth and prompt context growth decoupled.
 
@@ -356,7 +350,7 @@ Hook to run now or list local history. See [Scheduled prompts](schedules.md).
 
 ## Conductor
 
-The conductor is the owner's single conversation that reads a project's tasks
+The conductor is the owner's single conversation that reads a project's issues
 and sends independent worker briefs across enrolled computers. The first slice
 covers enrollment and placement: a reusable restricted dispatch key, pinned SSH
 peers in the Hook's private `hooks.yaml`, `POST /v1/dispatch` with named or

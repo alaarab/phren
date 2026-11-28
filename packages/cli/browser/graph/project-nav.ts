@@ -74,20 +74,15 @@ function injectNavCss(): void {
 
 let navEl: HTMLElement | null = null;
 
-/** findings/tasks count for a project — payload-sourced, adjacency fallback. */
-function projectCounts(node: RuntimeNode): { findings: number; tasks: number } {
+/** findings count for a project — payload-sourced, adjacency fallback. */
+function projectFindings(node: RuntimeNode): number {
   const adjacency = state.fullAdjacency.get(node.id);
   const findings = typeof node.findingCount === "number"
     ? node.findingCount
     : adjacency
       ? [...adjacency].filter((id) => state.nodeById.get(id)?.kind === "finding").length
       : 0;
-  const tasks = typeof node.taskCount === "number"
-    ? node.taskCount
-    : adjacency
-      ? [...adjacency].filter((id) => state.nodeById.get(id)?.kind === "task").length
-      : 0;
-  return { findings, tasks };
+  return findings;
 }
 
 /** The project nodes currently on screen, ordered by name for a stable dock. */
@@ -135,10 +130,10 @@ export function buildProjectNav(): void {
   navEl.removeAttribute("hidden");
 
   const orbs = projects.map((node) => {
-    const { findings, tasks } = projectCounts(node);
-    const total = findings + tasks;
+    const findings = projectFindings(node);
+    const total = findings;
     const active = state.focusedProjectId === node.id ? " active" : "";
-    const title = `${node.label} · ${findings} findings · ${tasks} tasks`;
+    const title = `${node.label} · ${findings} findings`;
     return (
       `<button type="button" class="phren-project-orb${active}" data-project-id="${esc(node.id)}" title="${esc(title)}">` +
       `<span class="phren-project-dot" style="background:${esc(node.baseColor)};color:${esc(node.baseColor)}"></span>` +

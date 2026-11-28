@@ -35,12 +35,18 @@ export function startProbe<T extends ChildProcess>(start: () => T, kill: (child:
 }
 
 type Output<T> = { stdout: T; stderr: T };
-export function execProbe(file: string, args: readonly string[], options: ExecFileOptions & { encoding: "buffer" }): Promise<Output<Buffer>>;
-export function execProbe(file: string, args: readonly string[], options: ExecFileOptions & { encoding?: BufferEncoding }): Promise<Output<string>>;
-export async function execProbe(file: string, args: readonly string[], options: ExecFileOptions & { encoding?: BufferEncoding | "buffer" }): Promise<Output<string | Buffer>> {
+type ProbeOptions = ExecFileOptions & { input?: string };
+export function execProbe(file: string, args: readonly string[], options: ProbeOptions & { encoding: "buffer" }): Promise<Output<Buffer>>;
+export function execProbe(file: string, args: readonly string[], options: ProbeOptions & { encoding?: BufferEncoding }): Promise<Output<string>>;
+export async function execProbe(file: string, args: readonly string[], { input, ...options }: ProbeOptions & { encoding?: BufferEncoding | "buffer" }): Promise<Output<string | Buffer>> {
   if (stopping) throw new Error("The Hook is shutting down.");
   const result = exec(file, args, options);
   if (result.child) track(result.child, forceKill);
+  if (input !== undefined && result.child?.stdin) {
+    // A command can exit before reading stdin, for example when authentication fails.
+    result.child.stdin.on("error", () => {});
+    result.child.stdin.end(input);
+  }
   return result;
 }
 

@@ -5,9 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-28
+
 ### Added
 
-- Owner Inbox items can carry an `issue` link (`domain/owner/name#N`), accepted by `phren owner-inbox add --issue`, `owner_inbox` and the Hook add route. It is stored inside the item's title (`" (issue: <ref>)"`), so a 0.3.100 Hook and older phones keep reading every row; readers that ask for it (`issues=1`) receive the structured field instead. A linked title is stored whole: one that does not fit beside the link (500 characters together) is refused with 400 rather than trimmed. Capability `ownerInboxIssues`.
+- Manage GitHub and gitboy issues through `phren issue`, MCP, and the owner-only `/v1/issues` Hook routes. Create and edit issues with checklists, claim them for a computer, comment, and close them.
+- Dispatches can carry a forge issue. The worker brief asks for one summary comment and a closing reference in its PR. Dispatch returns show the issue and `dispatch_report` posts each PR link once.
+- Owner Inbox items can link to a forge issue through the CLI, MCP, and Hook.
+
+### Fixed
+
+- Publish `@phren/code` 0.2.15 with support for the 0.4 CLI series.
+
+### Removed
+
+- Phren's local Tasks feature across the CLI, Hook, editor extension, desktop, and plugins. Existing `tasks.md` files stay on disk and are unused. The Tasks screen in older phone apps stops working when connected to a 0.4.0 Hook.
 
 ## [0.3.101] - 2026-11-27
 

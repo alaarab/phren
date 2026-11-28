@@ -9,18 +9,18 @@ MCP and Hook processes to publish a changed tool or route list. Third-party
 loading, live adapter replacement and a code-map implementation remain future
 work.
 
-Phren must remain useful as memory alone. Tasks, the phone Hook, repository
+Phren must remain useful as memory alone. The phone Hook, repository
 Changes, scheduled prompts, conductor and a future code map are independently
 enabled contributions. Disabling one removes its active surface and background
 work while preserving its data for re-enablement. No module switch uninstalls
-the user's agents, deletes their tasks or stops an agent they launched.
+the user's agents, stops an agent they launched.
 
 ## Runtime integration boundaries
 
 | Surface | Previous behavior | Runtime boundary |
 | --- | --- | --- |
 | `packages/cli/src/index.ts` | Imports all 15 `tools/*` registrars and calls `gate.finish()` | Resolve modules before importing optional registrars |
-| `packages/cli/src/mcp/profile.ts` | `core` exposes ten tools; the catalog keeps all tools, composites dispatch into it | Filter catalog membership by module first, then apply the MCP presentation profile |
+| `packages/cli/src/mcp/profile.ts` | `core` exposes twelve tools; the catalog keeps all tools, composites dispatch into it | Filter catalog membership by module first, then apply the MCP presentation profile |
 | `packages/cli/src/cli-registry.ts` | One unconditional catalog drives dispatch and help | Filter commands, aliases and nested subcommands together |
 | `packages/cli/src/init/config.ts`, `hooks.ts` | Install memory lifecycle callbacks and wrappers | Reconcile only enabled contributions, respecting management presets |
 | `packages/cli/src/bridge/install.ts` | Installs phone callbacks, usage status line and the OpenCode transcript plugin | Split Hook lifecycle callbacks from Git change capture; reconcile by owner |
@@ -58,7 +58,7 @@ version; external modules will version independently.
 
 The seven built-ins are enumerated in
 [`modules/registry.ts`](../packages/cli/src/modules/registry.ts). Tool names,
-CLI paths and HTTP/WS routes there refer to current implementations. Capability names (`memory`, `tasks`, `hook`, `git`, `schedules`) are emitted
+CLI paths and HTTP/WS routes there refer to current implementations. Capability names (`memory`, `hook`, `git`, `schedules`) are emitted
 from the same snapshot that gates Hook routes.
 
 Declarations are an ownership inventory, not a complete filesystem deletion
@@ -81,8 +81,7 @@ descendants appear in help or dispatch.
 
 | Module | Default for a new store | Current contributions |
 | --- | --- | --- |
-| `memory` | Required | Findings, notes, truths, review, summaries, search, fragment graph, memory session continuity, skills, governance, project/store configuration, memory lifecycle integration and store sync |
-| `tasks` | Off | Seven task handlers plus `manage_task`; `task`/`tasks`; `tasks.md`, task checkpoints and task UI |
+| `memory` | Required | Findings, notes, truths, review, summaries, search, fragment graph, memory session continuity, forge issues (`phren issue`, the issue MCP tools), skills, governance, project/store configuration, memory lifecycle integration and store sync |
 | `hook` | Off | `bridge` service and phone transport, native agent chat, approvals, workspace control, transcript/subagent reading, files, web previews, usage and simulators |
 | `git` | Off | `auto_extract_findings`, `maintain extract`/`extract-memories`, repository diffs and `/v1/git/*`, change capture and Changes UI |
 | `schedules` | Off | `schedule`, project `schedules.yaml`, scheduler, run history and Schedules UI |
@@ -93,8 +92,6 @@ All optional modules require memory; conductor also requires Hook. Git and
 schedules can manage their local/store data without Hook. Their phone routes
 and host services require both the owner and Hook. A disabled Hook does not
 prevent editing schedule definitions; it does prevent running their scheduler.
-Tasks have no Hook routes today: the phone reads and writes tasks through store
-sync. No invented task MCP tools or REST routes are needed for this split.
 
 Memory-store Git transport belongs to memory: `push_changes`, `background-sync`,
 pull polling and the `phren-sync` skill keep working without the Git module.
@@ -120,8 +117,7 @@ Claude runs the small `claude-hook.mjs claude` forwarder beside it. Copilot gets
 `SessionStart` and `UserPromptSubmit`. The manifest assigns the two tool-use
 events to Git because `AgentHooks` uses them for before/after change snapshots.
 The OpenCode transcript/approval plugin and Claude usage status line belong to
-Hook. Task-related work currently embedded in memory session handlers must be
-extracted into optional callbacks without installing a duplicate agent process.
+Hook. extracted into optional callbacks without installing a duplicate agent process.
 
 ## The memory-only guarantee
 
@@ -132,11 +128,7 @@ search_knowledge  get_memory_detail  get_project_summary  add_finding
 revise_finding    session            phren_admin
 ```
 
-Enabling tasks adds `get_tasks`, `add_task` and `manage_task`, preserving today's
-ten-tool core surface for installations that enable tasks. This deliberately defines a
-seven-tool memory core rather than keeping inert task tools in memory. The
-`CORE_TOOLS` ordering remains stable; the gate intersects it with the enabled
-manifests before building the presentation.
+
 
 `full` remains an explicit presentation choice: it exposes all tools of the
 enabled modules, not every installed module. Memory's remaining handlers stay
@@ -145,12 +137,10 @@ Neither the admin dispatcher nor a composite may reach an unregistered optional
 handler. Config/admin tools also cannot toggle a disabled subsystem indirectly.
 Calling a disabled name returns a structured unavailable/unknown-tool error.
 
-An initialized memory-only store, with `tasks: false`, must have:
+An initialized memory-only store must have:
 
 - Only memory-owned commands, skill mirrors, files and lifecycle callbacks.
   Management commands, including module management, remain available for repair.
-- No task templates, task checkpoints, task indexing/reranking, task counts or
-  task guidance in generated summaries, instructions, help or prompts.
 - No phone Hook service, socket, SSH wiring, transcript plugin, phone callbacks,
   repository change snapshots, scheduler, dispatch receipts or conductor skill.
 - No optional registrar imports, background workers, timers or model schema
@@ -187,7 +177,6 @@ install preferences and the existing `profiles/*.yaml` project membership:
 ```yaml
 version: 1
 enabled:
-  tasks: true
   hook: false
   git: false
   schedules: false
@@ -201,7 +190,6 @@ profiles:
       conductor: true
   personal:
     enabled:
-      tasks: false
 ```
 
 Resolution is built-in defaults, then store overrides, then the selected store
@@ -223,7 +211,6 @@ The management commands are:
 phren modules list
 phren modules list --store personal --profile work
 phren modules enable git --store personal
-phren modules disable tasks --store personal --profile work
 ```
 
 Without `--store`, use the selected primary store (`PHREN_PATH` can select it).
@@ -243,8 +230,7 @@ is no implicit cascading disable and no deletion of optional data.
 Each process resolves one store/profile snapshot before activation. Registrars
 consume that snapshot, not their own interpretations of the config. In a
 multi-store server the exposed tool set is the union needed by its accessible
-stores, but each handler rechecks its target store and profile. A task tool
-exposed for one store cannot operate on a second store with tasks disabled.
+stores. Each handler checks its target store and profile.
 
 | Consumer | Consultation point and invariant |
 | --- | --- |
@@ -290,7 +276,6 @@ to booleans or claim every declaration is operational.
 | Owner | Capabilities and conditions | Phone surface |
 | --- | --- | --- |
 | memory | New `memory`; also available from synced store config without Hook | Projects, findings, notes, review, search and memory graph |
-| tasks | New `tasks`, from the selected store/profile | Tasks tab, project task section and task actions |
 | hook | New `hook`; existing `transcript`, `progress`, `images`, `prompt`, `stop`, `terminal`, `shell`, `herdr`, `webServers`, `webPreview`, `activity`, `approvals`, `accountUsage`, `providers`, `files`, `repositoryFiles`, `subagents`, `approvalPush`; `simulators` and `simulatorStream` only where supported | Agents, chat, terminal, files, previews and supported host extras |
 | git | New `git`, existing `diff`, when Git and Hook routes are active | Changes, History, Branches, PRs, Working tree and transcript diff actions |
 | code | New `code`, when Code and Hook routes are active; each project needs its own index | Code cell on the project page: what changed, search and a function's or type's details |
@@ -311,18 +296,18 @@ decodes `LiveWorkspaces`. The model now retains the `phren` capability map and c
 `webPreview` capability, and `AgentInteractions` checks question capabilities,
 but those checks do not govern overall navigation.
 
-Before module negotiation, `MainTabView` in `PhrenApp.swift` always creates Projects, Agents, Tasks,
+Before module negotiation, `MainTabView` in `PhrenApp.swift` always creates Projects, Agents,
 Search and Settings. Readiness chooses onboarding/content. `ProjectsView` and
 `AgentsView` add Schedules links without a module check; `AgentChatView` adds
 Changes when it has a target; `AgentChangesView` renders all Changes sections.
 
 The phone must retain typed capabilities in `LiveWorkspaces` and its session
 model, and resolve synced `.config/modules.yaml` in PhrenKit using the same
-fixtures as TypeScript. Memory and task navigation uses the selected store's
+fixtures as TypeScript. Memory navigation uses the selected store's
 config even if no host is connected. Live operations use the selected host's
 negotiated capabilities, intersected with store enablement where applicable;
 never use one computer's capabilities for another. A host without a store
-context advertises only its host services, never another store's task access.
+context advertises only its host services, .
 
 On a capability change, cancel hidden screens' polls and streams, remove their
 navigation links and move an invalid tab/selection to Projects (or Settings
@@ -342,8 +327,6 @@ Do not apply new-store defaults to existing live registrations. Before the
 first release that gates consumers, migrate existing installs once under a
 store lock and save explicit overrides:
 
-1. Memory remains required and tasks enabled. Preserve task files, task mode
-   and project policies; an existing inactive task policy stays inactive.
 2. Existing memory CLI/MCP installs get Git enabled to preserve today's
    extraction surface. Do not turn on a feature flag that was off.
 3. A machine with an installed Hook maps its currently bundled phone, Git,
@@ -371,7 +354,7 @@ a separate operation.
 
 Runtime activation migrates legacy stores once, preserving explicit config if
 already present. A fresh `phren init` writes a version-only config before
-provisioning, so it uses the memory/tasks defaults. Existing memory installs
+provisioning, so it uses the memory defaults. Existing memory installs
 retain Git extraction; an existing Hook or conductor installation preserves its
 bundled optional surfaces. Migration records explicit values and keeps its
 backup in the git-ignored `.runtime/` directory. It does not
@@ -386,8 +369,8 @@ contract together; adapter hot replacement remains deferred. None requires imple
 | --- | --- | --- |
 | 1 | Declaration inventory: `modules/manifest.ts`, `modules/registry.ts`, `modules/registry.test.ts`, `cli-registry.ts`, this document and root changelog | Inventory matches current MCP registrations, commands, routes and skills; missing/default/store/profile/invalid/dependency configs; read-only list dispatch; memory declarations through the existing gate |
 | 2 | Config writer and migration: `modules/config.ts` (new), `init/setup.ts`, `init/preferences.ts`, `profile-store.ts`, `cli-registry.ts`, `cli/namespaces-store.ts` | Atomic concurrent updates, idempotent migration, new and legacy stores, differing host profiles, no service install from synced config, dependency errors, preservation of disabled data |
-| 3 | MCP catalog ownership: `index.ts`, `mcp/profile.ts`, `tools/tasks.ts`, `tools/session.ts`, `tools/finding.ts`, `tools/extract.ts`, `tools/dispatch.ts` | Exactly seven memory core tools; ten with tasks; `full` excludes disabled modules; admin/composite bypass attempts fail; no optional imports; target-store enforcement; VS Code full-profile contract |
-| 4 | CLI and active views: `entrypoint.ts`, `cli-registry.ts`, `cli-help.ts`, `cli/namespaces-tasks.ts`, `cli/govern.ts`, `shell/`, `ui/memory-ui.ts`, `packages/cli/browser/` | Help and execution agree; disabled aliases, nested and internal commands cannot bypass; repair works on invalid config; task panes and counts disappear; read-only list remains cheap |
+| 3 | MCP catalog ownership: `index.ts`, `mcp/profile.ts`, `tools/session.ts`, `tools/finding.ts`, `tools/extract.ts`, `tools/dispatch.ts` | Nine core tools; ten with tasks; `full` excludes disabled modules; admin/composite bypass attempts fail; no optional imports; target-store enforcement; VS Code full-profile contract |
+| 4 | CLI and active views: `entrypoint.ts`, `cli-registry.ts`, `cli-help.ts`, `cli/govern.ts`, `shell/`, `ui/memory-ui.ts`, `packages/cli/browser/` | Help and execution agree; disabled aliases, nested and internal commands cannot bypass; repair works on invalid config; task panes and counts disappear; read-only list remains cheap |
 | 5 | Provisioning, hooks and memory cross-cutting behavior: `init/setup.ts`, `init/config.ts`, `hooks.ts`, `link/refresh.ts`, `bridge/install.ts`, `cli/session-start.ts`, `cli/session-stop.ts`, `cli/session-tool-hook.ts`, `shared/index.ts`, `shared/retrieval.ts`, `content/summarize.ts`, `starter/` | Fresh memory-only filesystem and agent-setting snapshots; repair/update never reintroduce optional files; preserved third-party hooks; no task search/index/summary/checkpoints; no source-repo extraction without Git; all shipped skills owned |
 | 6 | Hook route/resource adapters: `bridge/server.ts`, `bridge/transport.ts`, `bridge/agent-hooks.ts`, `bridge/changes.ts`, `bridge/schedules.ts`, `bridge/dispatch.ts`, `bridge/install.ts` | HTTP/WS/SSH and callback routes agree with capabilities; no scheduler/retention/dispatch startup when disabled; profile isolation; drain/reload and failed-prepare rollback; no accidental worker termination or receipt retry |
 | 7 | Phone negotiation and navigation: `PhrenLive/.../PhrenConnection.swift`, `PhrenKit/.../Sessions/LiveSessions.swift`, `PhrenKit/.../Sessions/SessionDiscovery.swift`, `Phren/AppModel.swift`, `Phren/PhrenApp.swift`, `Features/Projects/ProjectsView.swift`, `Features/Agents/{AgentsView,AgentChatView,AgentChangesView}.swift`, `Features/Schedules/SchedulesView.swift` (all in the closed-source phren apps) | Shared module YAML fixtures; health/workspace capability decoding; memory-only with no host; different host capabilities; legacy compatibility; hidden task/schedule/Changes entrypoints, deep links and polling; loss of selected capability |
@@ -431,7 +414,7 @@ simulator tests from an environment that supports them.
 Fresh stores enable memory only. Enable what you need with `phren modules enable <name>`.
 On upgrade, activation writes the previous effective configuration into
 `.config/modules.yaml` before applying new defaults. Existing profile overrides
-are preserved, including an explicit task opt-out.
+are preserved, .
 
 The code engine, grammars and skill ship as `@phren/code`, outside the CLI tarball.
 `phren modules enable code` makes it loadable by this store, then copies its skill

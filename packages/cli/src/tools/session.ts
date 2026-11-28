@@ -1,122 +1,33 @@
-import { nonInteractiveGitEnv } from "../utils-helpers.js";
-import { moduleEnabled } from "../modules/runtime.js";
+import { listAllProjects } from "../store-routing.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { execFileSync } from "child_process";
-import { debugLog, getProjectDirs, isMemoryScopeVisible, normalizeMemoryScope } from "../shared.js";
+import { debugLog, isMemoryScopeVisible, normalizeMemoryScope } from "../shared.js";
 import { withFileLock } from "../shared/governance.js";
-import { isValidProjectName, errorMessage } from "../utils.js";
+import { isValidProjectName, } from "../utils.js";
 import { runCustomHooks } from "../hooks.js";
 import { readExtractedFacts } from "./extract-facts.js";
 import { resolveFindingSessionId } from "../finding/context.js";
-import { readTasks } from "../data/tasks.js";
 import { readFindings, FINDINGS_FILENAME } from "../data/access.js";
-import { getActiveTaskForSession } from "../task/lifecycle.js";
-import { listTaskCheckpoints, writeTaskCheckpoint } from "../session/checkpoints.js";
 import {
   findMostRecentSummaryWithProject as findMostRecentSummaryRecord,
   writeLastSummary,
 } from "../session/artifacts.js";
-import { markImpactEntriesCompletedForSession } from "../finding/impact.js";
 import {
   debugError, scanSessionFiles,
   type SessionState, runtimeSessionsDir, isSessionId, sessionFileForId,
   readSessionStateFile, writeSessionStateFile,
 } from "../session/utils.js";
 import { getRuntimeHealth } from "../governance/policy.js";
-import { getProjectSourcePath, readProjectConfig } from "../project-config.js";
 
 const STALE_SESSION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-function collectGitStatusSnapshot(cwd: string): { gitStatus: string; editedFiles: string[] } {
-  try {
-    const output = execFileSync("git", ["status", "--short"], { env: nonInteractiveGitEnv(), cwd, encoding: "utf8" }).trim();
-    if (!output) return { gitStatus: "", editedFiles: [] };
-    const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
-    const editedFiles = lines.map((line) => line.replace(/^[ MADRCU?!]{1,2}\s+/, "").trim()).filter(Boolean);
-    return { gitStatus: output, editedFiles };
-  } catch (err: unknown) {
-    debugLog(`session checkpoint git status failed: ${errorMessage(err)}`);
-    return { gitStatus: "", editedFiles: [] };
-  }
-}
-
-function extractFailingTests(summary?: string, fallbackContext?: string): string[] {
-  const text = [summary || "", fallbackContext || ""].join("\n").trim();
-  if (!text) return [];
-  const tests = new Set<string>();
-
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    const failLine = trimmed.match(/^FAIL(?:ED)?\s+(.+)$/i);
-    if (failLine?.[1]) tests.add(failLine[1].trim());
-
-    const vitestLine = trimmed.match(/^(?:\u00d7|\u2716)\s+(.+)$/);
-    if (vitestLine?.[1]) tests.add(vitestLine[1].trim());
-
-    const named = trimmed.match(/(?:failing tests?|failed tests?)\s*:\s*(.+)$/i);
-    if (named?.[1]) {
-      for (const part of named[1].split(/[;,]/)) {
-        const candidate = part.trim();
-        if (candidate) tests.add(candidate);
-      }
-    }
-
-    const junitStyle = trimmed.match(/test(?:\s+case)?\s+["'`](.+?)["'`]\s+failed/i);
-    if (junitStyle?.[1]) tests.add(junitStyle[1].trim());
-  }
-
-  return [...tests];
-}
-
-function extractResumptionHint(
-  summary: string | undefined,
-  fallbackNextStep: string,
-  fallbackLastAttempt: string,
-): { lastAttempt: string; nextStep: string } {
-  const normalizedSummary = (summary || "").trim();
-  if (!normalizedSummary) {
-    return {
-      lastAttempt: fallbackLastAttempt.trim() || "No prior attempt captured",
-      nextStep: fallbackNextStep.trim() || "Resume implementation",
-    };
-  }
-
-  const lines = normalizedSummary
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const nextPattern = /^(?:next(?:\s+step)?|next up|todo|to do|follow-up|follow up|remaining)\s*[:\-]\s*(.+)$/i;
-  let nextStep: string | null = null;
-  const lastAttemptLines: string[] = [];
-
-  for (const line of lines) {
-    const nextMatch = line.match(nextPattern);
-    if (nextMatch?.[1]) {
-      if (!nextStep) nextStep = nextMatch[1].trim();
-      continue;
-    }
-    lastAttemptLines.push(line);
-  }
-
-  const lastAttempt = (lastAttemptLines.join(" ").trim() || normalizedSummary).trim();
-  return {
-    lastAttempt: lastAttempt || fallbackLastAttempt.trim() || "No prior attempt captured",
-    nextStep: nextStep || fallbackNextStep.trim() || "Resume implementation",
-  };
-}
-
-/** Per-connection session map keyed by arbitrary connection ID (if provided). */
 const MAX_SESSION_MAP_ENTRIES = 200;
 const _sessionMap = new Map<string, string>();
 
-
-/** Find the most recent *active* (not ended) session file by mtime. */
 function findMostRecentSession(phrenPath: string): { file: string; state: SessionState } | null {
   const dir = runtimeSessionsDir(phrenPath);
   const results = scanSessionFiles<SessionState>(
@@ -233,13 +144,9 @@ export function incrementSessionFindings(phrenPath: string, count = 1, sessionId
   incrementSessionCounter(phrenPath, "findingsAdded", count, sessionId, project);
 }
 
-export function incrementSessionTasksCompleted(phrenPath: string, count = 1, sessionId?: string, project?: string): void {
-  incrementSessionCounter(phrenPath, "tasksCompleted", count, sessionId, project);
-}
-
 function incrementSessionCounter(
   phrenPath: string,
-  field: "findingsAdded" | "tasksCompleted",
+  field: "findingsAdded",
   count = 1,
   sessionId?: string,
   project?: string,
@@ -261,8 +168,6 @@ function incrementSessionCounter(
       const nextValue = Number.isFinite(current[field]) ? current[field] + count : count;
       writeSessionStateFile(file, {
         ...current,
-        findingsAdded: Number.isFinite(current.findingsAdded) ? current.findingsAdded : 0,
-        tasksCompleted: Number.isFinite(current.tasksCompleted) ? current.tasksCompleted : 0,
         [field]: nextValue,
       });
     });
@@ -281,7 +186,6 @@ interface SessionHistoryEntry {
   durationMins?: number;
   summary?: string;
   findingsAdded: number;
-  tasksCompleted: number;
   status: "active" | "ended";
 }
 
@@ -311,7 +215,6 @@ export function listAllSessions(phrenPath: string, limit = 50): SessionHistoryEn
       durationMins: Math.round(durationMs / 60000),
       summary: state.summary,
       findingsAdded: Number.isFinite(state.findingsAdded) ? state.findingsAdded : 0,
-      tasksCompleted: Number.isFinite(state.tasksCompleted) ? state.tasksCompleted : 0,
       status: state.endedAt ? "ended" : "active",
     });
   }
@@ -321,97 +224,24 @@ export function listAllSessions(phrenPath: string, limit = 50): SessionHistoryEn
   return entries;
 }
 
-/** Get findings and tasks that belong to a specific session. */
-interface SessionArtifactFinding {
-  project: string;
-  id: string;
-  date: string;
-  text: string;
-}
-
-interface SessionArtifactTask {
-  project: string;
-  id: string;
-  text: string;
-  section: string;
-  checked: boolean;
-}
-
-export async function getSessionArtifacts(
-  phrenPath: string,
-  sessionId: string,
-  project?: string,
-): Promise<{ findings: SessionArtifactFinding[]; tasks: SessionArtifactTask[] }> {
-  const findings: SessionArtifactFinding[] = [];
-  const tasks: SessionArtifactTask[] = [];
-  const shortId = sessionId.slice(0, 8);
-
-  try {
-    // Primary store projects
-    const projectDirs = getProjectDirs(phrenPath);
-    const targetProjects = project ? [project] : projectDirs.map((d) => path.basename(d));
-    const seen = new Set<string>();
-
-    const readProjectArtifacts = (storePath: string, proj: string) => {
-      if (seen.has(proj)) return;
-      seen.add(proj);
-
-      // Tasks with matching sessionId
-      const tasksResult = readTasks(storePath, proj);
-      if (tasksResult.ok) {
-        for (const section of ["Active", "Queue", "Done"] as const) {
-          for (const t of tasksResult.data.items[section]) {
-            if (t.sessionId && (t.sessionId === sessionId || t.sessionId.startsWith(shortId))) {
-              tasks.push({
-                project: proj,
-                id: t.id,
-                text: t.line,
-                section,
-                checked: t.checked,
-              });
-            }
-          }
-        }
-      }
-    };
-
-    for (const proj of targetProjects) {
-      readProjectArtifacts(phrenPath, proj);
-    }
-
-    // Team store projects
-    try {
-      const { getNonPrimaryStores, getStoreProjectDirs } = await import("../store-registry.js");
-      for (const store of getNonPrimaryStores(phrenPath)) {
-        if (!fs.existsSync(store.path)) continue;
-        const storeDirs = getStoreProjectDirs(store).map((d: string) => path.basename(d)).filter((p: string) => p !== "global");
-        const storeTargetProjects = project ? (storeDirs.includes(project) ? [project] : []) : storeDirs;
-        for (const proj of storeTargetProjects) {
-          readProjectArtifacts(store.path, proj);
-        }
-      }
-    } catch { /* store-registry not available */ }
-  } catch (err: unknown) {
-    debugLog(`getSessionArtifacts error: ${errorMessage(err)}`);
-  }
-
-  return { findings, tasks };
-}
-
-async function hasCompletedTasksInSession(phrenPath: string, sessionId: string, project?: string): Promise<boolean> {
-  const artifacts = await getSessionArtifacts(phrenPath, sessionId, project);
-  return artifacts.tasks.some((task) => task.section === "Done" && task.checked);
+export function getSessionFindings(phrenPath: string, sessionId: string, project?: string) {
+  return listAllProjects(phrenPath).flatMap(({ store, projectName }) => {
+    if (project && projectName !== project) return [];
+    const result = readFindings(store.path, projectName, { includeArchived: true });
+    if (!result.ok) return [];
+    return result.data.filter(finding => finding.sessionId === sessionId)
+      .map(finding => ({ project: projectName, id: finding.stableId ?? finding.id, date: finding.date, text: finding.text }));
+  });
 }
 
 /** Compute what changed since the last session ended. */
 function computeSessionDiff(phrenPath: string, project: string, lastSessionEnd: string): {
   newFindings: number;
   superseded: number;
-  tasksCompleted: number;
 } {
   const projectDir = path.join(phrenPath, project);
   const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
-  if (!fs.existsSync(findingsPath)) return { newFindings: 0, superseded: 0, tasksCompleted: 0 };
+  if (!fs.existsSync(findingsPath)) return { newFindings: 0, superseded: 0 };
 
   const content = fs.readFileSync(findingsPath, "utf8");
   const lines = content.split("\n");
@@ -430,25 +260,11 @@ function computeSessionDiff(phrenPath: string, project: string, lastSessionEnd: 
     }
   }
 
-  // Count tasks completed since last session by checking Done items with recent activity dates
-  let tasksCompleted = 0;
-  const tasksResult = readTasks(phrenPath, project);
-  if (tasksResult.ok) {
-    for (const item of tasksResult.data.items.Done) {
-      // lastActivity is updated on completion; fall back to createdAt
-      const itemDate = item.lastActivity?.slice(0, 10) ?? item.createdAt?.slice(0, 10);
-      if (itemDate && itemDate >= cutoff) {
-        tasksCompleted++;
-      }
-    }
-  }
-
-  return { newFindings, superseded, tasksCompleted };
+  return { newFindings, superseded };
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
   const { phrenPath } = ctx;
-  const tasksEnabled = moduleEnabled(phrenPath, "tasks", ctx.profile);
 
   server.registerTool("session_start", {
     title: "◆ phren · session start",
@@ -485,7 +301,6 @@ export function register(server: McpServer, ctx: McpContext): void {
       agentScope: normalizedAgentScope,
       startedAt: new Date().toISOString(),
       findingsAdded: 0,
-      tasksCompleted: 0,
     };
     const newFile = sessionFileForId(phrenPath, sessionId);
     writeSessionStateFile(newFile, next);
@@ -523,20 +338,6 @@ export function register(server: McpServer, ctx: McpContext): void {
       } catch (err: unknown) {
         debugError("session_start findingsRead", err);
       }
-      try {
-        const tasks = readTasks(projectStorePath, activeProject);
-        if (tasks.ok) {
-          const activeItems = tasks.data.items.Active
-            .filter((entry) => isMemoryScopeVisible(normalizeMemoryScope(entry.scope), activeScope))
-            .slice(0, 5)
-            .map((entry) => `- [ ] ${entry.line}`);
-          if (activeItems.length > 0) {
-            parts.push(`## Active task (${activeProject})\n${activeItems.join("\n")}`);
-          }
-        }
-      } catch (err: unknown) {
-        debugError("session_start taskRead", err);
-      }
       // Surface extracted preferences/facts for this project
       try {
         const facts = readExtractedFacts(projectStorePath, activeProject).slice(-10);
@@ -547,37 +348,16 @@ export function register(server: McpServer, ctx: McpContext): void {
         debugError("session_start factsRead", err);
       }
 
-      try {
-          const checkpoints = listTaskCheckpoints(projectStorePath, activeProject).slice(0, 3);
-        if (checkpoints.length > 0) {
-          const lines: string[] = [];
-          for (const checkpoint of checkpoints) {
-            lines.push(`- ${(checkpoint.taskText || checkpoint.taskLine).trim()} (task: ${checkpoint.taskId})`);
-            lines.push(`  Last attempt: ${checkpoint.resumptionHint.lastAttempt}`);
-            lines.push(`  Next step: ${checkpoint.resumptionHint.nextStep}`);
-            if (checkpoint.editedFiles.length > 0) {
-              lines.push(`  Edited files: ${checkpoint.editedFiles.slice(0, 5).join(", ")}${checkpoint.editedFiles.length > 5 ? ", ..." : ""}`);
-            }
-            if (checkpoint.failingTests.length > 0) {
-              lines.push(`  Failing tests: ${checkpoint.failingTests.slice(0, 3).join(", ")}${checkpoint.failingTests.length > 3 ? ", ..." : ""}`);
-            }
-          }
-          parts.push(`## Continue where you left off? (${activeProject})\n${lines.join("\n")}`);
-        }
-      } catch (err: unknown) {
-        debugError("session_start checkpointsRead", err);
-      }
     }
 
     // Compute context diff since last session
     if (activeProject && isValidProjectName(activeProject) && priorEndedAt) {
       try {
         const diff = computeSessionDiff(phrenPath, activeProject, priorEndedAt);
-        if (diff.newFindings > 0 || diff.superseded > 0 || diff.tasksCompleted > 0) {
+        if (diff.newFindings > 0 || diff.superseded > 0) {
           const diffParts: string[] = [];
           if (diff.newFindings > 0) diffParts.push(`${diff.newFindings} new finding${diff.newFindings === 1 ? "" : "s"}`);
           if (diff.superseded > 0) diffParts.push(`${diff.superseded} superseded`);
-          if (diff.tasksCompleted > 0) diffParts.push(`${diff.tasksCompleted} task${diff.tasksCompleted === 1 ? "" : "s"} in done`);
           parts.push(`## Since last session\n${diffParts.join(", ")}.`);
         }
       } catch (err: unknown) {
@@ -658,57 +438,6 @@ export function register(server: McpServer, ctx: McpContext): void {
       writeLastSummary(phrenPath, { summary: effectiveSummary, sessionId: state.sessionId, project: endedState.project });
     }
 
-    if (endedState.project && isValidProjectName(endedState.project)) {
-      const projectStorePath = (() => {
-        if (!endedState.project) return phrenPath;
-        try { return resolveStoreForProject(ctx, endedState.project, "read").phrenPath; } catch { return phrenPath; }
-      })();
-      try {
-        const trackedActiveTask = moduleEnabled(projectStorePath, "tasks", ctx.profile) ? getActiveTaskForSession(projectStorePath, state.sessionId, endedState.project) : null;
-        const activeTask = trackedActiveTask ?? (() => {
-          const tasks = readTasks(projectStorePath, endedState.project!);
-          if (!tasks.ok) return null;
-          return tasks.data.items.Active[0] ?? null;
-        })();
-        if (activeTask) {
-          const taskId = activeTask.stableId || activeTask.id;
-          const projectConfig = readProjectConfig(projectStorePath, endedState.project);
-          const snapshotRoot =
-            getProjectSourcePath(projectStorePath, endedState.project, projectConfig) ||
-            path.join(projectStorePath, endedState.project);
-          const { gitStatus, editedFiles } = moduleEnabled(projectStorePath, "git", ctx.profile) ? collectGitStatusSnapshot(snapshotRoot) : { gitStatus: "", editedFiles: [] };
-          const resumptionHint = extractResumptionHint(
-            effectiveSummary,
-            activeTask.line,
-            activeTask.context || "No prior attempt captured",
-          );
-          writeTaskCheckpoint(phrenPath, {
-            project: endedState.project,
-            taskId,
-            taskText: activeTask.line,
-            taskLine: activeTask.line,
-            sessionId: state.sessionId,
-            createdAt: new Date().toISOString(),
-            resumptionHint,
-            gitStatus,
-            editedFiles,
-            failingTests: extractFailingTests(effectiveSummary, activeTask.context),
-          });
-        }
-      } catch (err: unknown) {
-        debugLog(`session checkpoint write failed: ${errorMessage(err)}`);
-      }
-    }
-
-    try {
-      const tasksCompleted = Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0;
-      if (tasksCompleted > 0 || await hasCompletedTasksInSession(phrenPath, state.sessionId, endedState.project)) {
-        markImpactEntriesCompletedForSession(phrenPath, state.sessionId, endedState.project);
-      }
-    } catch (err: unknown) {
-      debugLog(`impact scoring update failed: ${errorMessage(err)}`);
-    }
-
     const durationMs = new Date(endedState.endedAt!).getTime() - new Date(state.startedAt).getTime();
     const durationMins = Math.round(durationMs / 60000);
 
@@ -716,18 +445,16 @@ export function register(server: McpServer, ctx: McpContext): void {
       PHREN_SESSION_ID: state.sessionId,
       PHREN_DURATION_MINS: String(durationMins),
       PHREN_FINDINGS_ADDED: String(endedState.findingsAdded),
-      ...(tasksEnabled ? { PHREN_TASKS_COMPLETED: String(Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0) } : {}),
       ...(endedState.project ? { PHREN_PROJECT: endedState.project } : {}),
     });
 
     return mcpResponse({
       ok: true,
-      message: `Session ended. Duration: ~${durationMins} min. ${endedState.findingsAdded} finding(s) added${tasksEnabled ? `, ${Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0} task(s) completed` : ""}.${summary ? " Summary saved for next session." : ""}`,
+      message: `Session ended. Duration: ~${durationMins} min. ${endedState.findingsAdded} finding(s) added.${summary ? " Summary saved for next session." : ""}`,
       data: {
         sessionId: state.sessionId,
         durationMins,
         findingsAdded: endedState.findingsAdded,
-        ...(tasksEnabled ? { tasksCompleted: Number.isFinite(endedState.tasksCompleted) ? endedState.tasksCompleted : 0 } : {}),
       },
     });
   });
@@ -757,7 +484,6 @@ export function register(server: McpServer, ctx: McpContext): void {
       `Started: ${state.startedAt}`,
       `Duration: ~${durationMins} min`,
       `Findings added: ${state.findingsAdded}`,
-      ...(tasksEnabled ? [`Tasks completed: ${Number.isFinite(state.tasksCompleted) ? state.tasksCompleted : 0}`] : []),
     ];
     if (state.summary) parts.push(`Prior summary: ${state.summary}`);
 
@@ -779,30 +505,16 @@ export function register(server: McpServer, ctx: McpContext): void {
       const session = sessions.find(s => s.sessionId === targetSessionId || s.sessionId.startsWith(targetSessionId));
       if (!session) return mcpResponse({ ok: false, error: `Session ${targetSessionId} not found.` });
 
-      const artifacts = await getSessionArtifacts(phrenPath, session.sessionId, project);
+      const findings = getSessionFindings(phrenPath, session.sessionId, project);
       const parts = [
         `Session: ${session.sessionId.slice(0, 8)}`,
         `Project: ${session.project ?? "none"}`,
         `Started: ${session.startedAt}`,
         `Status: ${session.status}`,
         `Duration: ~${session.durationMins ?? 0} min`,
-        `Findings: ${artifacts.findings.length}`,
-        ...(tasksEnabled ? [`Tasks: ${artifacts.tasks.length}`] : []),
       ];
       if (session.summary) parts.push(`\nSummary: ${session.summary}`);
-      if (artifacts.findings.length > 0) {
-        parts.push("\n## Findings");
-        for (const f of artifacts.findings) {
-          parts.push(`- [${f.project}] ${f.text}`);
-        }
-      }
-      if (artifacts.tasks.length > 0) {
-        parts.push("\n## Tasks");
-        for (const t of artifacts.tasks) {
-          parts.push(`- [${t.project}/${t.section}] ${t.text}`);
-        }
-      }
-      return mcpResponse({ ok: true, message: parts.join("\n"), data: { session, ...artifacts } });
+      return mcpResponse({ ok: true, message: parts.join("\n"), data: { session, findings } });
     }
 
     // List sessions
@@ -816,9 +528,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       const dur = s.durationMins != null ? `${s.durationMins}m` : "?";
       const status = s.status === "active" ? " ●" : "";
       const findings = s.findingsAdded > 0 ? ` ${s.findingsAdded}f` : "";
-      const tasks = tasksEnabled && s.tasksCompleted > 0 ? ` ${s.tasksCompleted}t` : "";
       const date = s.startedAt.slice(0, 16).replace("T", " ");
-      return `${id}${status}  ${date}  ${dur}${findings}${tasks}  ${proj}${s.summary ? "  " + s.summary.slice(0, 60) : ""}`;
+      return `${id}${status}  ${date}  ${dur}${findings}  ${proj}${s.summary ? "  " + s.summary.slice(0, 60) : ""}`;
     });
 
     return mcpResponse({

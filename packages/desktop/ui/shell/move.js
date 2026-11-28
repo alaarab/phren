@@ -318,7 +318,7 @@ export async function openMoveSheet({ computer, child, to = {}, notice = "", sel
       // `name` is the checkout basename, not the registered store project.
       project = checkout?.project;
       if (checkout && !project) {
-        const { stores = [] } = await hookGet(computer, "/v1/tasks/stores");
+        const { stores = [] } = await hookGet(computer, "/v1/store/directory");
         const names = [...new Set(stores.flatMap((store) => store.projects ?? []))];
         for (let offset = 0; offset < names.length && !project; offset += 4) {
           const located = await Promise.all(names.slice(offset, offset + 4).map(async (name) => {

@@ -46,7 +46,7 @@ export function reconcileStarterSkills(store: string, starter: string): void {
   const instructions = path.join(starter, "global", "AGENTS.md");
   if (fs.existsSync(instructions)) {
     const relative = "global/AGENTS.md", dest = path.join(store, relative);
-    const source = fs.readFileSync(instructions, "utf8"), desired = starterInstructions(store, source);
+    const source = fs.readFileSync(instructions, "utf8"), desired = source;
     const stat = fs.lstatSync(dest, { throwIfNoEntry: false });
     if (!stat || (stat.isFile() && !stat.isSymbolicLink() && [digest(instructions), ledger[relative]].includes(digest(dest)))) {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -56,10 +56,4 @@ export function reconcileStarterSkills(store: string, starter: string): void {
   }
   fs.mkdirSync(path.dirname(ledgerFile), { recursive: true });
   atomicWriteText(ledgerFile, JSON.stringify(ledger, null, 2) + "\n");
-}
-
-export function starterInstructions(store: string, content: string): string {
-  if (moduleSnapshot(store).has("tasks")) return content;
-  return content.split("\n").filter(line => !line.startsWith("- Tasks:")).join("\n")
-    .replace("findings, tasks and skills", "findings and skills");
 }

@@ -4,6 +4,10 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
+## [0.2.0] - 2026-11-28
+
+- Removed the Tasks screen, task counts and task actions.
+
 ## [0.1.17] - 2026-11-25
 
 ### Fixed

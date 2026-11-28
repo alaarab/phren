@@ -155,10 +155,9 @@ export function buildConfigView(phrenPath: string, project?: string): ConfigView
   const fields: Record<string, ResolvedField> = {};
 
   // ── proactivity ────────────────────────────────────────────────────────────
-  const proactivityKeyMap: Record<string, "proactivity" | "proactivityFindings" | "proactivityTask"> = {
+  const proactivityKeyMap: Record<string, "proactivity" | "proactivityFindings"> = {
     "proactivity.base": "proactivity",
     "proactivity.findings": "proactivityFindings",
-    "proactivity.tasks": "proactivityTask",
   };
   const baseLevels: Level[] = [];
   pushIfSet(baseLevels, "project", overrides?.proactivity, projectConfigPath);
@@ -167,7 +166,7 @@ export function buildConfigView(phrenPath: string, project?: string): ConfigView
   const baseResolved = resolveConfigField("proactivity.base", "high", baseLevels);
   fields["proactivity.base"] = baseResolved;
 
-  for (const key of ["proactivity.findings", "proactivity.tasks"]) {
+  for (const key of ["proactivity.findings"]) {
     const ovKey = proactivityKeyMap[key];
     const levels: Level[] = [];
     pushIfSet(levels, "project", overrides?.[ovKey], projectConfigPath);
@@ -183,13 +182,13 @@ export function buildConfigView(phrenPath: string, project?: string): ConfigView
         ...(baseResolved.sourcePath ? { sourcePath: baseResolved.sourcePath } : {}),
       };
     } else {
-      // Resolve against the base value, so a findings/tasks override only counts
+      // Resolve against the base value, so a findings override only counts
       // as a source when it genuinely diverges from the inherited base level.
       fields[key] = resolveConfigField(key, baseResolved.value, levels);
     }
   }
 
-  // ── findingSensitivity & taskMode (live in workflow-policy.json) ────────────
+  // ── findingSensitivity (live in workflow-policy.json) ────────────
   const fsLevels: Level[] = [];
   pushIfSet(fsLevels, "project", overrides?.findingSensitivity, projectConfigPath);
   pushIfSet(fsLevels, "profile", profileDefaults?.findingSensitivity);
@@ -200,11 +199,6 @@ export function buildConfigView(phrenPath: string, project?: string): ConfigView
     fsLevels,
   );
 
-  const tmLevels: Level[] = [];
-  pushIfSet(tmLevels, "project", overrides?.taskMode, projectConfigPath);
-  pushIfSet(tmLevels, "profile", profileDefaults?.taskMode);
-  pushIfSet(tmLevels, "global", rawWorkflow.taskMode, workflowPath);
-  fields.taskMode = resolveConfigField("taskMode", getConfigField("taskMode")?.default, tmLevels);
 
   // ── retention ──────────────────────────────────────────────────────────────
   const retentionScalars: Array<[string, string]> = [
@@ -228,11 +222,11 @@ export function buildConfigView(phrenPath: string, project?: string): ConfigView
     pushIfSet(levels, "global", dig(rawRetention, "decay", milestone), retentionPath);
     fields[fieldKey] = resolveConfigField(fieldKey, getConfigField(fieldKey)?.default, levels);
   }
-  // Budgets: tasks and review per project, the rest for this computer only.
-  for (const budget of ["openTasks", "reviewEntries", "runtimeMB", "fanoutArchiveMB", "runtimeAgeOut", "runtimeAgeOutDays"]) {
+  // Budgets: review per project, the rest for this computer only.
+  for (const budget of ["reviewEntries", "runtimeMB", "fanoutArchiveMB", "runtimeAgeOut", "runtimeAgeOutDays"]) {
     const fieldKey = `retention.budgets.${budget}`;
     const levels: Level[] = [];
-    if (budget === "openTasks" || budget === "reviewEntries") pushIfSet(levels, "project", dig(overrides?.retentionPolicy, "budgets", budget), projectConfigPath);
+    if (budget === "reviewEntries") pushIfSet(levels, "project", dig(overrides?.retentionPolicy, "budgets", budget), projectConfigPath);
     pushIfSet(levels, "global", dig(rawRetention, "budgets", budget), retentionPath);
     fields[fieldKey] = resolveConfigField(fieldKey, getConfigField(fieldKey)?.default, levels);
   }

@@ -45,7 +45,7 @@ export function pluginSetupReason(env: NodeJS.ProcessEnv = process.env): PluginS
 }
 
 const NO_STORE_INSTRUCTIONS =
-  "phren gives this agent memory across sessions (findings, tasks, project context), but it has no store on this machine yet. " +
+  "phren gives this agent memory across sessions (findings and project context), but it has no store on this machine yet. " +
   "When the user asks about phren or memory, call phren_setup to explain setup, and only call it with confirm=true after they agree.";
 
 const STAND_DOWN_INSTRUCTIONS =

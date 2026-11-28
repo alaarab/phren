@@ -17,12 +17,6 @@ interface SessionFindingView {
   text: string;
 }
 
-interface SessionTaskView {
-  id: string;
-  line: string;
-  section: string;
-  checked: boolean;
-}
 
 export async function showSessionOverview(client: PhrenClient, session: SessionData): Promise<void> {
   try {
@@ -42,26 +36,10 @@ export async function showSessionOverview(client: PhrenClient, session: SessionD
         } satisfies SessionFindingView;
       })
       .filter((entry): entry is SessionFindingView => Boolean(entry));
-    const tasks = asArray(data?.tasks)
-      .map((entry) => {
-        const record = asRecord(entry);
-        const id = asString(record?.id);
-        const line = asString(record?.text);
-        const section = asString(record?.section);
-        if (!id || !line || !section) return undefined;
-        return {
-          id,
-          line,
-          section,
-          checked: asBoolean(record?.checked) ?? section === "Done",
-        } satisfies SessionTaskView;
-      })
-      .filter((entry): entry is SessionTaskView => Boolean(entry));
-
     showPreview({
       key: `session:${session.projectName}:${session.sessionId}`,
       title: `Session: ${session.sessionId.slice(0, 8)}`,
-      html: renderSessionHtml(session, findings, tasks),
+      html: renderSessionHtml(session, findings),
     });
   } catch (error) {
     showPreview({
@@ -72,10 +50,9 @@ export async function showSessionOverview(client: PhrenClient, session: SessionD
   }
 }
 
-function renderSessionHtml(session: SessionData, findings: SessionFindingView[], tasks: SessionTaskView[]): string {
+function renderSessionHtml(session: SessionData, findings: SessionFindingView[]): string {
   const startedLabel = formatTimestamp(session.startedAt);
   const findingsLabel = findings.length === 1 ? "1 finding" : `${findings.length} findings`;
-  const tasksLabel = tasks.length === 1 ? "1 task" : `${tasks.length} tasks`;
 
   return `<!DOCTYPE html>
 <html>
@@ -107,7 +84,6 @@ function renderSessionHtml(session: SessionData, findings: SessionFindingView[],
     <span class="badge">${esc(session.projectName)}</span>
     <span class="badge ${session.status === "active" ? "badge-status-active" : ""}">${esc(session.status)}</span>
     <span class="badge">${esc(findingsLabel)}</span>
-    <span class="badge">${esc(tasksLabel)}</span>
   </div>
 
   <div class="meta">
@@ -143,17 +119,6 @@ function renderSessionHtml(session: SessionData, findings: SessionFindingView[],
     </ul>
   `}
 
-  <h2>Tasks</h2>
-  ${tasks.length === 0 ? '<div class="empty">No tasks captured for this session.</div>' : `
-    <ul class="list">
-      ${tasks.map((task) => `
-        <li class="list-item">
-          <div class="item-meta">${esc(task.id)} · ${esc(task.section)}${task.checked ? " · done" : ""}</div>
-          <div>${esc(task.line)}</div>
-        </li>
-      `).join("")}
-    </ul>
-  `}
 </body>
 </html>`;
 }
@@ -202,8 +167,4 @@ function asArray(value: unknown): unknown[] {
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
-}
-
-function asBoolean(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
 }

@@ -1,9 +1,8 @@
+import { registeredStoreIdentity } from "../store-registry.js";
 import { cachedCitationFreshness, refreshCitationFreshness, type CitationFreshness, type CitationFreshnessOptions } from "../content/citation-freshness.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { readFindings, type FindingItem } from "../data/access.js";
-import { completeTask, readTasks, type TaskItem } from "../data/tasks.js";
-import { taskStores } from "../data/task-store-directory.js";
 import { FINDING_TAGS } from "../phren-core.js";
 import { getProjectRemote, readProjectConfig } from "../project-config.js";
 import { redactSecretsForLog } from "../content/secrets.js";
@@ -13,27 +12,25 @@ import { BridgeError } from "./protocol.js";
 import { moduleEnabled } from "../modules/runtime.js";
 import { loadCodePackage } from "../modules/code-package.js";
 import { bestChunkMatch, tokenizeForOverlap } from "../shared/retrieval.js";
-import { findingWriteSchema, taskCompleteSchema, isBranchName, isRepoPath, isSearchText, MAX_FILE_PATHS, MAX_FINDING_BODY, MAX_SEARCH_LIMIT } from "./gitboy-contract.js";
+import { findingWriteSchema, isRepoPath, isSearchText, MAX_FILE_PATHS, MAX_FINDING_BODY, MAX_SEARCH_LIMIT } from "./gitboy-contract.js";
 
 // `GET /v1/projects/:project/memory`: one project's findings, truths and
-// tasks as a fixed read-only contract, for a client that renders them beside
 // the repository (gitboy). Phren stays the source of truth; nothing here
 // writes. The scoped `gitboy-read` SSH key reaches only this route
 // (scoped-gateway.ts). Contract: docs/phren-hook.md#gitboy-read-only-memory.
 
-export const PROJECT_MEMORY_ROUTE = /^\/v1\/projects\/([^/]+)\/(memory|memory\/files|memory\/search|tasks|tasks\/complete|findings)$/;
-export const MEMORY_LIMITS = { findings: 500, active: 200, queue: 200, done: 50 } as const;
+export const PROJECT_MEMORY_ROUTE = /^\/v1\/projects\/([^/]+)\/(memory|memory\/files|memory\/search|findings)$/;
+export const MEMORY_LIMITS = { findings: 500 } as const;
 
 export interface MemoryFinding {
   id: string; text: string; type: string | null; status: FindingItem["status"]; created: string | null;
   citationFreshness?: CitationFreshness;
   citation: { file: string | null; line: number | null; commit: string | null; name: string | null } | null;
 }
-export interface MemoryTask { id: string; text: string; created: string | null; context: string | null }
 export interface ProjectMemory {
   project: string; store_id: string | null; remote: string | null; truncated: boolean;
   findings: MemoryFinding[]; truths: { text: string }[];
-  tasks: { active: MemoryTask[]; queue: MemoryTask[]; done: MemoryTask[] };
+  tasks: { active: []; queue: []; done: [] };
 }
 
 const TAG = new RegExp(`^\\[(${FINDING_TAGS.join("|")})\\]\\s*`, "i");
@@ -63,14 +60,6 @@ function finding(item: FindingItem, opts: CitationFreshnessOptions): MemoryFindi
   };
 }
 
-function task(item: TaskItem): MemoryTask {
-  return {
-    id: item.stableId ? `bid:${item.stableId}` : item.id,
-    text: safe(item.line), created: item.createdAt ?? null,
-    context: item.context ? safe(item.context) : null,
-  };
-}
-
 function locate(base: string, rawProject: string): { project: string; root: string; storeId: string | null } {
   let project: string;
   try { project = decodeURIComponent(rawProject); } catch { throw new BridgeError(400, "Invalid project name."); }
@@ -78,8 +67,7 @@ function locate(base: string, rawProject: string): { project: string; root: stri
   let root: string;
   try { root = resolveProject(base, project).store.path; }
   catch { throw new BridgeError(404, "Project not found."); }
-  const storeId = taskStores(base).find(entry => path.resolve(entry.path) === path.resolve(root))?.taskStoreId ?? null;
-  return { project, root, storeId };
+  return { project, root, storeId: registeredStoreIdentity(root) ?? null };
 }
 
 /** Newest first, so a cap drops the oldest. Undated findings sort last. */
@@ -104,22 +92,12 @@ export function projectMemory(base: string, rawProject: string): ProjectMemory {
   const allFindings = sortedFindings(root, project, opts);
   const truths = readTruths(root, project).map(text => ({ text: safe(text) }));
 
-  // Tasks are their own module; with it off the sections are empty.
-  const taskDoc = readTasks(root, project);
-  const items = taskDoc.ok ? taskDoc.data.items : { Active: [], Queue: [], Done: [] };
-
-  const truncated = allFindings.length > MEMORY_LIMITS.findings || items.Active.length > MEMORY_LIMITS.active
-    || items.Queue.length > MEMORY_LIMITS.queue || items.Done.length > MEMORY_LIMITS.done;
+  const truncated = allFindings.length > MEMORY_LIMITS.findings;
   return {
     project, store_id: storeId, remote: opts.projectRemote ?? null, truncated,
     findings: allFindings.slice(0, MEMORY_LIMITS.findings).map(item => finding(item, opts)),
     truths,
-    tasks: {
-      active: items.Active.slice(0, MEMORY_LIMITS.active).map(task),
-      queue: items.Queue.slice(0, MEMORY_LIMITS.queue).map(task),
-      // Done is newest first in tasks.md; keep the most recent.
-      done: items.Done.slice(0, MEMORY_LIMITS.done).map(task),
-    },
+    tasks: { active: [], queue: [], done: [] },
   };
 }
 
@@ -206,33 +184,6 @@ export function memorySearch(base: string, rawProject: string, q: string, limit:
   return { project, query: q, results: hits.slice(0, limit) };
 }
 
-// ── /tasks?branch= ───────────────────────────────────────────────────────────
-
-/** Open tasks that name this branch (or its last segment) or the issue number
- *  in it (`fix/123-login`, `issue-123`, `gh-123`). One read of tasks.md. */
-export function tasksForBranch(base: string, rawProject: string, branch: string) {
-  const { project, root } = locate(base, rawProject);
-  if (!isBranchName(branch)) throw new BridgeError(400, "Invalid branch name.");
-  const taskDoc = readTasks(root, project);
-  const items = taskDoc.ok ? taskDoc.data.items : { Active: [], Queue: [], Done: [] };
-  const lower = branch.toLowerCase();
-  const tail = lower.includes("/") ? lower.slice(lower.lastIndexOf("/") + 1) : "";
-  const names = [lower, ...(tail.length >= 4 ? [tail] : [])];
-  const issues = [...lower.matchAll(/(?:^|[\/_-])(?:issue-?|gh-?|#)?(\d{1,7})(?=$|[\/_-])/g)].map(match => Number(match[1]));
-  const mentionsIssue = (text: string, issue: number) => new RegExp(`(?:#|/issues/|/pull/|/pulls/)${issue}(?!\\d)`).test(text);
-  const matches: Array<MemoryTask & { section: "active" | "queue"; match: "branch" | "issue" }> = [];
-  for (const [section, list] of [["active", items.Active], ["queue", items.Queue]] as const) {
-    for (const item of list) {
-      const text = `${item.line}\n${item.context ?? ""}`.toLowerCase();
-      const match = names.some(name => text.includes(name)) ? "branch"
-        : issues.some(issue => item.githubIssue === issue || (item.githubUrl && mentionsIssue(item.githubUrl, issue)) || mentionsIssue(text, issue)) ? "issue"
-        : undefined;
-      if (match) matches.push({ ...task(item), section, match });
-    }
-  }
-  return { project, branch, truncated: matches.length > 50, tasks: matches.slice(0, 50) };
-}
-
 // ── POST /findings ───────────────────────────────────────────────────────────
 
 let writes: Promise<unknown> = Promise.resolve();
@@ -264,26 +215,4 @@ export async function saveFinding(base: string, rawProject: string, input: unkno
   const saved = status === "saved" ? sortedFindings(root, project, opts)
     .find(item => item.text === (result.data?.finding ?? "").replace(/^-\s+/, "").trim()) : undefined;
   return { project, status, finding: saved ? finding(saved, opts) : null };
-}
-
-// ── POST /tasks/complete ─────────────────────────────────────────────────────
-
-/** Mark one open task done, by the stable id `/tasks?branch=` gave gitboy when
- *  its pull request merged. Exact ids only: no text matching, so a wrong guess
- *  can never complete another task. A task already done answers `already-done`. */
-export function completeProjectTask(base: string, rawProject: string, input: unknown) {
-  const { project, root } = locate(base, rawProject);
-  if (Buffer.byteLength(JSON.stringify(input ?? null)) > 256) throw new BridgeError(413, "The body must be at most 256 bytes.");
-  const { id } = taskCompleteSchema.parse(input);
-  const doc = readTasks(root, project);
-  if (!doc.ok) throw new BridgeError(404, "No tasks for this project.");
-  const stable = id.slice(4);
-  const open = [...doc.data.items.Active, ...doc.data.items.Queue].find(item => item.stableId === stable);
-  if (!open) {
-    if (doc.data.items.Done.some(item => item.stableId === stable)) return { project, id, status: "already-done" as const };
-    throw new BridgeError(404, "No task with this id.");
-  }
-  const done = completeTask(root, project, id);
-  if (!done.ok) throw new BridgeError(400, safe(done.error));
-  return { project, id, status: "completed" as const };
 }

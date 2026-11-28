@@ -1,3 +1,4 @@
+import { storeDirectory } from "./store-directory.js";
 import type { BrowserRegistry } from "./browser-registry.js";
 import { browserRoute } from "./browser-routes.js";
 import type { TurnQueue } from "./turn-queue.js";
@@ -16,9 +17,9 @@ import { localMoveAvailability, moveComputers } from "./move-computers.js";
 import { ownerRequest, requestPeer, type PeerIdentity } from "./request-origin.js";
 import { bodyDigest, OWNER_PROOF_HEADER, OwnerProof } from "./owner-proof.js";
 import { listMoves, moveSessionFields, readMove, type MoveRecord, type SessionMover } from "./session-move.js";
-import { getTaskListRoute, getTaskDetailRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import { inboxWire, type OwnerInbox } from "./owner-inbox.js";
+import { issueItemRoute, issueListRoute, issueWriteRoute } from "./issue-routes.js";
 import { cancelDispatch, closeFinishedWorker, closeOwnPane } from "./worker-close.js";
 import { reportWorker, readIntegrator, setIntegrator } from "./worker-reports.js";
 import { sessionStalls } from "./stalls.js";
@@ -56,7 +57,7 @@ import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { resolveFilePath } from "./file-resolve.js";
 import { isMediaPath, readMedia } from "./home-media.js";
 import { storeRoute } from "./memory-store.js";
-import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch, completeProjectTask } from "./project-memory.js";
+import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding } from "./project-memory.js";
 import { PROJECT_GIT_ROUTE, projectGit, projectHostToken } from "./project-git.js";
 import { availablePaneEvidence, childActivity, effectivePaneEvidence } from "./session-evidence.js";
 import { liveWork, markBackground, ownRecord, paneRecord, provisionalWork, recordTitle, replyExcerpt, resolveEffectiveStatus, turnCompletion } from "./session-activity.js";
@@ -213,7 +214,7 @@ export const ownerInboxCloseSchema = z.object({
 
 export const capabilities = { browsers: true, turnCheckpoints: true, transcript: true, progress: true, images: true, prompt: true, stop: true, terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, sessionSeen: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", macWindows: macWindowsSupported() ? 1 : undefined, macWindowStream: macWindowsSupported() ? 1 : undefined, code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, ownerConfirm: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true, housekeeping: 1, housekeepingInventory: 1 };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", simulatorStream: process.platform === "darwin", simulatorDevices: process.platform === "darwin", simulatorDrag: process.platform === "darwin", macWindows: macWindowsSupported() ? 1 : undefined, macWindowStream: macWindowsSupported() ? 1 : undefined, code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, afterTurnQueue: true, queuedMessageActions: ["claude"], deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, secretExec: true, ownerProof: 1, ownerConfirm: 1, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, moveNewChat: true, moveConductor: true, moveToComputer: true, moveConductorToComputer: true, moveResume: true, moveSummaryByTarget: true, moveConversationCopy: true, claudeAccountAdd: true, accountPools: true, workerRelocation: 1, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true, projectHostToken: true, gitRemoteIdentity: true, gitWatch: true, worktreeRemove: true, terminalResolve: true, conversationSearch: true, housekeeping: 1, housekeepingInventory: 1, issues: 1 };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -227,10 +228,9 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
     result.ownerInboxPush = true;
     result.ownerInboxIssues = true;
   }
-  for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
+  for (const name of ["memory", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
   if (snapshot.has("hook")) result.approvalRules = { version: 2, effects: ["always-ask", "deny"], harnesses: ["claude"], events: ["PermissionRequest"], tools: ["Bash"], inputField: "command", conductorTools: false, mcpTools: false, preExecution: false };
   if (snapshot.has("schedules")) { result.scheduleProjects = true; result.scheduleUpdate = true; result.scheduleEvents = true; }
-  if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; result.taskAtomicCreate = true; result.taskAtomicSave = true; result.taskBoundLaunch = true; result.taskWork = true; }
   return result;
 }
 
@@ -545,14 +545,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       const memoryRoute = PROJECT_MEMORY_ROUTE.exec(url.pathname);
       if (memoryRoute) {
         const [, project, route] = memoryRoute;
-        if (request.method !== (route === "findings" || route === "tasks/complete" ? "POST" : "GET")) throw new BridgeError(405, "Unsupported request method.");
+        if (request.method !== (route === "findings" ? "POST" : "GET")) throw new BridgeError(405, "Unsupported request method.");
         if (!modules.has("memory")) throw new BridgeError(404, disabledHint("memory"));
-        if ((route === "tasks" || route === "tasks/complete") && !modules.has("tasks")) throw new BridgeError(404, disabledHint("tasks"));
         if (route === "memory") result = projectMemory(modules.store, project);
         else if (route === "memory/files") result = await memoryForFiles(modules.store, project, url.searchParams.getAll("path"));
         else if (route === "memory/search") result = memorySearch(modules.store, project, url.searchParams.get("q") ?? "", Number(url.searchParams.get("limit") ?? "5"));
-        else if (route === "tasks") result = tasksForBranch(modules.store, project, url.searchParams.get("branch") ?? "");
-        else if (route === "tasks/complete") result = completeProjectTask(modules.store, project, await body(request));
         else result = await saveFinding(modules.store, project, await body(request));
       } else if (PROJECT_GIT_ROUTE.test(url.pathname)) {
         const [, project, tokenRoute] = PROJECT_GIT_ROUTE.exec(url.pathname)!;
@@ -561,6 +558,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         result = tokenRoute
           ? await projectHostToken(modules.store, project, await journal.recent(), await body(request))
           : await projectGit(modules.store, project, await journal.recent());
+      } else if (url.pathname === "/v1/store/directory" || url.pathname === "/v1/tasks/stores") {
+        if (request.method !== "GET") throw new BridgeError(405, "Unsupported request method.");
+        result = await storeDirectory(modules.store);
       } else if (url.pathname === "/v1/store/pull-now") {
         if (request.method !== "POST") throw new BridgeError(405, "Unsupported request method.");
         if (!ctx.storePulls) throw new BridgeError(503, "Store pulls unavailable.");
@@ -573,9 +573,6 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         // Owner actions that a phone signs carry no body on GET: the signed digest is of zero bytes.
         await ownerProof.check(request, url.pathname, {}, bodyDigest(Buffer.alloc(0)));
         switch (url.pathname) {
-          case "/v1/tasks": result = await getTaskListRoute(modules.store, url); break;
-          case "/v1/tasks/detail": result = await getTaskDetailRoute(modules.store, url); break;
-          case "/v1/tasks/stores": result = await getTaskDirectoryRoute(modules.store); break;
           case "/v1/health": result = { ...info, codePackage: await codePackageStatus(scheduleStore, modules.has("code")) }; break;
           case "/v1/metrics": result = hookMetrics.snapshot(); break;
           case "/v1/health/details": result = { ...await healthDetails({ hookVersion: version, computerId: computerID, store: scheduleStore,
@@ -853,6 +850,16 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             if (url.searchParams.get("peers") === "1") result = { ...result as Json, ...await fromPeers("/v1/resources") };
             break;
           }
+          case "/v1/issues": {
+            // The phone's issue list (docs/phren-hook.md#issues-from-the-phone): owner-only,
+            // bounded, bodies trimmed, and every store project's repo when none is named.
+            if (!ownerRequest(request, {})) throw new BridgeError(403, "Only the owner reads issues.");
+            result = await issueListRoute(url, modules.store); break;
+          }
+          case "/v1/issues/item": {
+            if (!ownerRequest(request, {})) throw new BridgeError(403, "Only the owner reads issues.");
+            result = await issueItemRoute(url); break;
+          }
           case "/v1/housekeeping": {
             // The newest housekeeping report (docs/housekeeping.md); null before the first pass.
             // This computer only; the phone asks each computer itself. `peers=1` is for `phren housekeeping`.
@@ -1021,14 +1028,6 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           if (request.headers?.["x-phren-origin"] === "peer") throw new BridgeError(403, "Only local agents use the conductor call route.");
           const parsed = z.object({ action: z.enum(["dispatch", "hand_off", "returns", "approve", "grants-list", "grants-add", "grants-remove"]), data: z.record(z.string(), z.unknown()), origin: targetSchema.omit({ source: true, session: true }) }).strict().parse(data);
           result = await conductorCall(parsed.action, parsed.data, parsed.origin, () => executeConductor(parsed.action, parsed.data, parsed.origin));
-        } else if (url.pathname === "/v1/tasks/launch") {
-          result = await launches.run(async () => launchTaskRoute(modules.store, selectedServer(url), data));
-        } else if (url.pathname === "/v1/tasks/save") {
-          result = saveTaskRoute(modules.store, data);
-        } else if (url.pathname === "/v1/tasks/create") {
-          result = createTaskRoute(modules.store, data);
-        } else if (url.pathname === "/v1/tasks/update") {
-          result = updateTaskRoute(modules.store, data);
         } else if (url.pathname === "/v1/subagents/resume") {
           result = await fanoutMessages.send(data);
         } else if (url.pathname === "/v1/subagents/archive-finished") {
@@ -1126,6 +1125,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await renameSession(selectedServer(url), data);
         } else if (url.pathname === "/v1/sessions/seen") {
           result = await markSessionSeen(data);
+        } else if (url.pathname.startsWith("/v1/issues/")) {
+          // Owner-only, owner-proof signed once the phone signs (owner-proof.ts). The
+          // bodies are the MCP issue tools' schemas (issue-routes.ts).
+          if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner changes issues.");
+          result = await issueWriteRoute(url.pathname, data, info.computer.name);
         } else if (url.pathname === "/v1/housekeeping/scan") {
           // Owner-only: a fresh inventory (sizes take a while); the answer comes back through the view's revision.
           if (!ownerRequest(request, data)) throw new BridgeError(403, "Only the owner starts a housekeeping scan.");

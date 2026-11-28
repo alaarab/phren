@@ -25,7 +25,6 @@ implementation does not have to rediscover them by reading regexes.
   profiles/<name>.yaml     # which projects a machine loads
   <project>/
     FINDINGS.md            # durable knowledge — the product
-    tasks.md               # checkboxes, three sections
     review.md              # queue awaiting human judgement
     truths.md              # pinned entries that never decay
     summary.md             # human-written project overview
@@ -147,20 +146,6 @@ snippet, not by `fid`.** Resolution is a normalised prefix match. Editing the
 referenced entry's opening words breaks the link silently. `fid` exists and
 should be used instead; this is the format's most obvious unfinished migration.
 
-### 3.1 Task metadata
-
-Tasks use a single combined comment rather than several:
-
-```
-<!-- bid:abcd1234 rank:7 lastActivity:2026-08-01 created:2026-07-30
-     session:abc scope:shared findings:abcd1234 parentFinding:... speculative -->
-```
-
-`bid` is the stable task id. All other fields are optional and order-sensitive
-in the current regex.
-
----
-
 ## 4. File formats
 
 ### 4.1 `FINDINGS.md`
@@ -178,33 +163,6 @@ in the current regex.
 - An optional `[type]` prefix tags the finding. See §6 for the vocabulary
   problem.
 - One finding is one bullet. Continuation lines are not part of the format.
-
-### 4.2 `tasks.md`
-
-```markdown
-# <project> tasks
-
-## Active
-- [ ] In progress right now <!-- bid:11112222 rank:1 -->
-
-## Queue
-- [ ] Not started [high] <!-- bid:33334444 rank:2 -->
-
-## Done
-- [x] Finished <!-- bid:55556666 -->
-```
-
-Exactly three sections in this order: `Active`, `Queue`, `Done`. New tasks are
-appended to **Queue**. Completion moves the item to the top of `Done` and sets
-`[x]`.
-
-⚠️ **Priority and pinned state have two sources of truth.** `[high]`/`[medium]`/
-`[low]` and `[pinned]` live as substrings *in the task text* and also as parsed
-fields. `updateTask` with new text recomputes both fields from that text — so a
-caller that renames a task without re-supplying them silently drops them. A
-previous incarnation of this bug appended a duplicate tag on every update
-(observed: 48 × `[high]` on one task), which is why the current stripper loops
-to a fixed point. Prefer moving these into the `bid` comment.
 
 ### 4.3 `review.md`
 
@@ -323,7 +281,6 @@ committed bytes:
 - a file containing an unrecognised metadata comment (§2.1)
 - a legacy `<details>` block (§5.2)
 - a `[bracket]` that is not a recognised type tag (§6)
-- a pinned/prioritised task edited by text only (§4.2)
 - text long enough and Unicode-rich enough to hit the 500- and 60-character
   boundaries (§2.2, §4.3)
 
@@ -356,7 +313,7 @@ same bytes.
 if the CLI's writer format changes and nobody reruns `generate-fixtures.mjs`,
 both suites keep passing against stale bytes. Until a regenerate-and-diff job
 exists, treat any CLI change under `content/`, `data/`, `finding/`, `core/`,
-or `task/` as a prompt to regenerate.
+as a prompt to regenerate.
 
 ---
 

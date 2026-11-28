@@ -43,7 +43,6 @@ function writeWorkflowPolicy(
         schemaVersion: 1,
         lowConfidenceThreshold: 0.7,
         riskySections: ["Stale", "Conflicts"],
-        taskMode: "auto",
         findingSensitivity: "balanced",
         ...overrides,
       },
@@ -183,8 +182,8 @@ describe("finding sensitivity — CLI config subcommand", () => {
     }
   });
 
-  it("set updates only findingSensitivity, leaves taskMode untouched", () => {
-    writeWorkflowPolicy(tmp.path, { taskMode: "suggest", findingSensitivity: "balanced" });
+  it("set updates only findingSensitivity, preserves the rest of workflow policy", () => {
+    writeWorkflowPolicy(tmp.path, { findingSensitivity: "balanced" });
 
     runCli(
       ["config", "finding-sensitivity", "set", "aggressive"],
@@ -192,7 +191,6 @@ describe("finding sensitivity — CLI config subcommand", () => {
     );
 
     const policy = getWorkflowPolicy(tmp.path);
-    expect(policy.taskMode).toBe("suggest");
     expect(policy.findingSensitivity).toBe("aggressive");
   });
 });

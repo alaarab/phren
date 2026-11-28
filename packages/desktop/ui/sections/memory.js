@@ -122,7 +122,6 @@ function byDateDesc(a, b) {
 
 function graphKindLabel(node) {
   if (!node) return "";
-  if (node.kind === "task") return node.group === "task-done" ? "Done task" : node.group === "task-queue" ? "Backlog task" : "Active task";
   const map = { finding: "Finding", project: "Project", entity: "Fragment", reference: "Reference", topic: "Topic", note: "Note" };
   return map[node.kind] ?? "Node";
 }

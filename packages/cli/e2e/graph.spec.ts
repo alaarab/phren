@@ -533,18 +533,7 @@ test.describe.serial("graph visualization e2e", () => {
     await page.evaluate(() => (window as any).graphClearSelection());
   });
 
-  test("task nodes exist and can be selected", async ({ page }) => {
-    await openGraphTab(page);
 
-    const taskId = await selectNodeOfKind(page, "task");
-    if (taskId) {
-      const popover = page.locator("#graph-node-popover");
-      await expect(popover).not.toHaveCSS("display", "none");
-      const content = await page.locator("#graph-node-content").textContent();
-      expect(content?.toLowerCase()).toContain("task");
-    }
-    await page.evaluate(() => (window as any).graphClearSelection());
-  });
 
   test("edges exist between connected nodes", async ({ page }) => {
     await openGraphTab(page);
@@ -702,11 +691,11 @@ test.describe.serial("graph visualization e2e", () => {
     const hasUpdate = await page.evaluate(() => typeof (window as any).phrenGraph?.updateNode === "function");
     expect(hasUpdate).toBe(true);
 
-    // Pick a task node (the fixture seeds one queue task)
+    // Pick an existing finding
     const target = await page.evaluate(() => {
       const pg = (window as any).phrenGraph;
-      const node = pg.getData().nodes.find((n: any) => n.kind === "task");
-      return node ? { id: node.id, label: node.label, section: node.section } : null;
+      const node = pg.getData().nodes.find((n: any) => n.kind === "finding");
+      return node ? { id: node.id, label: node.label } : null;
     });
     expect(target).not.toBeNull();
 
@@ -722,7 +711,6 @@ test.describe.serial("graph visualization e2e", () => {
     const result = await page.evaluate((id: string) => {
       return (window as any).phrenGraph.updateNode(id, {
         text: "Renamed by in-place update test",
-        section: "Done",
       });
     }, target!.id);
     expect(result).toBe(true);
@@ -730,7 +718,7 @@ test.describe.serial("graph visualization e2e", () => {
     const after = await page.evaluate((id: string) => {
       const pg = (window as any).phrenGraph;
       const node = pg.getData().nodes.find((n: any) => n.id === id);
-      return node ? { label: node.label, section: node.section, fullLabel: node.fullLabel } : null;
+      return node ? { label: node.label, fullLabel: node.fullLabel } : null;
     }, target!.id);
     expect(after).not.toBeNull();
     expect(after!.section).toBe("Done");
@@ -745,7 +733,7 @@ test.describe.serial("graph visualization e2e", () => {
     });
     expect(canvasAfter).toBe(canvasBefore);
 
-    const bogus = await page.evaluate(() => (window as any).phrenGraph.updateNode("task:nope:xyz", { section: "Done" }));
+    const bogus = await page.evaluate(() => (window as any).phrenGraph.updateNode("finding:nope:xyz", { text: "Missing" }));
     expect(bogus).toBe(false);
 
     const errorTexts = errors.map((e) => e.text());
@@ -940,8 +928,8 @@ test.describe.serial("graph visualization e2e", () => {
     await page.evaluate(() => {
       (window as any).phrenGraph.mount({
         nodes: [
-          { id: "project:alpha", label: "alpha", group: "project", project: "alpha", findingCount: 2, taskCount: 1 },
-          { id: "project:beta", label: "beta", group: "project", project: "beta", findingCount: 1, taskCount: 0 },
+          { id: "project:alpha", label: "alpha", group: "project", project: "alpha", findingCount: 2 },
+          { id: "project:beta", label: "beta", group: "project", project: "beta", findingCount: 1 },
           { id: "entity:auth", label: "AuthService", group: "entity", entityType: "class", refCount: 5, connectedProjects: ["alpha", "beta"] },
           { id: "ref:alpha/auth.ts", label: "auth.ts", group: "reference", project: "alpha" },
         ],
@@ -1010,7 +998,7 @@ test.describe.serial("graph visualization e2e", () => {
     }, firstOrbId);
     expect(isProjectNode).toBe(true);
 
-    // Clicking the orb focuses that project — no finding/task selection needed —
+    // Clicking the orb focuses that project — no finding selection needed —
     // and opens the dossier for it.
     await orbs.first().click();
     await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
@@ -1018,7 +1006,6 @@ test.describe.serial("graph visualization e2e", () => {
     // The clicked orb is marked active and the graph reports the focused project.
     await expect(orbs.first()).toHaveClass(/active/);
     const focused = await page.evaluate(() => {
-      const pg = (window as any).phrenGraph;
       // getData reflects host nodes; focus is internal — assert via the active orb.
       return document.querySelector(".phren-project-orb.active")?.getAttribute("data-project-id") || null;
     });
@@ -1037,7 +1024,7 @@ test.describe.serial("graph visualization e2e", () => {
     // Hidden until a project is in context.
     await expect(panel).toBeHidden();
 
-    // Focus a project — the pane appears with its findings/tasks.
+    // Focus a project — the pane appears with its findings.
     const projectId = await selectNodeOfKind(page, "project");
     expect(projectId).toBeTruthy();
     await expect(panel).toBeVisible({ timeout: 8_000 });
@@ -1071,7 +1058,6 @@ test.describe.serial("graph visualization e2e", () => {
     // file order, so what "all" meant drifted with fixture edits and test
     // order — the assertion turned on arithmetic rather than on the rule it
     // names. Picking rows directly states that rule, in both directions.
-    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
     await panel.locator("[data-pp-select]").click();
     const merge = panel.locator("[data-pp-bulk-merge]");
     const rows = panel.locator(".phren-pp-row");
@@ -1103,7 +1089,6 @@ test.describe.serial("graph visualization e2e", () => {
     });
     const panel = page.locator(".phren-project-panel");
     await expect(panel).toBeVisible({ timeout: 8_000 });
-    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
     await panel.locator("[data-pp-select]").click();
     // Exactly two: merge is offered only for a pair, so "select all" merges
     // nothing the moment the fixture carries a third finding.
@@ -1261,7 +1246,6 @@ test.describe.serial("graph visualization e2e", () => {
     });
     const panel = page.locator(".phren-project-panel");
     await expect(panel).toBeVisible({ timeout: 8_000 });
-    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
     await panel.locator("[data-pp-select]").click();
     await panel.locator("[data-pp-bulk-all]").click();
     await panel.locator("[data-pp-bulk-delete]").click();
@@ -1298,7 +1282,6 @@ test.describe.serial("graph visualization e2e", () => {
     await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
 
     // Clicking a filter chip inside the pane must not clear the graph selection.
-    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
     await expect(page.locator(".phren-project-orb.active")).toHaveCount(1);
     await expect(panel).toBeVisible();
   });
@@ -1314,9 +1297,6 @@ test.describe.serial("graph visualization e2e", () => {
     const before = await rows.count();
     expect(before).toBeGreaterThan(0);
 
-    // "Findings" chip restricts the list to findings only (no task rows).
-    await panel.locator('[data-pp-chip][data-kind="finding"]').click();
-    await expect(panel.locator('.phren-pp-group', { hasText: /Tasks/ })).toHaveCount(0);
 
     // A nonsense query empties the list.
     await panel.locator("[data-pp-search]").fill("zzzzz-no-such-item-qqqq");

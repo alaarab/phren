@@ -208,7 +208,6 @@ describe("web-ui server", () => {
     const parsed = JSON.parse(body);
     expect(parsed.ok).toBe(true);
     expect(parsed.view).toBeTruthy();
-    expect(parsed.view.fields.taskMode).toBeTruthy();
     expect(parsed.indexPolicy).toBeTruthy();
     expect(Array.isArray(parsed.indexPolicy.includeGlobs)).toBe(true);
   });
@@ -263,7 +262,7 @@ describe("web-ui server", () => {
     };
 
     const before = await readToken();
-    fs.appendFileSync(path.join(tmpRoot, "demo", "tasks.md"), "\n- [ ] Live refresh item\n");
+    fs.appendFileSync(path.join(tmpRoot, "demo", "FINDINGS.md"), "\n- Live refresh item\n");
     const after = await readToken();
     expect(after).not.toBe(before);
   });
@@ -493,7 +492,6 @@ describe("web-ui HTML rendering", () => {
       expect(body).toContain('id="graph-node-popover"');
       expect(body).toContain('id="graph-node-content"');
       expect(body).toContain("phrenGraph");
-      expect(body).toContain("/api/tasks/update");
     } finally {
       cleanup();
     }

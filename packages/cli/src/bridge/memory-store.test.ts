@@ -40,15 +40,17 @@ it("only identifies GitHub remotes, preserving distinct hosts and local stores",
 });
 
 it("serves the working tree, uncommitted edits included, without ignored files", async () => {
-  await writeFile(path.join(store, "demo", "tasks.md"), "# tasks\n");
+  await writeFile(path.join(store, "demo", "summary.md"), "# summary\n");
   await mkdir(path.join(store, ".runtime")); await writeFile(path.join(store, ".runtime", "secret.json"), "{}");
+  await writeFile(path.join(store, "demo", "tasks.md"), "# legacy data\n");
   const { sha } = await storeHead(store, index);
-  expect(await paths(sha)).toEqual([".gitignore", "demo/FINDINGS.md", "demo/tasks.md"]);
-  const entry = ((await storeTree(store, sha)).tree as { path: string; sha: string }[]).find(item => item.path === "demo/tasks.md")!;
-  expect(entry.sha).toBe(blobSha(Buffer.from("# tasks\n")));
-  expect(Buffer.from((await storeBlob(store, entry.sha)).content as string, "base64").toString()).toBe("# tasks\n");
-  await rm(path.join(store, "demo", "tasks.md"));
-  expect(await paths((await storeHead(store, index)).sha)).not.toContain("demo/tasks.md");
+  expect(await paths(sha)).toEqual([".gitignore", "demo/FINDINGS.md", "demo/summary.md"]);
+  expect(await readFile(path.join(store, "demo", "tasks.md"), "utf8")).toBe("# legacy data\n");
+  const entry = ((await storeTree(store, sha)).tree as { path: string; sha: string }[]).find(item => item.path === "demo/summary.md")!;
+  expect(entry.sha).toBe(blobSha(Buffer.from("# summary\n")));
+  expect(Buffer.from((await storeBlob(store, entry.sha)).content as string, "base64").toString()).toBe("# summary\n");
+  await rm(path.join(store, "demo", "summary.md"));
+  expect(await paths((await storeHead(store, index)).sha)).not.toContain("demo/summary.md");
 });
 
 it("writes only over the sha the phone last saw", async () => {
@@ -86,12 +88,12 @@ it("writes and deletes only while holding the file's writers' lock", async () =>
 
 it("rejects oversized blobs with an actionable size error before reading their contents", async () => {
   const content = Buffer.alloc(4 * 1024 * 1024 + 1, 120);
-  await writeFile(path.join(store, "demo", "tasks.md"), content);
+  await writeFile(path.join(store, "demo", "summary.md"), content);
   await storeHead(store, index);
   await expect(storeBlob(store, blobSha(content))).rejects.toMatchObject({
     status: 413, details: { code: "store-file-too-large", size: content.length, limit: 4 * 1024 * 1024 },
   });
-  // A large task history cannot stop independent small files being read.
+  // A large file cannot stop independent small files being read.
   const small = await readFile(path.join(store, "demo", "FINDINGS.md"));
   expect((await storeBlob(store, blobSha(small))).content).toBe(small.toString("base64"));
 });
@@ -106,7 +108,7 @@ it("refuses paths outside the store, into .git, or through symlinks", async () =
 });
 
 it("serves many blobs in one batch and marks unknown ones", async () => {
-  await writeFile(path.join(store, "demo", "tasks.md"), "# tasks\n");
+  await writeFile(path.join(store, "demo", "summary.md"), "# summary\n");
   const { sha } = await storeHead(store, index);
   const tree = (await storeTree(store, sha)).tree as { path: string; sha: string }[];
   const wanted = tree.map(entry => entry.sha);

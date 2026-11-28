@@ -25,10 +25,8 @@ function fakeModules(register: (name: string, config: ToolConfig, handler: ToolH
   tool("supersede_finding", "Mark a finding superseded.", { project: z.string(), old: z.string(), new: z.string() });
   tool("retract_finding", "Retract a finding.", { project: z.string(), text: z.string() });
   tool("edit_finding", "Edit a finding.", { project: z.string(), id: z.string(), text: z.string() });
-  tool("get_tasks", "List tasks.", { project: z.string().optional() });
-  tool("add_task", "Add a task.", { project: z.string(), text: z.string() });
-  tool("complete_task", "Complete a task.", { project: z.string(), task: z.string() });
-  tool("update_task", "Update a task.", { project: z.string(), task: z.string().optional(), text: z.string().optional(), updates: z.object({ section: z.enum(["Active", "Queue", "Done"]).optional(), priority: z.enum(["high", "medium", "low"]).optional(), text: z.string().optional() }).optional() });
+  tool("list_issues", "List forge issues.", { repos: z.array(z.string()).optional(), project: z.string().optional(), state: z.enum(["open", "closed", "all"]).optional() });
+  tool("get_issue", "Read one forge issue.", { repo: z.string().optional(), project: z.string().optional(), number: z.number().int().min(1) });
   tool("set_config", "Set config.", { domain: z.string(), settings: z.record(z.string(), z.unknown()), project: z.string().optional() });
   tool("session_start", "Start a session.", { project: z.string().optional() });
   tool("session_end", "End a session.", { summary: z.string().optional() });
@@ -71,12 +69,12 @@ describe("composites", () => {
 
   it("validates against the target's own schema and explains a miss", async () => {
     const { registered, calls } = gateWith("core");
-    const res = await registered.get("manage_task")!.handler({ action: "complete", project: "p" }); // missing task
+    const res = await registered.get("revise_finding")!.handler({ action: "supersede", project: "p", old: "previous" });
     expect(calls).toEqual([]);
     const body = parse(res);
     expect(body.ok).toBe(false);
-    expect(body.issues[0].path).toBe("task");
-    expect(body.params.map((p: { name: string }) => p.name)).toContain("task");
+    expect(body.issues[0].path).toBe("new");
+    expect(body.params.map((p: { name: string }) => p.name)).toContain("new");
   });
 
   it("lists its actions with their required parameters in the description", () => {
@@ -165,38 +163,27 @@ describe("dispatch", () => {
   it("takes a nested object as an object or as the JSON string a host passes through", async () => {
     const { registered, calls } = gateWith("core");
     const admin = registered.get("phren_admin")!.handler;
-    const asObject = parse(await admin({ action: "set_config", domain: "proactivity", settings: { level: "medium", scope: "tasks" } }));
-    expect(asObject.data.args.settings).toEqual({ level: "medium", scope: "tasks" });
-    const asString = parse(await admin({ action: "set_config", domain: "proactivity", settings: '{"level":"medium","scope":"tasks"}' }));
-    expect(asString.data.args.settings).toEqual({ level: "medium", scope: "tasks" });
+    const asObject = parse(await admin({ action: "set_config", domain: "proactivity", settings: { level: "medium", scope: "findings" } }));
+    expect(asObject.data.args.settings).toEqual({ level: "medium", scope: "findings" });
+    const asString = parse(await admin({ action: "set_config", domain: "proactivity", settings: '{"level":"medium","scope":"findings"}' }));
+    expect(asString.data.args.settings).toEqual({ level: "medium", scope: "findings" });
     expect(calls).toEqual(["set_config", "set_config"]);
     // A string field stays a string even when it looks like JSON, and a
     // string that is not JSON gets the schema's own explanation.
-    const text = parse(await registered.get("manage_task")!.handler({ action: "update", project: "p", task: "t", text: '{"not":"parsed"}' }));
-    expect(text.data.args.text).toBe('{"not":"parsed"}');
+    const text = parse(await registered.get("revise_finding")!.handler({ action: "supersede", project: "p", old: "previous", new: '{"not":"parsed"}' }));
+    expect(text.data.args.new).toBe('{"not":"parsed"}');
     const broken = parse(await admin({ action: "set_config", domain: "proactivity", settings: "{level: medium" }));
     expect(broken.ok).toBe(false);
     expect(broken.issues[0].path).toBe("settings");
   });
 
-  it("takes manage_task's updates as an object or as the JSON string a host passes through", async () => {
-    const { registered, calls } = gateWith("core");
-    const manage = registered.get("manage_task")!.handler;
-    const asObject = parse(await manage({ action: "update", project: "p", task: "t", updates: { section: "Active", priority: "high" } }));
-    expect(asObject.data.args.updates).toEqual({ section: "Active", priority: "high" });
-    const asString = parse(await manage({ action: "update", project: "p", task: "t", updates: '{"section":"Active","priority":"high"}' }));
-    expect(asString.data.args.updates).toEqual({ section: "Active", priority: "high" });
-    const doubleWrapped = parse(await manage({ action: "update", project: "p", task: "t", updates: '"{\\"section\\":\\"Active\\"}"' }));
-    expect(doubleWrapped.data.args.updates).toEqual({ section: "Active" });
-    expect(calls).toEqual(["update_task", "update_task", "update_task"]);
-  });
+
 
   it("passes arrays and objects through, and decodes their JSON-string forms", async () => {
     const catalog: Catalog = new Map();
     const seen: Record<string, unknown>[] = [];
     catalog.set("complete_many", {
       name: "complete_many",
-      // complete_task's shape: a single string is wrapped, an array is kept.
       config: { inputSchema: { item: z.preprocess((v) => (typeof v === "string" ? [v] : v), z.array(z.string()).min(1)) } },
       handler: (args) => { seen.push(args); return ok(args); },
     });
@@ -205,8 +192,6 @@ describe("dispatch", () => {
     await dispatch(catalog, "complete_many", { item: "bid:a" });
     expect(seen.map((a) => a.item)).toEqual([["bid:a", "bid:b"], ["bid:a", "bid:b"], ["bid:a"]]);
     const { registered } = gateWith("core");
-    const updates = parse(await registered.get("manage_task")!.handler({ action: "update", project: "p", task: "t", updates: { section: "Queue" } }));
-    expect(updates.data.args.updates).toEqual({ section: "Queue" });
   });
 
   it("decodes a stringified number or boolean only where the field needs one", async () => {
@@ -223,12 +208,5 @@ describe("dispatch", () => {
     expect(bad.ok).toBe(false);
   });
 
-  it("reports a JSON-string updates miss at its real inner path, not as a type error", async () => {
-    const { registered, calls } = gateWith("core");
-    const res = parse(await registered.get("manage_task")!.handler({ action: "update", project: "p", task: "t", updates: '{"priority":"urgent"}' }));
-    expect(calls).toEqual([]);
-    expect(res.ok).toBe(false);
-    expect(res.issues[0].path).toBe("updates.priority");
-    expect(res.issues[0].message).not.toMatch(/expected object, received string/);
-  });
+
 });

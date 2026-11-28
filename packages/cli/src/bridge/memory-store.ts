@@ -68,7 +68,7 @@ export function githubStoreRepository(remote: string): string | undefined {
   return /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+$/.test(repository) ? repository.toLowerCase() : undefined;
 }
 
-async function storeRepositoryIdentity(store: string): Promise<{ repository: string; branch: string } | undefined> {
+export async function storeRepositoryIdentity(store: string): Promise<{ repository: string; branch: string } | undefined> {
   const [remote, branch] = await Promise.all([
     git(store, ["config", "--get", "remote.origin.url"]).catch(() => ""),
     git(store, ["symbolic-ref", "--quiet", "--short", "HEAD"]).catch(() => ""),
@@ -76,6 +76,8 @@ async function storeRepositoryIdentity(store: string): Promise<{ repository: str
   const repository = githubStoreRepository(remote);
   return repository && branch.trim() ? { repository, branch: branch.trim() } : undefined;
 }
+
+const unusedStoreFile = (relative: string) => /^[^/]+\/tasks\.md$/i.test(relative);
 
 /** A tree sha for the store's current working tree, written through a private index. */
 export function storeHead(store: string, indexFile = path.join(bridgeRoot(), "store-snapshot.index")): Promise<{ sha: string; repositoryIdentity?: { repository: string; branch: string } }> {
@@ -87,7 +89,7 @@ export function storeHead(store: string, indexFile = path.join(bridgeRoot(), "st
       const head = await git(store, ["rev-parse", "--verify", "--quiet", "HEAD"]).catch(() => "");
       await git(store, head.trim() ? ["read-tree", "HEAD"] : ["read-tree", "--empty"], env);
     }
-    await git(store, ["add", "--all", "--", "."], env);
+    await git(store, ["add", "--all", "--", ".", ":(exclude,glob,icase)*/tasks.md"], env);
     const sha = (await git(store, ["write-tree"], env)).trim();
     const repositoryIdentity = await storeRepositoryIdentity(store);
     return { sha, ...(repositoryIdentity ? { repositoryIdentity } : {}) };
@@ -101,7 +103,7 @@ export async function storeTree(store: string, sha: string): Promise<Json> {
   const tree = (await git(store, ["ls-tree", "-r", "-l", "-z", sha])).split("\0").filter(Boolean).flatMap(line => {
     const match = /^(\d+) (\w+) ([0-9a-f]{40}) +(\d+|-)\t(.+)$/s.exec(line);
     // Symlinks and submodules never reach the phone.
-    if (!match || match[2] !== "blob" || match[1] === "120000") return [];
+    if (!match || match[2] !== "blob" || match[1] === "120000" || unusedStoreFile(match[5])) return [];
     return [{ path: match[5], type: "blob", sha: match[3], size: Number(match[4]) }];
   });
   return { sha, truncated: false, tree };
@@ -187,6 +189,7 @@ export async function storeFile(store: string, relative: string): Promise<string
       || normalized.split("/").some(part => isGitDirName(part) || part === "" || part === ".") || /[\0\r\n]/.test(normalized)) {
     throw new BridgeError(400, "Invalid store path.");
   }
+  if (unusedStoreFile(normalized)) throw new BridgeError(404, "Store file is unavailable.");
   const root = await realpath(store);
   let parent = path.dirname(path.join(root, normalized));
   // Missing parents are created later; the nearest existing one must stay inside the store.

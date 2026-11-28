@@ -1,7 +1,7 @@
-import { moduleEnabled } from "../modules/runtime.js";
+
 import { WEB_UI_STYLES, renderWebUiScript } from "./assets.js";
 import { renderGraphScript } from "./graph.js";
-import { FINDING_CAPTURE_UI_STYLES, LAYOUT_VIEWPORT_STYLES, NOTES_UI_STYLES, PROJECT_REFERENCE_UI_STYLES, REVIEW_UI_STYLES, SETTINGS_TAB_UI_STYLES, TASK_UI_STYLES } from "./styles.js";
+import { FINDING_CAPTURE_UI_STYLES, LAYOUT_VIEWPORT_STYLES, NOTES_UI_STYLES, PROJECT_REFERENCE_UI_STYLES, REVIEW_UI_STYLES, SETTINGS_TAB_UI_STYLES } from "./styles.js";
 import { PHREN_DEEP_VOID_STYLES } from "./deep-void.js";
 import { GRAPH_HUD_STYLES } from "./graph-chrome.js";
 import {
@@ -11,7 +11,7 @@ import {
   renderFindingCaptureEnhancementScript,
   renderNotesEnhancementScript,
   renderProjectReferenceEnhancementScript,
-  renderTasksAndSettingsScript,
+  renderSettingsScript,
   renderReviewQueueKeyboardScript,
   renderSearchScript,
   renderEventWiringScript,
@@ -29,7 +29,6 @@ function h(s: string): string {
 }
 
 export function renderWebUiPage(_phrenPath: string, authToken?: string, nonce?: string): string {
-  const tasksEnabled = moduleEnabled(_phrenPath, "tasks");
   const nonceAttr = nonce ? ` nonce="${h(nonce)}"` : "";
 
   return `<!doctype html>
@@ -45,7 +44,6 @@ export function renderWebUiPage(_phrenPath: string, authToken?: string, nonce?: 
 ${WEB_UI_STYLES}
 ${PROJECT_REFERENCE_UI_STYLES}
 ${SETTINGS_TAB_UI_STYLES}
-${TASK_UI_STYLES}
 ${REVIEW_UI_STYLES}
 ${PHREN_DEEP_VOID_STYLES}
 ${LAYOUT_VIEWPORT_STYLES}
@@ -134,7 +132,6 @@ ${NOTES_UI_STYLES}
     <button class="nav-item" data-tab="activity">Activity</button>
     <button class="nav-item" data-tab="search">Search</button>
     <button class="nav-item" data-tab="graph">Graph</button>
-    ${tasksEnabled ? '<button class="nav-item" data-tab="tasks">Tasks</button>' : ""}
     <button class="nav-item" data-tab="skills">Skills</button>
     <button class="nav-item" data-tab="hooks">Hooks</button>
     <button class="nav-item" data-tab="settings">Settings</button>
@@ -230,7 +227,7 @@ ${NOTES_UI_STYLES}
   <div id="tab-search" class="tab-content">
     <div style="max-width:720px;margin:0 auto">
       <div style="display:flex;gap:8px;margin-bottom:16px">
-        <input type="text" id="search-query" placeholder="${tasksEnabled ? "Search fragments, findings, tasks..." : "Search fragments and findings..."}" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;background:var(--surface);color:var(--ink);font-size:var(--text-base);font-family:var(--font);outline:none" />
+        <input type="text" id="search-query" placeholder="Search fragments and findings..." style="flex:1;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;background:var(--surface);color:var(--ink);font-size:var(--text-base);font-family:var(--font);outline:none" />
         <div id="search-project-wrap" style="position:relative">
           <button id="search-project-btn" type="button" onclick="window._phrenToggleProjectDropdown()" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm);cursor:pointer;font-family:var(--font);min-width:120px;text-align:left;white-space:nowrap">All projects</button>
           <div id="search-project-dropdown" style="display:none;position:absolute;top:100%;left:0;z-index:50;margin-top:4px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:0 4px 12px rgba(0,0,0,.15);max-height:240px;overflow-y:auto;min-width:160px"></div>
@@ -238,7 +235,6 @@ ${NOTES_UI_STYLES}
         <select id="search-type-filter" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;background:var(--surface);color:var(--ink);font-size:var(--text-sm)">
           <option value="">All types</option>
           <option value="finding">Findings</option>
-          ${tasksEnabled ? '<option value="task">Tasks</option>' : ""}
           <option value="reference">Reference</option>
           <option value="summary">Summaries</option>
         </select>
@@ -295,26 +291,6 @@ ${NOTES_UI_STYLES}
       <div class="split-reader" id="hooks-reader">
         <div class="reader-empty">Select a hook config to view its contents.<br/><span style="font-size:var(--text-sm);color:var(--muted);margin-top:8px;display:inline-block">Per-project hooks can also be configured in Settings &gt; [project name].</span></div>
       </div>
-    </div>
-  </div>
-
-  <!-- ── Tasks Tab ─────────────────────────────────────────── -->
-  <div id="tab-tasks" class="tab-content">
-    <div class="task-toolbar">
-      <select id="tasks-filter-project" class="task-filter-select">
-        <option value="">All projects</option>
-      </select>
-      <select id="tasks-filter-section" class="task-filter-select">
-        <option value="">Active + Queue</option>
-        <option value="Active">Active only</option>
-        <option value="Queue">Queue only</option>
-        <option value="Done">Completed</option>
-      </select>
-      <select id="tasks-filter-responsibility" class="task-filter-select" aria-label="Task responsibility"><option value="">Human + Agent</option><option value="human">Human</option><option value="agent">Agent</option></select>
-      <span id="tasks-count" class="task-count-label"></span>
-    </div>
-    <div id="tasks-list">
-      <div class="task-empty-state"><svg viewBox="0 0 48 48" width="48" height="48" style="display:block;margin:0 auto 12px"><ellipse cx="24" cy="24" rx="16" ry="15" fill="#7B68AE" opacity="0.25"/><ellipse cx="24" cy="24" rx="12" ry="11.5" fill="#7B68AE" opacity="0.4"/><circle cx="19" cy="22" r="1.5" fill="#2D2255"/><circle cx="29" cy="22" r="1.5" fill="#2D2255"/><path d="M21 28c1 1.2 2.5 1.5 3.5 1.3 1-.2 2-1 2.5-1.3" stroke="#2D2255" stroke-width="1" fill="none" stroke-linecap="round"/></svg><div style="font-size:var(--text-md);font-weight:600;color:var(--ink)">Loading tasks...</div></div>
     </div>
   </div>
 
@@ -440,7 +416,7 @@ ${renderProfileSwitcherScript(h(authToken || ""))}
 ${renderProjectReferenceEnhancementScript(h(authToken || ""))}
 </script>
 <script${nonceAttr}>
-${renderTasksAndSettingsScript(authToken || "")}
+${renderSettingsScript(authToken || "")}
 </script>
 <script${nonceAttr}>
 ${renderReviewQueueKeyboardScript(authToken || "")}
