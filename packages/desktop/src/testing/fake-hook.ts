@@ -391,6 +391,12 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
     const start = Math.max(1, end - size + 1);
     return { entries: all.filter((entry) => entry.line >= start && entry.line <= end), totalLines: all.length, startLine: start, hasMore: start > 1 };
   };
+  const storeDirectory: FakeHookHandler = () => ({ json: {
+    ok: true, version: 1, stores: [{
+      id: "personal", name: "Personal", role: "primary", primary: true, available: true,
+      identityReady: true, ambiguous: false, metadataWritable: false, projects: ["phren", "website"],
+    }],
+  } });
   const defaults: Record<string, FakeHookHandler> = {
     // The newest page over HTTP: the snapshot the desktop reads ahead of opening a chat.
     "GET /v1/transcripts/history": async (_req, _body, url) => {
@@ -398,7 +404,8 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
       if (before !== null) await options.holdOlderPages?.();
       return { json: { type: "older", source: url.searchParams.get("source") ?? "claude", session: url.searchParams.get("session") ?? "", ...transcriptPage(before === null ? undefined : Number(before)) } };
     },
-    "GET /v1/store/directory": () => ({ json: { stores: [{ id: "personal", name: "Personal", primary: true, role: "owner", available: true, projects: ["phren", "website"] }] } }),
+    "GET /v1/store/directory": storeDirectory,
+    "GET /v1/tasks/stores": storeDirectory, // Legacy alias for the store directory, with no task data.
     "GET /v1/projects/repos": () => ({ json: { repos: [
       { name: "phren", project: "phren", directory: "/Users/you/phren", registered: true, lastSeen: "2026-10-15T12:00:00Z" },
       { name: "website", project: "website", directory: "/Users/you/website", registered: true, lastSeen: "2026-10-14T12:00:00Z" },
