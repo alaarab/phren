@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-28
+
+### Fixed
+
+- Publish `@phren/code` 0.2.15 to npm: its package now names the repository, which npm's provenance check requires, so the 0.4.0 release stopped before it.
+
 ## [0.4.0] - 2026-11-28
 
 ### Added
