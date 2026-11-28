@@ -1112,11 +1112,11 @@ Copy a note into `FINDINGS.md` and mark the original as promoted without deletin
 
 ## Issues
 
-Work lives in forge issues: gitboy repositories and GitHub. Phren reads and writes them through the forge layer described in [Forge issues](issues.md): a repository reference (`owner/name`, `domain/owner/name` or a URL) or a Phren project whose `issues:` setting or checkout names one. `list_issues` and `get_issue` are in the core profile; the rest are full-profile tools. `assignee: "me"` and `claim_issue` use the signed-in forge user, and a claim's computer name is this computer's Phren name. Forge failures come back as `{ ok: false, error, errorCode }` with `errorCode` one of `AUTH`, `NOT_FOUND`, `FORBIDDEN`, `RATE_LIMITED`, `UNAVAILABLE` or `INVALID`; tokens never appear in the message.
+Work lives in forge issues: gitboy repositories and GitHub. Phren reads and writes them through the forge layer described in [Forge issues](issues.md): a repository reference (`owner/name`, `domain/owner/name` or a URL) or a Phren project whose `issues:` setting or checkout names one. `list_issues` and `get_issue` are in the core profile; the rest are full-profile tools. `assignee: "me"` and `claim_issue` use the signed-in forge user, and a claim's computer name is this computer's Phren name. Forge failures come back as `{ ok: false, error, errorCode }` with `errorCode` one of `AUTH`, `NOT_FOUND`, `FORBIDDEN`, `RATE_LIMITED`, `UNAVAILABLE`, `INVALID` or `CONFLICT`; tokens never appear in the message.
 
 ### `list_issues`
 
-List issues across one or more repositories, or a project's repository. Defaults to open issues, 50 results (maximum 200), newest update first. A repository that cannot be read is reported in `errors` while the others still return; `data` carries `repos`, `issues` and `errors`. With neither `repos` nor `project`, Phren reads every project that has a resolvable issue repository.
+List issues across one or more repositories, or a project's repository. Defaults to open issues, 50 results (maximum 200), newest update first. A successful response carries `repos`, `issues`, and typed per-repository `errors` in `data`. If every repository fails, the result has `ok: false`, a forge `errorCode`, and the per-repository errors in `data.errors`. With neither `repos` nor `project`, Phren reads every project that has a resolvable issue repository.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

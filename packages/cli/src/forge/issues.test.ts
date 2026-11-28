@@ -440,6 +440,22 @@ describe("listing and errors", () => {
     await expect(providerFor(github).get({ repo: github, number: 1 })).rejects.toMatchObject({ code: "rate-limited" });
   });
 
+  it("reports a total failure with typed errors, but accepts an empty successful repo", async () => {
+    fetchForge.mockImplementation(async () => Response.json({}, { status: 429 }));
+    gh.mockRejectedValue(ghFailure(401));
+    await expect(listAcross({ repos: [github, gitboy] })).rejects.toMatchObject({
+      name: "IssueListError",
+      errors: [
+        { repo: gitboy, code: "rate-limited" },
+        { repo: github, code: "auth" },
+      ],
+    });
+    gh.mockResolvedValueOnce(ghJson([]));
+    await expect(listAcross({ repos: [github, gitboy] })).resolves.toMatchObject({
+      issues: [], errors: [{ repo: gitboy, code: "rate-limited" }],
+    });
+  });
+
   it("limits mixed-forge fan-out to four and returns successes alongside per-repo errors", async () => {
     let running = 0;
     let peak = 0;
@@ -461,7 +477,7 @@ describe("listing and errors", () => {
     expect(listed.issues).toHaveLength(4);
     expect(listed.issues.some(issue => issue.repo === gitboy)).toBe(true);
     expect(listed.issues.map(issue => issue.number)).toEqual([1, 1, 1, 1]);
-    expect(listed.errors).toEqual([{ repo: "github.com/example/missing", error: expect.any(String) }]);
+    expect(listed.errors).toEqual([{ repo: "github.com/example/missing", code: "not-found", error: expect.any(String) }]);
     expect(gh).toHaveBeenCalledTimes(6);
     expect(fetchForge).toHaveBeenCalledTimes(1);
   });

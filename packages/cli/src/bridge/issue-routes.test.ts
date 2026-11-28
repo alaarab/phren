@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ForgeError, type Issue, type IssueEdit, type NewIssue } from "../forge/issues.js";
+import { ForgeError, IssueListError, type Issue, type IssueEdit, type NewIssue } from "../forge/issues.js";
 import { BUILTIN_MODULES } from "../modules/registry.js";
 import { ISSUES_RESPONSE_LIMIT, LIST_BODY_LIMIT, resetIssueRouteCache, resetIssueRouteDeps, setIssueRouteDeps, type IssueRouteDeps } from "./issue-routes.js";
 import { OWNER_PROOF_HEADER } from "./owner-proof.js";
@@ -147,6 +147,17 @@ describe("forge errors map to HTTP statuses", () => {
     const answer = await request("GET", "/v1/issues/item?repo=github.com/example/widgets&number=7", undefined, {}, store);
     expect(answer.status).toBe(status);
     expect(answer.body).toMatchObject({ error: "The forge said no.", code: `forge-${code}` });
+  });
+
+  it("returns the forge status and typed details when every repo fails", async () => {
+    const repo = "github.com/example/widgets";
+    const failure = { repo, error: "Try again later.", code: "rate-limited" as const };
+    restore = setIssueRouteDeps({ list: async () => { throw new IssueListError([failure]); } });
+    const answer = await request("GET", `/v1/issues?repos=${repo}`, undefined, {}, store);
+    expect(answer).toEqual({
+      status: 429,
+      body: expect.objectContaining({ code: "forge-rate-limited", issues: [], errors: [failure] }),
+    });
   });
 
   it("returns the holding computer when a signed claim conflicts", async () => {

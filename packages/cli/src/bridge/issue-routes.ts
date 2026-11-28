@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { listAcross, ForgeError, parseRepo, providerFor, repoForProject, type Issue, type IssueEdit, type IssueQuery, type IssueRef, type NewIssue, type RepoRef } from "../forge/issues.js";
+import { listAcross, ForgeError, IssueListError, parseRepo, providerFor, repoForProject, type Issue, type IssueEdit, type IssueList, type IssueQuery, type IssueRef, type NewIssue, type RepoRef } from "../forge/issues.js";
 import { listAllProjects } from "../store-routing.js";
 import { BridgeError, type Json } from "./protocol.js";
 
@@ -61,7 +61,10 @@ const FORGE_STATUS: Record<ForgeError["code"], number> = {
 };
 
 function forgeBridgeError(error: unknown): never {
-  if (error instanceof ForgeError) throw new BridgeError(FORGE_STATUS[error.code], error.message, { code: `forge-${error.code}` });
+  if (error instanceof ForgeError) throw new BridgeError(FORGE_STATUS[error.code], error.message, {
+    code: `forge-${error.code}`,
+    ...(error instanceof IssueListError ? { issues: [], errors: error.errors } : {}),
+  });
   throw error;
 }
 
@@ -70,7 +73,7 @@ async function mapped<T>(run: () => Promise<T>): Promise<T> {
 }
 
 export interface IssueRouteDeps {
-  list(query: IssueQuery): Promise<{ issues: Issue[]; errors: { repo: RepoRef; error: string }[] }>;
+  list(query: IssueQuery): Promise<IssueList>;
   get(ref: IssueRef): Promise<Issue>;
   create(input: NewIssue): Promise<Issue>;
   edit(ref: IssueRef, edit: IssueEdit): Promise<Issue>;
@@ -140,7 +143,7 @@ function listIssue(issue: Issue): Json {
   return { ...issue, body: issue.body.slice(0, LIST_BODY_LIMIT), truncated: true };
 }
 
-function boundedList(result: { issues: Issue[]; errors: { repo: RepoRef; error: string }[] }): Json {
+function boundedList(result: IssueList): Json {
   const rows = result.issues.map(listIssue);
   // The envelope and errors are paid for first, so the whole answer, not just
   // the rows, stays under the cap.

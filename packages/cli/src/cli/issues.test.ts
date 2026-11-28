@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChecklistIndexError } from "../forge/checklist.js";
-import { ForgeError, type Issue } from "../forge/issues.js";
+import { ForgeError, IssueListError, type Issue } from "../forge/issues.js";
 import { makeTempDir } from "../test-helpers.js";
 import { handleIssueCommand, parseIssueArgs, resolveIssueRef, splitIssueRef } from "./issues.js";
 
@@ -139,7 +139,7 @@ describe("issue references", () => {
 
 describe("list", () => {
   it("passes the filters and repositories to listAcross", async () => {
-    forge.listAcross.mockResolvedValue({ issues: [issue({ labels: ["bug"], assignees: ["me"] })], errors: [{ repo: other, error: "Sign in to the forge." }] });
+    forge.listAcross.mockResolvedValue({ issues: [issue({ labels: ["bug"], assignees: ["me"] })], errors: [{ repo: other, code: "auth", error: "Sign in to the forge." }] });
     const code = await handleIssueCommand(["list", "--repo", "github.com/example/widgets", "--repo", "gitboy.example/example/gadgets", "--state", "all", "--assignee", "me", "--label", "bug", "--search", "widget", "--limit", "5"], store.path);
     expect(code).toBe(0);
     expect(forge.listAcross).toHaveBeenCalledWith({
@@ -162,6 +162,17 @@ describe("list", () => {
     expect(code).toBe(0);
     expect(JSON.parse(out.join("\n"))).toEqual({ issues: [issue()], errors: [] });
     expect(forge.listAcross.mock.calls[0]![0]).toMatchObject({ repos: [repo], state: "open" });
+  });
+
+  it.each([false, true])("exits 2 for a fully failed list (%j)", async asJson => {
+    const failure = { repo, code: "rate-limited" as const, error: "Try again later." };
+    forge.listAcross.mockRejectedValue(new IssueListError([failure]));
+    expect(await handleIssueCommand(["list", "--repo", repo, ...(asJson ? ["--json"] : [])], store.path)).toBe(2);
+    if (asJson) expect(JSON.parse(out.join("\n"))).toEqual({ issues: [], errors: [failure] });
+    else {
+      expect(out).toEqual([]);
+      expect(err).toEqual([`! ${repo}: Try again later.`]);
+    }
   });
 
   it("defaults to the project around the working directory", async () => {

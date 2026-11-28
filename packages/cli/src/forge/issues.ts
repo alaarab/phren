@@ -61,9 +61,20 @@ export function providerFor(repo: RepoRef): IssueProvider {
   return repoParts(repo).kind === "gitboy" ? gitboyIssues : githubIssues;
 }
 
-export async function listAcross(query: IssueQuery): Promise<{ issues: Issue[]; errors: { repo: RepoRef; error: string }[] }> {
+export interface IssueListFailure { repo: RepoRef; code: ForgeError["code"]; error: string }
+export interface IssueList { issues: Issue[]; errors: IssueListFailure[] }
+
+export class IssueListError extends ForgeError {
+  constructor(public errors: [IssueListFailure, ...IssueListFailure[]]) {
+    const first = errors[0];
+    super(first.code, errors.length === 1 ? first.error : `Could not list issues from any of the ${errors.length} repositories.`);
+    this.name = "IssueListError";
+  }
+}
+
+export async function listAcross(query: IssueQuery): Promise<IssueList> {
   const repos = new Map<string, RepoRef>();
-  const errors: { repo: RepoRef; error: string }[] = [];
+  const errors: IssueListFailure[] = [];
   for (const input of query.repos ?? []) {
     let repo = "(invalid repository)";
     try {
@@ -71,19 +82,24 @@ export async function listAcross(query: IssueQuery): Promise<{ issues: Issue[]; 
       forgeKind(repo.split("/")[0]);
       repos.set(repo.toLowerCase(), repo);
     } catch {
-      errors.push({ repo, error: "Use a github.com or gitboy repository." });
+      errors.push({ repo, code: "invalid", error: "Use a github.com or gitboy repository." });
     }
   }
   const pending = repos.values();
   const issues: Issue[] = [];
+  let successful = 0;
   await Promise.all(Array.from({ length: Math.min(4, repos.size) }, async () => {
     for (const repo of pending) {
       try {
         issues.push(...await providerFor(repo).list({ ...query, repos: [repo] }));
+        successful++;
       } catch (error) {
-        errors.push({ repo, error: error instanceof ForgeError ? error.message : forgeFailure(0).message });
+        const failure = error instanceof ForgeError ? error : forgeFailure(0);
+        errors.push({ repo, code: failure.code, error: failure.message });
       }
     }
   }));
+  const [first, ...rest] = errors.sort((a, b) => a.repo.localeCompare(b.repo));
+  if (!successful && first) throw new IssueListError([first, ...rest]);
   return { issues: orderIssues(issues).slice(0, issueLimit(query.limit)), errors };
 }

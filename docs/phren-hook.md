@@ -1981,7 +1981,7 @@ credentials, and claims.
 
 | Route | Inputs | Answer |
 | --- | --- | --- |
-| `GET /v1/issues` | `repos` (repeatable or comma-separated), `state` (`open` default, `closed`, `all`), `assignee` (`me` or a user), `label`, `search`, `limit` (1-200, default 50) | `{issues, errors, truncated}` through the same bounded fan-out as the CLI: up to four repositories at a time, a per-repository failure in `errors`, and never a pull request. |
+| `GET /v1/issues` | `repos` (repeatable or comma-separated), `state` (`open` default, `closed`, `all`), `assignee` (`me` or a user), `label`, `search`, `limit` (1-200, default 50) | `{issues, errors, truncated}` through the same bounded fan-out as the CLI: up to four repositories at a time, typed per-repository failures in `errors`, and only issue rows. When all repositories fail the response has a forge error status plus `errors`. |
 | `GET /v1/issues/item` | `repo`, `number` | `{issue}`, with the full body. |
 | `POST /v1/issues/create` | `repo`, `title`, optional `body`, `checklist` (strings), `labels` | `{ok:true, issue}`. |
 | `POST /v1/issues/edit` | `repo`, `number`, optional `title`, `body`, `checklist` (`{text,done}`), `addLabels`, `removeLabels`, `state` | `{ok:true, issue}`. |
@@ -2002,7 +2002,7 @@ top-level `truncated: true`, when the answer would still exceed the cap.
 
 Forge failures carry a stable status and a `forge-<code>` code: `auth` is 502,
 `not-found` 404, `forbidden` 403, `rate-limited` 429, `unavailable` 503 and
-`invalid` 400. A malformed body or query is 400. The route never returns a
+`invalid` 400. Claim conflicts return 409 with `forge-conflict`. A malformed body or query is 400. The route never returns a
 token or a forge response body.
 
 ## Schedule editing

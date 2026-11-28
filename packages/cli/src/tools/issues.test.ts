@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ForgeError, type Issue } from "../forge/issues.js";
+import { ForgeError, IssueListError, type Issue } from "../forge/issues.js";
 import { CORE_TOOLS } from "../mcp/profile.js";
 import { makeTempDir } from "../test-helpers.js";
 import type { McpContext } from "./types.js";
@@ -143,13 +143,21 @@ describe("schemas", () => {
 
 describe("list_issues", () => {
   it("fans out over repos and passes every filter", async () => {
-    forge.listAcross.mockResolvedValue({ issues: [issue(), issue({ repo: other, number: 7 })], errors: [{ repo: other, error: "Sign in to the forge." }] });
+    forge.listAcross.mockResolvedValue({ issues: [issue(), issue({ repo: other, number: 7 })], errors: [{ repo: other, code: "auth", error: "Sign in to the forge." }] });
     const result = await call("list_issues", { repos: ["owner/name", "gitboy.example/example/gadgets"], state: "all", assignee: "me", label: "bug", search: "widget", limit: 10 });
     expect(result.ok).toBe(true);
     expect(forge.listAcross).toHaveBeenCalledWith({ repos: [repo, other], state: "all", assignee: "me", label: "bug", search: "widget", limit: 10 });
-    expect(result.data).toEqual({ repos: [repo, other], issues: [issue(), issue({ repo: other, number: 7 })], errors: [{ repo: other, error: "Sign in to the forge." }] });
+    expect(result.data).toEqual({ repos: [repo, other], issues: [issue(), issue({ repo: other, number: 7 })], errors: [{ repo: other, code: "auth", error: "Sign in to the forge." }] });
     expect(String(result.message)).toContain("github.com/example/widgets#12");
     expect(String(result.message)).toContain(`! ${other}: Sign in to the forge.`);
+  });
+
+  it("returns a failed result with the forge code when every repo fails", async () => {
+    const failure = { repo, code: "auth" as const, error: "Renew the token." };
+    forge.listAcross.mockRejectedValue(new IssueListError([failure]));
+    await expect(call("list_issues", { repos: [repo] })).resolves.toMatchObject({
+      ok: false, errorCode: "AUTH", data: { issues: [], errors: [failure] },
+    });
   });
 
   it("reads a project's repository", async () => {

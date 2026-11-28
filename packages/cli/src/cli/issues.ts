@@ -2,12 +2,14 @@ import path from "node:path";
 import { ChecklistIndexError } from "../forge/checklist.js";
 import {
   ForgeError,
+  IssueListError,
   listAcross,
   parseRepoForProject,
   providerFor,
   repoForProject,
   type Issue,
   type IssueEdit,
+  type IssueListFailure,
   type IssueQuery,
   type IssueRef,
   type RepoRef,
@@ -179,7 +181,7 @@ function row(issue: Issue): { repo: string; number: string; state: string; updat
   };
 }
 
-function renderList(issues: Issue[], errors: { repo: RepoRef; error: string }[]): void {
+function renderList(issues: Issue[], errors: IssueListFailure[]): void {
   if (!issues.length) {
     console.log("No issues.");
   } else {
@@ -224,7 +226,7 @@ function json(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
-async function list(args: ParsedArgs, store: string, profile: string): Promise<void> {
+async function list(args: ParsedArgs, store: string, profile: string): Promise<number> {
   only(args.flags, ["--repo", "--project", "--state", "--assignee", "--label", "--search", "--limit", "--json"]);
   const state = (one(args.flags, "--state") ?? "open") as NonNullable<IssueQuery["state"]>;
   if (!["open", "closed", "all"].includes(state)) throw new UsageError("--state must be open, closed or all.");
@@ -238,9 +240,17 @@ async function list(args: ParsedArgs, store: string, profile: string): Promise<v
     ...(one(args.flags, "--search") ? { search: one(args.flags, "--search") } : {}),
     ...(limitText !== undefined ? { limit: positiveInteger(limitText, "--limit") } : {}),
   };
-  const result = await listAcross(query);
-  if (has(args.flags, "--json")) json(result);
-  else renderList(result.issues, result.errors);
+  try {
+    const result = await listAcross(query);
+    if (has(args.flags, "--json")) json(result);
+    else renderList(result.issues, result.errors);
+    return 0;
+  } catch (error) {
+    if (!(error instanceof IssueListError)) throw error;
+    if (has(args.flags, "--json")) json({ issues: [], errors: error.errors });
+    else for (const failure of error.errors) console.error(`! ${failure.repo}: ${failure.error}`);
+    return 2;
+  }
 }
 
 async function showIssue(args: ParsedArgs, store: string): Promise<void> {
@@ -330,7 +340,7 @@ export async function handleIssueCommand(args: string[], store: string, profile 
   const [action, ...rest] = args;
   try {
     const parsed = parseIssueArgs(rest);
-    if (action === "list" || action === undefined) await list(parsed, store, profile);
+    if (action === "list" || action === undefined) return await list(parsed, store, profile);
     else if (action === "show") await showIssue(parsed, store);
     else if (action === "new") await create(parsed, store);
     else if (action === "edit") await edit(parsed, store);

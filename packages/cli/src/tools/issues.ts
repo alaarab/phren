@@ -3,6 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import {
   ForgeError,
+  IssueListError,
   listAcross,
   parseRepoForProject,
   providerFor,
@@ -26,7 +27,10 @@ class IssueInputError extends Error {
 
 function failure(error: unknown) {
   if (error instanceof ForgeError) {
-    return mcpResponse({ ok: false, error: error.message, errorCode: error.code.toUpperCase().replace(/-/g, "_") });
+    return mcpResponse({
+      ok: false, error: error.message, errorCode: error.code.toUpperCase().replace(/-/g, "_"),
+      ...(error instanceof IssueListError ? { data: { issues: [], errors: error.errors } } : {}),
+    });
   }
   if (error instanceof IssueInputError) {
     return mcpResponse({ ok: false, error: error.message, errorCode: "INVALID_ARGUMENT" });
@@ -92,7 +96,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     "list_issues",
     {
       title: "◆ phren · issues",
-      description: "List forge issues (GitHub or gitboy) for one or more repositories, or for a project. Defaults to open issues, 50 results (max 200), newest update first. A repository that is unreachable is reported in errors while the others still return.",
+      description: "List forge issues (GitHub or gitboy) for one or more repositories, or for a project. Defaults to open issues, 50 results (max 200), newest update first. Results include per-repository errors. If every repository fails, the tool returns an error.",
       inputSchema: z.object({
         repos: z.array(z.string()).optional().describe("Repository references: owner/name, domain/owner/name, or a URL. Omit to use project, or every project with a resolvable repository."),
         project: projectField,
