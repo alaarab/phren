@@ -2,7 +2,7 @@ import { hostname } from "node:os";
 import { BridgeError, type Json, object, objects } from "./protocol.js";
 import { peerRead } from "./peer-reads.js";
 import { hookPeers, peerRequest } from "./peers.js";
-import { ownerInboxSchema, pasteCommand, type OwnerInbox } from "./owner-inbox.js";
+import { inboxWire, ownerInboxSchema, pasteCommand, type OwnerInbox } from "./owner-inbox.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { ownerInboxKey } from "./owner-inbox-key.js";
 
@@ -19,11 +19,15 @@ const RECONCILE_FIELDS = ["live", "source", "actionId"] as const;
 export const COMPACT_PEER_TIMEOUT_MS = 6_000;
 
 /** A compact item: the fields above, and nothing an older or newer peer added.
- * `reconcile` keeps the aggregation keys, for a Hook reading another Hook. */
-export function compactInboxItem(item: Json, reconcile = false): Json {
+ * `reconcile` keeps the aggregation keys, for a Hook reading another Hook.
+ * `issues` adds the structured issue link for a reader that asked for it; every
+ * other reader gets the link appended to the title instead (see `inboxWire`). */
+export function compactInboxItem(item: Json, reconcile = false, issues = false): Json {
+  const wire = inboxWire(item, issues);
   const compact: Json = {};
-  for (const field of COMPACT_FIELDS) if (item[field] !== undefined) compact[field] = item[field];
-  if (reconcile) for (const field of RECONCILE_FIELDS) if (item[field] !== undefined) compact[field] = item[field];
+  for (const field of COMPACT_FIELDS) if (wire[field] !== undefined) compact[field] = wire[field];
+  if (reconcile) for (const field of RECONCILE_FIELDS) if (wire[field] !== undefined) compact[field] = wire[field];
+  if (issues && wire.issue !== undefined) compact.issue = wire.issue;
   return compact;
 }
 
@@ -50,11 +54,13 @@ function placed(item: Json, inboxComputer: string): Json {
 export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnly = false, compact = false, reconcile = false): Promise<Json> {
   const data = ownerInboxSchema.parse(input);
   const { computer, ...local } = data;
+  const issues = data.issues === true;
   const peers = await hookPeers().catch(() => []);
-  const localList = `/v1/owner-inbox?local=1${data.includeResolved ? "&includeResolved=true" : ""}${compact ? "&compact=1" : ""}`;
+  // `issues=1` is a query flag: an older Hook ignores it and answers in full.
+  const localList = `/v1/owner-inbox?local=1${data.includeResolved ? "&includeResolved=true" : ""}${compact ? "&compact=1" : ""}${issues ? "&issues=1" : ""}`;
   const peerList = compact ? `${localList}&reconcile=1` : localList;
   const options = compact ? { timeout: COMPACT_PEER_TIMEOUT_MS } : undefined;
-  const project = (items: Json[], withReconciliation = false) => compact ? items.map(item => compactInboxItem(item, withReconciliation)) : items;
+  const project = (items: Json[], withReconciliation = false) => compact ? items.map(item => compactInboxItem(item, withReconciliation, issues)) : items.map(item => inboxWire(item, issues));
   if (computer && computer !== "local" && !isLocalComputer(computer)) {
     const peer = peers.find(peer => peer.name === computer);
     if (!peer) throw new BridgeError(404, "That inbox computer is not linked.");
@@ -62,15 +68,26 @@ export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnl
       const view = await peerRead(peer, localList, options);
       return { ...view, items: project(objects(view.items).map(item => placed(item, computer))), unreachable: [] };
     }
-    if (local.command !== undefined || local.task !== undefined || local.pr !== undefined || local.key !== undefined || local.ifUpdatedAt !== undefined) {
+    const needsActions = local.command !== undefined || local.task !== undefined || local.pr !== undefined || local.key !== undefined || local.ifUpdatedAt !== undefined;
+    const needsIssues = local.issue !== undefined;
+    if (needsActions || needsIssues) {
       const health = await peerRequest(peer, "/v1/health", undefined, 5_000);
-      if (object(health.capabilities).ownerInboxActions !== true) {
+      const supported = object(health.capabilities);
+      if (needsActions && supported.ownerInboxActions !== true) {
         throw new BridgeError(409, `Upgrade the Hook on ${computer} to use inbox commands, task or PR links, keys or guarded resolves.`, { code: "owner-inbox-actions-unsupported" });
       }
+      if (needsIssues && supported.ownerInboxIssues !== true) {
+        throw new BridgeError(409, `Upgrade the Hook on ${computer} to link an inbox item to an issue.`, { code: "owner-inbox-issues-unsupported" });
+      }
     }
-    const result = await peerRequest(peer, "/v1/owner-inbox", local);
+    // `issues` is this Hook's answer shape, not a field an older peer's strict
+    // schema accepts; the answer is shaped here instead, and the peer is asked
+    // through its query flag (an older peer ignores it).
+    const { issues: _issues, ...peerBody } = local;
+    const result = await peerRequest(peer, `/v1/owner-inbox${issues ? "?issues=1" : ""}`, peerBody);
     const item = object(result.item);
-    return { ...result, item: local.action === "add" ? placed(item, computer) : { ...item, inboxComputer: computer } };
+    const answer = local.action === "add" ? placed(item, computer) : { ...item, inboxComputer: computer };
+    return { ...result, item: inboxWire(answer, issues) };
   }
   const result = await inbox.run(local);
   if (data.action !== "list") return result;

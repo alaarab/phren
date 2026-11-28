@@ -43,20 +43,31 @@ describe("dispatch entry points", () => {
     vi.mocked(hookRequest).mockResolvedValue({ ok: true });
     const call = (operation: string, rest: object) => exposed.get(profile === "full" ? "owner_inbox" : "phren_admin")!({ operation, ...rest, ...(profile === "core" ? { action: "owner_inbox" } : {}) });
     await call("add", { title: "Restart the router" });
-    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox", { action: "add", title: "Restart the router" });
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox?issues=1", { action: "add", title: "Restart the router" });
+    await call("add", { title: "Rotate the deploy key", issue: "github.com/alaarab/phren#42" });
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox?issues=1", { action: "add", title: "Rotate the deploy key", issue: "github.com/alaarab/phren#42" });
     await call("resolve", { id: session });
-    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox", { action: "resolve", id: session });
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox?issues=1", { action: "resolve", id: session });
+    // The reader flag is a query parameter: a Hook from before the field
+    // existed parses every one of these bodies with a strict schema.
+    for (const [, body] of vi.mocked(hookRequest).mock.calls.filter(([route]) => route.startsWith("/v1/owner-inbox"))) {
+      expect("issues" in (body as object)).toBe(false);
+    }
   });
 
   it("routes the inbox CLI and preserves dispatch's keep-open option", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.mocked(hookRequest).mockResolvedValue({ ok: true });
     const context = { phrenPath: () => "unused", profile: () => "unused" };
+    await lookupCommand("owner-inbox")!.run(["add", "Rotate the deploy key", "--issue", "github.com/alaarab/phren#42"], context);
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox?issues=1", { action: "add", title: "Rotate the deploy key", issue: "github.com/alaarab/phren#42" });
     await lookupCommand("owner-inbox")!.run(["resolve", session, "--computer", "Desk", "--resolution", "Approved"], context);
-    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox", { action: "resolve", id: session, computer: "Desk", resolution: "Approved" });
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox?issues=1", { action: "resolve", id: session, computer: "Desk", resolution: "Approved" });
     const updatedAt = "2026-11-26T10:00:00.000Z";
     await lookupCommand("owner-inbox")!.run(["resolve", session, "--computer", "Desk", "--resolution", "done", "--if-updated-at", updatedAt], context);
-    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox", { action: "resolve", id: session, computer: "Desk", resolution: "done", ifUpdatedAt: updatedAt });
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox?issues=1", { action: "resolve", id: session, computer: "Desk", resolution: "done", ifUpdatedAt: updatedAt });
+    await lookupCommand("owner-inbox")!.run(["list", "--all"], context);
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox?issues=1", { action: "list", includeResolved: true });
     await lookupCommand("dispatch")!.run(["Desk", "phren", "--label", "Checks", "--prompt", "Run checks", "--keep-open"], context);
     expect(hookRequest).toHaveBeenLastCalledWith("/v1/dispatch", { ...brief, closeOnFinish: false }, undefined, 180_000);
   });

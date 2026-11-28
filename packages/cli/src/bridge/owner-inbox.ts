@@ -13,6 +13,28 @@ const command = z.string().min(1).max(4000).refine(s => !/[\x00-\x08\x0b-\x1f\x7
 const taskRef = z.string().regex(/^bid:[a-f0-9]{8}$/);
 const prRef = z.string().max(1000).refine(s => parseForgeUrl(s)?.kind === "pull");
 const dedupeKey = z.string().min(1).max(200).regex(/^[A-Za-z0-9:_./#@-]+$/);
+/** The issues layer's repo reference: lowercase dotted labels, then an owner and
+ * a name, each a plain path segment (never "." or ".."). */
+const repoDomain = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
+const repoSegment = /^[A-Za-z0-9._-]+$/;
+/** A forge issue link, `domain/owner/name#N` (for example
+ * `github.com/alaarab/phren#42`), at most 300 characters. The number is a safe
+ * integer, so a link always names one issue. */
+export function parseIssueLink(text: string): { repo: string; number: number } | undefined {
+  if (text.length > 300) return undefined;
+  const match = /^(.+)#([1-9][0-9]*)$/.exec(text);
+  if (!match) return undefined;
+  const repo = match[1], number = Number(match[2]);
+  if (!Number.isSafeInteger(number)) return undefined;
+  const parts = repo.split("/");
+  if (parts.length !== 3) return undefined;
+  const [domain, owner, name] = parts;
+  if (!repoDomain.test(domain)) return undefined;
+  if (![owner, name].every(part => repoSegment.test(part) && part !== "." && part !== "..")) return undefined;
+  return { repo, number };
+}
+const issueRef = z.string().max(300).refine(s => parseIssueLink(s) !== undefined,
+  "Use domain/owner/name#N, for example github.com/alaarab/phren#42.");
 export const inboxTargetSchema = z.union([targetSchema, startingTargetSchema]);
 const itemSchema = z.object({
   id: z.string().uuid(), kind: z.enum(["manual", "needs-you", "blocked"]), title,
@@ -21,11 +43,16 @@ const itemSchema = z.object({
   project: z.string().max(200).optional(), computer: z.string().max(253).optional(),
   target: inboxTargetSchema.optional(), dispatch: z.string().uuid().optional(), actionId: z.string().max(200).optional(),
   source: z.string().max(500).optional(), live: z.boolean().optional(),
-  // Manual extras: what the owner should run, and the task and pull request it links.
+  // Manual extras: what the owner should run, and the task and pull request it
+  // links. An issue link never gets a key of its own: it rides in the title, so
+  // a Hook from before it existed still reads every stored row (see
+  // `inboxIssueTitle`).
   command: command.optional(), task: taskRef.optional(), pr: prRef.optional(), key: dedupeKey.optional(),
 }).strict();
 export type InboxItem = z.infer<typeof itemSchema>;
-const legacyMarkedItemSchema = itemSchema.extend({ reopened: z.boolean().optional() });
+/** Rows a previous build wrote, read once and migrated: its inline reopen
+ * marker, and an `issue` key that must become part of the title. */
+const legacyMarkedItemSchema = itemSchema.extend({ reopened: z.boolean().optional(), issue: issueRef.optional() });
 const MAX_ITEMS = 10_000;
 const reopenedSchema = z.array(z.string().uuid()).max(MAX_ITEMS);
 /** The internal tick snapshot: the public open row plus whether this is the
@@ -37,7 +64,12 @@ export const ownerInboxSchema = z.object({
   id: z.string().uuid().optional(), resolution: z.string().max(2000).optional(),
   ifUpdatedAt: z.string().datetime().optional(),
   includeResolved: z.boolean().optional(), computer: computerName.optional(),
-  command: command.optional(), task: taskRef.optional(), pr: prRef.optional(), key: dedupeKey.optional(),
+  command: command.optional(), task: taskRef.optional(), pr: prRef.optional(), issue: issueRef.optional(), key: dedupeKey.optional(),
+  /** The reader asks for the structured `issue` field. Without it, the row is
+   * sent as stored: the link stays in the title, where every older strict Hook
+   * and phone schema accepts it. Set from the route's `issues=1`, never by a
+   * client body in this build. */
+  issues: z.boolean().optional(),
 }).strict();
 export interface InboxSource { source: string; kind: "needs-you" | "blocked"; title: string; project?: string; computer?: string; target?: z.infer<typeof inboxTargetSchema>; dispatch?: string; actionId?: string; task?: string }
 export interface InboxSnapshot { sources: InboxSource[]; unavailableDispatches?: string[] }
@@ -53,6 +85,69 @@ export function pasteCommand(item: { id: string; command: string; updatedAt: str
 const withPaste = (row: InboxItem): Json => row.command
   ? { ...row, paste: pasteCommand({ id: row.id, command: row.command, updatedAt: row.updatedAt }) }
   : row;
+
+/** How a reader without the structured `issue` field learns the link. */
+export function issueSuffix(issue: string): string { return ` (issue: ${issue})`; }
+
+/** A stored title split into its plain text and the issue link it carries. */
+export function issueInTitle(title: string): { title: string; issue?: string } {
+  const match = / \(issue: ([^()\s]+)\)$/.exec(title);
+  return match && parseIssueLink(match[1]) ? { title: title.slice(0, match.index), issue: match[1] } : { title };
+}
+
+const ELLIPSIS = "…";
+/** The item title bound: `itemSchema`'s `title.max` and the phone contract. */
+export const INBOX_TITLE_LIMIT = 500;
+/** How long a plain title may be beside this link. */
+export function titleBudget(issue: string): number { return INBOX_TITLE_LIMIT - issueSuffix(issue).length; }
+
+/** The stored title: the plain title plus its link, exactly. Never trimmed,
+ * because two different titles would then store identically and a re-add would
+ * not advance `updatedAt` (which a stale close and a reopen rely on). A caller
+ * adding a link checks `titleBudget` first and refuses a title that does not
+ * fit; idempotent, so a title already carrying the link is not decorated twice. */
+export function inboxIssueTitle(item: { title: string; issue?: string }): string {
+  const parsed = issueInTitle(item.title);
+  const link = item.issue ?? parsed.issue;
+  if (!link) return item.title;
+  return `${parsed.issue ? parsed.title : item.title}${issueSuffix(link)}`;
+}
+
+/** The APNs alert body, which `push.ts` cuts at 500 UTF-8 bytes: trim by bytes
+ * with the link's own bytes reserved, so a long title never loses the link.
+ * This trims a notification only, never a stored row. */
+export function pushIssueTitle(item: { title: string; issue?: string }): string {
+  const composed = inboxIssueTitle(item);
+  const parsed = issueInTitle(composed);
+  if (!parsed.issue) return composed;
+  const suffix = issueSuffix(parsed.issue), bytes = (text: string) => Buffer.byteLength(text, "utf8");
+  const budget = 500 - bytes(suffix);
+  if (bytes(parsed.title) <= budget) return composed;
+  let end = parsed.title.length;
+  while (end > 0 && bytes(parsed.title.slice(0, end)) + bytes(ELLIPSIS) > budget) end--;
+  // Never cut a surrogate pair in half: a lone one becomes U+FFFD on the wire.
+  if (end > 0 && /[\uD800-\uDBFF]/.test(parsed.title[end - 1])) end--;
+  if (end === 0) return suffix.trimStart();
+  return `${parsed.title.slice(0, end).trimEnd()}${ELLIPSIS}${suffix}`;
+}
+
+/**
+ * One inbox row as a reader receives it. The stored row carries the link only
+ * in its title, which every older strict Hook and phone schema accepts. A
+ * reader that asks for it (`issues`) gets the link as a field and the plain
+ * title instead; everyone else gets the row as stored.
+ */
+export function inboxWire(item: Json, issues = false): Json {
+  const { issue, ...rest } = item;
+  if (typeof item.title !== "string") return issues ? { ...item } : { ...rest };
+  const parsed = issueInTitle(item.title);
+  const link = typeof issue === "string" ? issue : parsed.issue;
+  if (issues) return { ...rest, ...(link ? { issue: link } : {}), title: link ? parsed.title : item.title };
+  // A stored title already carries its own link. Only a legacy row's separate
+  // `issue` key is folded in, and only when it fits: never trim a title.
+  const title = parsed.issue || !link || parsed.title.length > titleBudget(link) ? item.title : inboxIssueTitle({ title: parsed.title, issue: link });
+  return { ...rest, title };
+}
 
 // Prompt prose, counters and timestamps are observations, not identities.
 function sourceKey(row: Pick<InboxItem, "target" | "actionId" | "source" | "computer" | "dispatch">): string | undefined {
@@ -91,14 +186,20 @@ export class OwnerInbox {
     await atomicInPrivateDir(this.reopenedFile, retained);
   }
 
-  /** Called under the Inbox lock, including while migrating a previous build's marker. */
+  /** Called under the Inbox lock, including while migrating a previous build's
+   * inline reopen marker or `issue` key. */
   private async read(): Promise<InboxItem[]> {
     const info = await lstat(this.file).catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
     if (!info) return [];
     if (!info.isFile() || info.isSymbolicLink() || info.size > 4 * 1024 * 1024) throw new BridgeError(409, "The owner inbox cannot be read safely.");
     const stored = z.array(legacyMarkedItemSchema).max(MAX_ITEMS).parse(JSON.parse(await readFile(this.file, "utf8")));
-    if (!stored.some(row => row.reopened !== undefined)) return stored;
-    const rows = stored.map(({ reopened: _, ...row }) => row);
+    if (!stored.some(row => row.reopened !== undefined || row.issue !== undefined)) return stored;
+    // A previous build kept the issue link in a key of its own; fold it into
+    // the title so this Hook's store is one an older Hook reads too. A title
+    // with no room for the link keeps its text and loses the link, never a
+    // trimmed title that could collide with another row.
+    const rows = stored.map(({ reopened: _, issue, ...row }) => issue && row.title.length <= titleBudget(issue)
+      ? { ...row, title: inboxIssueTitle({ title: row.title, issue }) } : row);
     const reopened = stored.filter(row => row.reopened === true).map(row => row.id);
     if (reopened.length) await this.recordReopens(reopened, rows);
     await atomicInPrivateDir(this.file, rows);
@@ -189,9 +290,16 @@ export class OwnerInbox {
         if (!data.title) throw new BridgeError(400, "Name the owner inbox item.");
         // The schema guarantees a pr parses as a pull request; store its normalized url.
         const pr = data.pr ? parseForgeUrl(data.pr) : undefined;
+        // The issue link rides in the title, which an older Hook reads as text.
+        const nextTitle = data.issue ? inboxIssueTitle({ title: data.title, issue: data.issue }) : data.title;
+        // Never trim to fit the link: two different titles would store
+        // identically, so a re-add would not advance the revision.
+        if (data.issue && nextTitle.length > INBOX_TITLE_LIMIT) {
+          throw new BridgeError(400, `Title too long with an issue link: shorten it to ${titleBudget(data.issue)} characters.`);
+        }
         // Unset fields are left out, not stored as undefined.
         const fields = { project: data.project, command: data.command, task: data.task, pr: pr?.url, key: data.key };
-        const next = { title: data.title, ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) } as Pick<InboxItem, "title" | "project" | "command" | "task" | "pr" | "key">;
+        const next = { title: nextTitle, ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) } as Pick<InboxItem, "title" | "project" | "command" | "task" | "pr" | "key">;
         const differs = (row: InboxItem) => row.title !== next.title || row.project !== next.project || row.command !== next.command
           || row.task !== next.task || row.pr !== next.pr || row.key !== next.key;
         const apply = (row: InboxItem): void => {
@@ -204,7 +312,7 @@ export class OwnerInbox {
         const effective = next.key ?? (next.pr ? `pr:${next.pr}` : undefined);
         const prior = data.id ? rows.find(row => row.id === data.id) : undefined;
         if (prior && prior.kind !== "manual") throw new BridgeError(409, "This inbox id names another item.");
-        if (prior?.state === "resolved" && !differs(prior)) return { ok: true, item: withPaste(prior) };
+        if (prior?.state === "resolved" && !differs(prior)) return { ok: true, item: inboxWire(withPaste(prior), data.issues) };
         const matches = rows.filter(row => row.kind === "manual" && row.state === "open" && (
           (next.pr && row.pr === next.pr) || (effective && (row.key ?? (row.pr ? `pr:${row.pr}` : undefined)) === effective)));
         if (matches.length > 1 || (prior && matches.length && matches[0] !== prior)) {
@@ -216,22 +324,22 @@ export class OwnerInbox {
           await this.recordReopens([prior.id], rows);
           apply(prior); prior.state = "open"; delete prior.resolvedAt; delete prior.resolution;
           await atomicInPrivateDir(this.file, rows);
-          return { ok: true, item: withPaste(prior), reopened: true };
+          return { ok: true, item: inboxWire(withPaste(prior), data.issues), reopened: true };
         }
         const target = prior ?? matches[0];
         if (target) {
           if (differs(target)) {
             apply(target);
             await atomicInPrivateDir(this.file, rows);
-            return { ok: true, item: withPaste(target), updated: true };
+            return { ok: true, item: inboxWire(withPaste(target), data.issues), updated: true };
           }
-          return { ok: true, item: withPaste(target) };
+          return { ok: true, item: inboxWire(withPaste(target), data.issues) };
         }
         if (rows.length >= MAX_ITEMS) throw new BridgeError(409, "The owner inbox is full.");
         const item = itemSchema.parse({ id: data.id ?? randomUUID(), kind: "manual", ...next, state: "open", createdAt: at, updatedAt: at });
         rows.push(item);
         await atomicInPrivateDir(this.file, rows);
-        return { ok: true, item: withPaste(item) };
+        return { ok: true, item: inboxWire(withPaste(item), data.issues) };
       }
       if (data.action === "resolve") {
         const item = rows.find(row => row.id === data.id);
@@ -239,11 +347,11 @@ export class OwnerInbox {
         if (data.ifUpdatedAt !== undefined && item.updatedAt !== data.ifUpdatedAt) throw new BridgeError(409, "This inbox item changed. Refresh it and try again.");
         if (item.state !== "resolved") { item.state = "resolved"; item.resolvedAt = at; item.updatedAt = nextUpdate(item); item.resolution = data.resolution; changed = true; }
         if (changed) await atomicInPrivateDir(this.file, rows);
-        return { ok: true, item };
+        return { ok: true, item: inboxWire(item, data.issues) };
       }
       if (changed) await atomicInPrivateDir(this.file, rows);
       const visible = rows.filter(row => data.includeResolved || (row.state === "open" && (row.kind === "manual" || row.live === true))).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-      return { ok: true, items: visible.map(row => row.kind === "manual" ? withPaste(row) : row) };
+      return { ok: true, items: visible.map(row => inboxWire(row.kind === "manual" ? withPaste(row) : row, data.issues)) };
     });
   }
   /** A signed phone decision on one row, guarded by the exact revision the

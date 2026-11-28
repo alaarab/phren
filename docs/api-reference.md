@@ -2801,7 +2801,9 @@ Full profile or `phren_admin(action:"owner_inbox",...)` in core. `operation` def
 to `list`; optional `includeResolved` shows history. `add` requires `title`, with
 optional `project`, stable UUID `id`, `command` (a paste-able shell command,
 at most 20 lines; phren never runs it), `task` (`bid:xxxxxxxx`), `pr` (an HTTPS
-pull or merge request URL, stored normalized) and `key` (a dedupe key).
+pull or merge request URL, stored normalized), `issue` (the forge issue the item
+carries out, `domain/owner/name#N`, at most 300 characters, for example
+`github.com/alaarab/phren#42`) and `key` (a dedupe key).
 `resolve` requires `id` and accepts `resolution`, `computer` (the item's
 `inboxComputer`, omitted for local), and `ifUpdatedAt` (the item's `updatedAt`).
 A stale `ifUpdatedAt` returns 409. Use the prompt's own route to answer or
@@ -2811,12 +2813,19 @@ entries. Add and list responses compute a `paste` for manual items with a
 runs multiline commands with `sh -e`, and routes to the owning Hook. Named
 remote adds and resolves also return `inboxComputer`. Remote `command`, `task`,
 `pr`, `key` and `ifUpdatedAt` require the destination Hook's `ownerInboxActions`
-capability. Legacy adds and resolves work during a rolling upgrade.
+capability, and a remote `issue` requires `ownerInboxIssues`. Legacy adds and
+resolves work during a rolling upgrade.
 
 Manual adds match open items by normalized PR or `key`. A write whose identifiers
 match different items returns 409. An explicit `id` naming a resolved manual item
 reopens it when its fields change. An identical retry returns it unchanged, and
-an explicit `id` naming an automatic item is refused. Open manual items resolve
+an explicit `id` naming an automatic item is refused. An `issue` link is stored
+as part of the item's title and sent as a field only to a reader that asks for
+it (`issues=1` on the Hook route, `issues:true` in a POST body); every other
+reader, including older Hooks and phones, gets the link in the title, because
+their item schemas reject unknown keys. A linked title is stored whole and never
+trimmed: an add whose title and link exceed 500 characters together returns 400
+and names the length that fits. Open manual items resolve
 on the list tick when a GitHub or gitboy PR merges or closes (`done: PR merged`,
 `done: PR closed without merging`). When the PR read supplies neither outcome,
 a linked Done task also resolves the item (`done: task <bid> is Done`). GitLab
