@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Treat `tasks` as a retired module name in `.config/modules.yaml`: it is ignored without the "unknown module" warning, and every write by phren drops it, so computers still on 0.3.x can no longer bring the warning back.
+
 ## [0.4.1] - 2026-11-28
 
 ### Fixed
