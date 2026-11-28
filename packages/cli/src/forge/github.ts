@@ -23,6 +23,7 @@ export const githubIssues = issueProvider("github", async ({ domain, path, repo 
       if (!status && /gh auth login|set the GH_TOKEN|not logged in/i.test(message)) throw forgeFailure(401);
       throw forgeFailure(status, status === 403 && /rate limit/i.test(message));
     }
+    if (method === "DELETE" && !stdout.trim()) return undefined;
     try { return JSON.parse(stdout); }
     catch { throw forgeFailure(0); }
   }

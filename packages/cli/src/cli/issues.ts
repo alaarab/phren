@@ -102,7 +102,7 @@ function positiveInteger(text: string, label: string): number {
 export function splitIssueRef(text: string): { repo?: string; number: number } {
   const input = text.trim();
   if (!input) throw new UsageError("An issue reference is required: repo#N, a URL, or #N with --repo or --project.");
-  const url = /^(?:https?:\/\/)?(\S+?)\/issues\/(\d+)\/?(?:#\S*)?$/i.exec(input);
+  const url = /^((?:https?:\/\/)?\S+?)\/issues\/(\d+)\/?(?:#\S*)?$/i.exec(input);
   if (url) return { repo: url[1], number: positiveInteger(url[2], "The issue number") };
   const hash = /^(.*)#(\d+)$/.exec(input);
   if (hash) {

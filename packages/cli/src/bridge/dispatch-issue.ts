@@ -1,4 +1,4 @@
-import { lstat, readFile, unlink } from "node:fs/promises";
+import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { z } from "zod";
@@ -42,6 +42,7 @@ function sidecar(id: string): string {
 
 export async function writeDispatchIssue(id: string, issue: IssueRef): Promise<void> {
   const file = sidecar(id);
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const release = tryFileLock(file);
   if (!release) throw new BridgeError(409, "This dispatch issue is being recorded. Retry the dispatch.");
   try {
@@ -88,6 +89,7 @@ function queuePullLink(issue: IssueRef, url: string): Promise<void> {
 }
 
 async function postPullLink(file: string, issue: IssueRef, url: string): Promise<void> {
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const release = tryFileLock(file);
   if (!release) throw new BridgeError(409, "The PR link is being posted. Retry the report.");
   try {
