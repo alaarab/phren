@@ -1974,7 +1974,7 @@ unverified rather than resolved. No phone UI changes are included here.
 With `capabilities.issues: 1` the Hook serves the owner's forge issues from its
 memory stores. All routes are owner-only: a peer computer and an agent's MCP
 call are refused with 403, and the five writes also require the paired phone's
-owner-proof signature once it has signed one (`owner-proof.ts`). The service
+owner-proof signature from the first request (`owner-proof.ts`). The service
 behind them is `packages/cli/src/forge/`; the Hook only shapes requests and
 answers. See [Issues](issues.md) for repository selection, Gitboy and GitHub
 credentials, and claims.

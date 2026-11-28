@@ -72,8 +72,6 @@ beforeEach(async () => {
   await mkdir(bridge, { recursive: true });
   await mkdir(path.join(home, ".ssh"), { recursive: true });
   await writeFile(path.join(home, ".ssh", "authorized_keys"), AUTHORIZED_KEYS);
-  // The phone has signed once: unsigned writes to these routes are refused.
-  await writeFile(path.join(bridge, "owner-proof.json"), "{}");
   vi.stubEnv("PHREN_BRIDGE_HOME", bridge);
   vi.stubEnv("HOME", home);
   restore = setIssueRouteDeps(forged);
@@ -113,8 +111,14 @@ describe("issue routes are owner-only", () => {
     expect(answer.status).toBe(403);
   });
 
-  it("refuses an unsigned write once the phone has signed before", async () => {
-    const answer = await request("POST", "/v1/issues/create", { repo: "github.com/example/widgets", title: "T" }, {}, store);
+  it.each([
+    ["create", { title: "New issue" }],
+    ["edit", { number: 7, title: "Updated title" }],
+    ["comment", { number: 7, body: "A comment" }],
+    ["claim", { number: 7 }],
+    ["close", { number: 7 }],
+  ])("requires owner proof for %s from the first request", async (route, input) => {
+    const answer = await request("POST", `/v1/issues/${route}`, { repo: "github.com/example/widgets", ...input }, {}, store);
     expect(answer.status).toBe(403);
     expect(answer.body).toMatchObject({ code: "owner-proof-required" });
   });
