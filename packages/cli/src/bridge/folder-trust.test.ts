@@ -146,12 +146,13 @@ describe("folder trust", () => {
     expect(await pretrustFolder("claude", project, "test", env)).toBe("already");
     expect(await pretrustFolder("codex", project, "test", env)).toBe("trusted");
     expect(await readFile(codexFile, "utf8")).toBe(`[projects.${JSON.stringify(project)}]\ntrust_level = "trusted"\n`);
-    // No trust screen to skip, no such folder, or a relative path: nothing is written.
+    // Unsupported harnesses, invalid paths and broad directories are skipped.
     const other = path.join(home, "Projects", "other");
     await mkdir(other);
     expect(await pretrustFolder("opencode", other, "test", env)).toBe("skipped");
     expect(await pretrustFolder("claude", path.join(home, "missing"), "test", env)).toBe("skipped");
     expect(await pretrustFolder("claude", "Projects/other", "test", env)).toBe("skipped");
+    expect(await pretrustFolder("codex", path.parse(home).root, "test", env)).toBe("skipped");
     // PHREN_PRETRUST=off turns it off.
     expect(pretrustEnabled({ PHREN_PRETRUST: "off" })).toBe(false);
     expect(pretrustEnabled({})).toBe(true);

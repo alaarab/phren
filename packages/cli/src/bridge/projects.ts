@@ -432,11 +432,14 @@ async function scanWebServers(): Promise<LocalServer[]> {
 
 /** Launch only in real local directories under home or a locator candidate. */
 export async function launchDirectory(raw: unknown, activity: Json[] = [], located: Iterable<string> = []): Promise<string> {
-  if (typeof raw !== "string" || raw.length > 4096 || !path.isAbsolute(raw) || /[\x00-\x1f\x7f]/.test(raw)) throw new BridgeError(400, "Invalid workspace directory.");
+  if (typeof raw !== "string" || raw.length > 4096 || /[\x00-\x1f\x7f]/.test(raw)) throw new BridgeError(400, "Invalid workspace directory.");
+  const homePath = homeDir();
+  const expanded = raw === "~" || raw.startsWith("~/") ? homePath + raw.slice(1) : raw;
+  if (!path.isAbsolute(expanded)) throw new BridgeError(400, "Invalid workspace directory.");
   let dir: string;
-  try { dir = await realpath(raw); if (!(await stat(dir)).isDirectory()) throw new Error(); }
+  try { dir = await realpath(expanded); if (!(await stat(dir)).isDirectory()) throw new Error(); }
   catch { throw new BridgeError(400, "Workspace directory does not exist."); }
-  const home = await realpath(homeDir());
+  const home = await realpath(homePath);
   if (dir === home || dir.startsWith(home + path.sep)) return dir;
   for (const candidate of located) {
     const real = await realpath(candidate).catch(() => undefined);
