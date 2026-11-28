@@ -5,7 +5,7 @@ import { z } from "zod";
 import { ForgeError, providerFor, type IssueRef } from "../forge/issues.js";
 import { repoParts } from "../forge/repositories.js";
 import { tryFileLock } from "../governance/locks.js";
-import { parseForgeUrl } from "../task/work.js";
+import { parseForgeUrl } from "../forge/links.js";
 import { atomic, atomicInPrivateDir, BridgeError, bridgeRoot } from "./protocol.js";
 
 const dispatchId = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
@@ -42,10 +42,16 @@ function sidecar(id: string): string {
 
 export async function writeDispatchIssue(id: string, issue: IssueRef): Promise<void> {
   const file = sidecar(id);
-  const current = await readDispatchIssue(id);
-  if (!current) await atomicInPrivateDir(file, issue);
-  else if (issueReference(current).toLowerCase() !== issueReference(issue).toLowerCase())
-    throw new BridgeError(409, "This dispatch id is already bound to another issue.");
+  const release = tryFileLock(file);
+  if (!release) throw new BridgeError(409, "This dispatch issue is being recorded. Retry the dispatch.");
+  try {
+    const current = await readDispatchIssue(id);
+    if (!current) await atomicInPrivateDir(file, issue);
+    else if (issueReference(current).toLowerCase() !== issueReference(issue).toLowerCase())
+      throw new BridgeError(409, "This dispatch id is already bound to another issue.");
+  } finally {
+    release();
+  }
 }
 
 const inFlight = new Map<string, Promise<void>>();
