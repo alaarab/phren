@@ -13,6 +13,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Dispatches can carry a forge issue. The worker brief asks for one summary comment and a closing reference in its PR. Dispatch returns show the issue and `dispatch_report` posts each PR link once.
 - Owner Inbox items can link to a forge issue through the CLI, MCP, and Hook.
 
+### Fixed
+
+- Publish `@phren/code` 0.2.15 with support for the 0.4 CLI series.
+
 ### Removed
 
 - Phren's local Tasks feature across the CLI, Hook, editor extension, desktop, and plugins. Existing `tasks.md` files stay on disk and are unused. The Tasks screen in older phone apps stops working when connected to a 0.4.0 Hook.

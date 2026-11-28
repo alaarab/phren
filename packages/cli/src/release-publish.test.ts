@@ -9,7 +9,7 @@ import path from "node:path";
 const script = path.resolve("scripts/release-publish.sh");
 const dirs: string[] = [];
 
-function run(viewOutput: string, viewExit = 0) {
+function run(viewOutput: string, viewExit = 0, args = ["@phren/cli", "."]) {
   const dir = mkdtempSync(path.join(tmpdir(), "release-publish-"));
   dirs.push(dir);
   writeFileSync(path.join(dir, "view.json"), viewOutput);
@@ -20,7 +20,7 @@ function run(viewOutput: string, viewExit = 0) {
     "exit 2",
   ].join("\n"));
   chmodSync(path.join(dir, "npm"), 0o755);
-  const result = spawnSync("bash", [script, "@phren/cli", "."], {
+  const result = spawnSync("bash", [script, ...args], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${dir}${path.delimiter}${process.env.PATH}`, INPUT_VERSION: "1.2.3", GITHUB_SHA: "abc", GITHUB_STEP_SUMMARY: path.join(dir, "summary") },
   });
@@ -52,6 +52,18 @@ describe.skipIf(process.platform === "win32")("release-publish.sh", () => {
 
   it("skips a version already published from this commit", () => {
     const result = run(JSON.stringify({ version: "1.2.3", gitHead: "abc" }));
+    expect(result.status).toBe(0);
+    expect(result.published).toBeUndefined();
+  });
+
+  it("publishes an unpublished optional package at its own version", () => {
+    const result = run('{"error":{"code":"E404"}}', 1, ["@phren/code", "phren-code-0.2.15.tgz", "0.2.15"]);
+    expect(result.status).toBe(0);
+    expect(result.published).toContain("publish phren-code-0.2.15.tgz --access public --provenance");
+  });
+
+  it("reuses an independent version from an earlier CLI release", () => {
+    const result = run('{"version":"0.2.15","gitHead":"def"}', 0, ["@phren/code", "phren-code-0.2.15.tgz", "0.2.15"]);
     expect(result.status).toBe(0);
     expect(result.published).toBeUndefined();
   });
